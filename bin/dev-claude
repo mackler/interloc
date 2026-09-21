@@ -45,7 +45,7 @@ ensure_running() {
 
 command=${1:-run}
 case "$command" in
-    run | shell | build | down) shift || true ;;
+    run | shell | build | review | down) shift || true ;;
     help | -h | --help) command=help ;;
     *) command=run ;; # every other first argument belongs to claude
 esac
@@ -61,6 +61,10 @@ case "$command" in
         ;;
     build)
         exec "${compose[@]}" build
+        ;;
+    review)
+        ensure_running
+        exec "${compose[@]}" exec -it cc node /opt/plan-review/src/main.ts "$@"
         ;;
     down)
         exec "${compose[@]}" down
