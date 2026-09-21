@@ -1,0 +1,128 @@
+# Effect v4 API ledger
+
+Every Effect and @effect/platform-node name that the program uses, with its signature as read from
+the installed `.d.ts` files. Versions: `effect` 4.0.0-rc.117, `@effect/platform-node` 4.0.0-rc.117
+(its `peerDependencies` require `effect ^4.0.0-rc.117`). Paths are relative to `node_modules/`.
+Write code only against names in this file; add an entry (read from the `.d.ts`) before using a
+new name. Material online describes v3 in most cases and is not a source.
+
+## Effect (`effect/dist/Effect.d.ts`)
+
+| Name | Line | Signature (abridged) |
+|---|---|---|
+| `Effect.gen` | 1892 | `gen(f: () => Generator<Eff, AEff, never>): Effect<AEff, E of Eff, R of Eff>`; also `gen({ self }, f)` |
+| `Effect.succeed` | 1414 | `<A>(value: A) => Effect<A>` |
+| `Effect.fail` | 2056 | `<E>(error: E) => Effect<never, E>` |
+| `Effect.sync` | 1578 | `<A>(thunk: LazyArg<A>) => Effect<A>` |
+| `Effect.die` | 2179 | `(defect: unknown) => Effect<never>` |
+| `Effect.try` | 2180 (`try_ as try`) | `({ try: LazyArg<A>, catch: (error: unknown) => E }) => Effect<A, E>` |
+| `Effect.tryPromise` | 1242 | `({ try: (signal: AbortSignal) => PromiseLike<A>, catch: (error: unknown) => E }) => Effect<A, E>`. The `signal` is aborted when the fiber is interrupted. This is how SDK calls get their abort signal. |
+| `Effect.promise` | 1171 | `<A>(evaluate: (signal: AbortSignal) => PromiseLike<A>) => Effect<A>` |
+| `Effect.callback` | 1633 | `(register: (resume, signal: AbortSignal) => void \| Effect<void>) => Effect<A, E, R>` (v3 `async`) |
+| `Effect.never` | 1650 | `Effect<never>` |
+| `Effect.sleep` | 8138 | `(duration: Duration.Input) => Effect<void>` |
+| `Effect.mapError` | 5769 | `(f: (e: E) => E2)` |
+| `Effect.catchTag` | 4221 | `(k: tag \| tags, f: (e) => Effect, orElse?)` |
+| `Effect.orDie` | 6015 | `(self) => Effect<A, never, R>` |
+| `Effect.ensuring` | 12336 | `(finalizer: Effect<X, never, R1>)` |
+| `Effect.onExit` | 12693 | `(f: (exit: Exit<A, E>) => Effect<void, XE, XR>)` |
+| `Effect.onInterrupt` | 13618 | `(finalizer: (interruptors: ReadonlySet<number>) => Effect<void, XE, XR>)` |
+| `Effect.interruptible` | 13593 | `(self) => Effect<A, E, R>` |
+| `Effect.acquireRelease` | 12124 | `(acquire: Effect<A, E, R>, release: (a: A, exit: Exit) => Effect<unknown, never, R2>, options?)` → requires `Scope` |
+| `Effect.scoped` | 12017 | `(self) => Effect<A, E, Exclude<R, Scope>>` |
+| `Effect.provide` | 10641 | `(layer \| [layers] \| context)`, data-first and data-last |
+| `Effect.context` | 10549 | `<R>() => Effect<Context.Context<R>, never, R>` (v3 `Effect.context`/`runtime`) |
+| `Effect.contextWith` | 10607 | `(f: (context: Context<R>) => Effect)` |
+| `Effect.forkChild` | 16245 | `(self) => Effect<Fiber<A, E>, never, R>` (v3 `fork`; there is no `Effect.fork` in v4) |
+| `Effect.runFork` | 16530 | `(effect: Effect<A, E, never>, options?: RunOptions) => Fiber<A, E>` |
+| `Effect.runPromise` | 16701 | `(effect: Effect<A, E>, options?: RunOptions) => Promise<A>` |
+| `Effect.runPromiseExit` | 16769 | `(effect, options?) => Promise<Exit<A, E>>` |
+| `Effect.runPromiseWith` | 16736 | `(context: Context<R>) => (effect: Effect<A, E, R>, options?) => Promise<A>`. **Bridge for SDK callbacks** (canUseTool, hooks): capture `yield* Effect.context<R>()` when the layer is built, then run callback Effects with `Effect.runPromiseWith(ctx)(eff, { signal })`. v4 has no `Runtime.runPromise`. |
+| `RunOptions` | 16495 | `{ signal?: AbortSignal; scheduler?; uninterruptible?; onFiberStart? }` |
+
+## Fiber, Exit, Cause, Ref
+
+| Name | File:line | Signature |
+|---|---|---|
+| `Fiber.interrupt` | Fiber.d.ts:347 | `(self: Fiber<A, E>) => Effect<void>` |
+| `Fiber.join` | Fiber.d.ts:282 | `(self) => Effect<A, E>` |
+| `Exit.isSuccess` / `isFailure` | Exit.d.ts:377 / 404 | type guards |
+| `Exit.match` | Exit.d.ts:722 | `({ onSuccess, onFailure: (cause) => X })` |
+| `Cause.hasInterrupts` | Cause.d.ts:1021 | `(self: Cause<E>) => boolean` |
+| `Cause.hasInterruptsOnly` | Cause.d.ts:596 | `(self) => boolean` |
+| `Cause.findErrorOption` | Cause.d.ts:927 | `(input: Cause<E>) => Option<E>` (v3 `failureOption`, which no longer exists) |
+| `Cause.findError` | Cause.d.ts:903 | `(self) => Result<E, Cause<never>>` |
+| `Cause.squash` | Cause.d.ts:827 | `(self) => unknown` |
+| `Cause.pretty` | Cause.d.ts:1192 | `(cause) => string` |
+| `Ref.make` / `get` / `set` / `update` | Ref.d.ts:149 / 175 / 210 / 587 | `make(value) => Effect<Ref<A>>`; `set(self, value)`; `update(self, f)` |
+
+## Services and Layers
+
+| Name | File:line | Signature |
+|---|---|---|
+| `Context.Service` | Context.d.ts:188 | `Context.Service<Shape>("Key")` (function form) or `class X extends Context.Service<X, Shape>()("Key") {}` (class form). Replaces v3 `Context.Tag` / `Effect.Service`. The key can be yielded in `Effect.gen` to get the service. |
+| `Context.make` / `add` / `get` | Context.d.ts:646 / 683 / 1220 | `make(key, service)`; `get(context, key)` |
+| `Layer.succeed` | Layer.d.ts:813 | `(key, resource) => Layer<I>` |
+| `Layer.sync` | Layer.d.ts:983 | `(key, evaluate) => Layer<I>` |
+| `Layer.effect` | Layer.d.ts:1131 | `(key, effect: Effect<S, E, R>) => Layer<I, E, Exclude<R, Scope>>`. Scoped layers go through `Layer.effect` with `acquireRelease` inside (no `Layer.scoped` in v4). |
+| `Layer.mergeAll` | Layer.d.ts:1392 | `(...layers) => Layer<…>` |
+| `Layer.provide` / `provideMerge` | Layer.d.ts:1704 / 2116 | `(self, that)` / `(that)(self)` |
+
+## Tagged errors
+
+| Name | File:line | Signature |
+|---|---|---|
+| `Data.TaggedError` | Data.d.ts:966 | `(tag) => new <A>(args: A) => Cause.YieldableError & { _tag: Tag } & Readonly<A>`. Usage: `class X extends Data.TaggedError("X")<{ readonly f: string }> {}`, which is erasable syntax. A value can be yielded in `Effect.gen` to fail with it. |
+
+## Schema (`effect/dist/Schema.d.ts`)
+
+| Name | Line | Notes |
+|---|---|---|
+| `Schema.Struct` | 2843 | `Struct(fields)`; `.fields` for spreading into a new Struct (there is no `extend`; `fieldsAssign` also exists) |
+| `Schema.String` / `Number` / `Boolean` / `Unknown` | 2454 / 2477 / 2498 / 2407 | constants |
+| `Schema.Finite` / `Int` | 5555 / 5812 | Use `Finite` for numbers in agent schemas: `Number` generates `anyOf [number, "Infinity"/"-Infinity"/"NaN"]` (observed in a probe). |
+| `Schema.Literal` / `Literals` | 2140 / 3960 | `Literals(["a", "b"])` generates `{type: "string", enum: [...]}` (observed) |
+| `Schema.Array` | 3679 (`ArraySchema as Array`) | `Array(item)` |
+| `Schema.NullOr` / `Union` | — / 3921 | `Union(members, options?)` |
+| `Schema.optionalKey` | 1888 | `optionalKey(schema)`: the key may be absent (the `?:` of `LogEntry`) |
+| `Schema.declare` | 399 | `declare(is: (u) => u is T, annotations?)`, used for the stage 1 scaffolding |
+| `Schema.fromJsonString` | 6729 | `fromJsonString(schema, options?)`: a string decoded as JSON, then as `schema`. Used for Codex's `finalResponse` and for JSON files. |
+| `Schema.decodeUnknownEffect` | 1170 | `(schema, options?: ParseOptions) => (input, options?) => Effect<Type, SchemaError, R>` |
+| `Schema.decodeUnknownExit` | 1223 | `(schema, options?) => (input) => Exit<Type, SchemaError>` |
+| `Schema.decodeUnknownSync` | 1460 | throws `SchemaError` |
+| `Schema.SchemaError` | 949 | class, `_tag: "SchemaError"`, `issue: SchemaIssue.Issue`, `message` is the formatted issue with the path (for example `Expected string\n  at ["issues"][0]["id"]`, observed). Use `message` as the formatted parse issue. |
+| `Schema.isSchemaError` | 977 | type guard |
+| `Schema.Type` / `Schema.Schema.Type` | — | `typeof S["Type"]` gives the decoded type |
+| `ParseOptions.onExcessProperty` | SchemaAST.d.ts:414 | `"ignore"` (default, strips) or `"error"`. Observed message: `Expected no excess property\n  at ["extra"]`. |
+| `Schema.toJsonSchemaDocument` | 10619 | `(schema, options?: ToJsonSchemaOptions) => JsonSchema.Document<"draft-2020-12">`, which returns `{ dialect, schema, definitions }`. The JSON Schema to pass to an agent is `.schema` (plus `$defs` if `definitions` is not empty). |
+| `ToJsonSchemaOptions.onExcessProperty` | 10524 | with `"error"`, every object gets `additionalProperties: false` (observed); with the default, `additionalProperties: true`. |
+
+Observed in a probe (not a test): with `onExcessProperty: "error"`, `Literals` and non-optional
+fields, the generated object has `required` listing all keys and `additionalProperties: false`,
+which is the strict form that Codex requires. `definitions` was empty for plain Structs.
+
+## Platform
+
+| Name | File:line | Notes |
+|---|---|---|
+| `FileSystem.FileSystem` | effect/dist/FileSystem.d.ts:363 | service; methods `exists`, `makeDirectory`, `readDirectory`, `readFileString`, `writeFileString(path, data, { flag?: "a" … })`, `rename`, `stat`, `remove`, `chmod`; errors are `PlatformError` |
+| `Path.Path` | effect/dist/Path.d.ts:250 | service; `join`, `resolve`, `sep` |
+| `NodeFileSystem.layer` | @effect/platform-node/dist/NodeFileSystem.d.ts:9 | `Layer<FileSystem>` |
+| `NodePath.layer` | @effect/platform-node/dist/NodePath.d.ts:10 | `Layer<Path>` |
+| `NodeServices.layer` | @effect/platform-node/dist/NodeServices.d.ts:33 | all Node services |
+| `ChildProcess.make` | effect/dist/unstable/process/ChildProcess.d.ts:456 | `make(command, args, options?)` or tagged template; `setCwd(cmd, cwd)` at 833. **Module path `effect/unstable/process`**: marked unstable in v4. |
+| `ChildProcessSpawner` | effect/dist/unstable/process/ChildProcessSpawner.d.ts:247 | service; `string(command)`, `lines(command)`, `exitCode(command)` → `Effect<…, PlatformError>` |
+| `NodeChildProcessSpawner.layer` | @effect/platform-node-shared/dist/NodeChildProcessSpawner.d.ts:41 | `Layer<ChildProcessSpawner, never, FileSystem \| Path>` |
+| `NodeRuntime.runMain` | @effect/platform-node/dist/NodeRuntime.d.ts:27 | `runMain(effect, { disableErrorReporting?, teardown? })`. Implementation (platform-node-shared/dist/NodeRuntime.js): on SIGINT or SIGTERM it calls `fiber.interruptUnsafe`, so finalizers run; then `teardown(exit, onExit)` decides the exit code, and the process exits when a signal was received or the code is not 0. |
+| `Runtime.Teardown` | effect/dist/Runtime.d.ts:46 | `(exit, onExit: (code: number) => void) => void`; `defaultTeardown` at 93. A custom teardown gives exit code 130 on interruption (decision Q3); `disableErrorReporting: true` keeps the output to the program's own lines. |
+
+## SDK options (verified in node_modules)
+
+| Option | File | Notes |
+|---|---|---|
+| `Options.abortController?: AbortController` | @anthropic-ai/claude-agent-sdk/sdk.d.ts:1454 | aborts a `query` |
+| `Options.outputFormat?: OutputFormat` | sdk.d.ts:1885 | `{ type: "json_schema", schema }` |
+| `Query.interrupt()` | sdk.d.ts:2685 | not used; abort goes through `abortController` |
+| `TurnOptions.signal?: AbortSignal` | @openai/codex-sdk/dist/index.d.ts:173 | aborts `thread.run` |
+| `TurnOptions.outputSchema?: unknown` | index.d.ts:171 | JSON Schema per turn |
+| `ThreadOptions.sandboxMode`, `approvalPolicy`, `workingDirectory`, `model` | index.d.ts:246–259 | unchanged from src/codex.ts |
