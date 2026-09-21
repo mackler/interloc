@@ -1,0 +1,21 @@
+# compose.cc.yaml — Claude Code container for developing plan-review.
+# Use it from the development clone only; the mount below is the current directory.
+name: plan-review-dev
+
+services:
+  cc:
+    container_name: plan-review-claude
+    build:
+      context: ../claude-code-image
+    image: claude-code-base
+    user: node
+    working_dir: /workspace
+    volumes:
+      - ./:/workspace
+      - claude-config:/home/node/.claude
+    environment:
+      - CLAUDE_CODE_OAUTH_TOKEN
+    command: sleep infinity
+
+volumes:
+  claude-config:
