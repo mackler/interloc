@@ -1,5 +1,8 @@
 # compose.cc.yaml — Claude Code container for developing plan-review.
 # Use it from the development clone only; the mount below is the current directory.
+# The container also carries the Codex credentials and the installed program at
+# /opt/plan-review, so that the installed orchestrator can be run against this clone.
+# This container has no firewall: Claude Code and Codex in it reach every host.
 name: plan-review-dev
 
 services:
@@ -13,9 +16,16 @@ services:
     volumes:
       - ./:/workspace
       - claude-config:/home/node/.claude
+      - codex-config:/home/node/.codex
+      - ${HOME}/work/plan-review:/opt/plan-review:ro
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN
+    # Keeps the container running between sessions; the image's own CMD would start
+    # claude without a terminal, which exits at once.
     command: sleep infinity
 
 volumes:
   claude-config:
+  codex-config:
+    external: true
+    name: iou-notes-codex_codex-config
