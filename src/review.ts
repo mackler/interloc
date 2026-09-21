@@ -1,16 +1,42 @@
-// One planning phase after the plan has been written or revised: review rounds until a review
-// contains no counted issue, or until the user chooses to proceed.
+// The review procedure: Codex reviews a file in rounds, Claude Code answers each issue, and the
+// rounds end when a review contains no counted issue or when the user chooses to proceed.
+// The procedure is applied to three subjects: the question list, the requirements, and the plan.
 
 import * as path from "node:path";
 import type { Planner, Reviewer } from "./agents.ts";
 import * as log from "./issueLog.ts";
-import { applyDecisionsPrompt, respondPrompt, reviewPrompt } from "./prompts.ts";
-import { planWriteSchema, plannerResponseSchema } from "./schemas.ts";
 import { Halt, type State } from "./state.ts";
-import type { Config, PlanWriteResult, PlannerResponse, Review } from "./types.ts";
+import type { Config, PlannerResponse, Review } from "./types.ts";
 import type { Ui } from "./ui.ts";
 
 export type Context = { state: State; ui: Ui; planner: Planner; reviewer: Reviewer; config: Config };
+
+/** What the review procedure is applied to. */
+export type Subject<R extends PlannerResponse = PlannerResponse> = {
+  /** Heading in conversation.md and in terminal output, for example "Planning phase 2". */
+  heading: string;
+  /** Name of the reviewed file as used in messages, for example "plan.md". */
+  fileLabel: string;
+  /** Absolute path of the reviewed file. */
+  file: string;
+  /** File name of the issue log of this subject. */
+  logName: string;
+  /** Subdirectory of plan-review/ for the JSON files of the rounds. */
+  dirName: string;
+  /** Number recorded in the phase field of log entries. */
+  phase: number;
+  reviewPrompt(round: number): string;
+  respondPrompt(round: number): string;
+  respondSchema: object;
+  applyDecisionsPrompt: string;
+  applyDecisionsSchema: object;
+  /** Called after every Claude Code call of this subject, for output that the program writes to the file. */
+  afterPlannerCall?(output: unknown): void;
+  /** Called after the response of a round, for amendments that require the user (the requirements). */
+  amend?(ctx: Context, review: Review, response: R, round: number): Promise<void>;
+  /** Text of the "p" choice at the round limit. */
+  proceedLabel: string;
+};
 
 /** Reads one decision. An empty answer records nothing and returns "". */
 export async function askDecision(ctx: Context, subject: string): Promise<string> {
@@ -19,20 +45,21 @@ export async function askDecision(ctx: Context, subject: string): Promise<string
   return decision;
 }
 
-/** A planning call. Halts if the call changed the project outside plan-review/. */
-export async function planningCall<T>(ctx: Context, prompt: string, schema: object): Promise<{ output: T; resultText: string; costUsd: number | null }> {
+/** A call in which Claude Code may write only under plan-review/. Halts if the project changed. */
+export async function planningCall<T>(ctx: Context, prompt: string, schema: object, progress = false): Promise<{ output: T; resultText: string; costUsd: number | null }> {
   const before = ctx.state.projectState();
-  const result = await ctx.planner.planning<T>(prompt, schema);
+  const result = await ctx.planner.planning<T>(prompt, schema, progress);
   if (ctx.state.projectState() !== before) throw new Halt("a planning-phase call changed the project outside plan-review/");
   return result;
 }
 
-export async function applyDecisions(ctx: Context): Promise<void> {
-  await planningCall<PlanWriteResult>(ctx, applyDecisionsPrompt, planWriteSchema);
+export async function applyDecisions(ctx: Context, subject: Subject<any>): Promise<void> {
+  const call = await planningCall<unknown>(ctx, subject.applyDecisionsPrompt, subject.applyDecisionsSchema);
+  subject.afterPlannerCall?.(call.output);
 }
 
-function renderRound(phase: number, round: number, review: Review, response: PlannerResponse): string {
-  const issues = review.issues.map((i) => `- **[${i.id}]** (${i.severity}, ${i.plan_section}) ${i.problem}\n  Evidence: ${i.evidence}`);
+function renderRound(heading: string, round: number, review: Review, response: PlannerResponse): string {
+  const issues = review.issues.map((i) => `- **[${i.id}]** (${i.severity}, ${i.location}) ${i.problem}\n  Evidence: ${i.evidence}`);
   const answers = response.dispositions.map((d) => {
     const dup = d.duplicate_of !== "" ? ` (duplicate of ${d.duplicate_of})` : "";
     const rev = d.reverses !== "" ? ` (reverses ${d.reverses})` : "";
@@ -40,13 +67,14 @@ function renderRound(phase: number, round: number, review: Review, response: Pla
   });
   const self = response.self_corrections.map((s) => `- **Self-correction** (${s.new_action}, issue "${s.id}"): ${s.explanation}`);
   const feedback = response.reviewer_feedback !== "" ? [`- **Feedback to the reviewer:** ${response.reviewer_feedback}`] : [];
-  return `## Planning phase ${phase}, round ${round}\n\n### Codex\n\n${issues.join("\n")}\n\n### Claude Code\n\n${[...answers, ...self, ...feedback].join("\n")}\n\n`;
+  return `## ${heading}, round ${round}\n\n### Codex\n\n${issues.join("\n")}\n\n### Claude Code\n\n${[...answers, ...self, ...feedback].join("\n")}\n\n`;
 }
 
-export async function reviewLoop(ctx: Context, phase: number): Promise<"converged" | "proceed"> {
+export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subject: Subject<R>): Promise<"converged" | "proceed"> {
   const { state, ui, config } = ctx;
-  const dir = state.phaseDir("planning", phase);
-  const hashes: string[] = [state.planHash()];
+  const { heading, fileLabel, file, logName, phase } = subject;
+  const dir = state.subDir(subject.dirName);
+  const hashes: string[] = [state.fileHash(file)];
   const counts: number[] = [];
   const costs: (number | null)[] = [];
   let idle = 0;
@@ -56,36 +84,36 @@ export async function reviewLoop(ctx: Context, phase: number): Promise<"converge
   for (let n = 1; ; n++) {
     // Pause at the round limit (usage and time).
     if (n > limit) {
-      ui.say(`\nCounted issues and reported Claude Code usage per round of planning phase ${phase}:`);
+      ui.say(`\nCounted issues and reported Claude Code usage per round of ${heading}:`);
       counts.forEach((c, i) => ui.say(`  round ${i + 1}: counted issues = ${c}, total_cost_usd = ${costs[i] ?? "not reported"}`));
-      const extra = await ui.ask(`${limit} rounds completed without convergence. Number = additional rounds; p = proceed to execution with the plan as it is; 0 = stop > `);
+      const extra = await ui.ask(`${limit} rounds completed without convergence. Number = additional rounds; p = ${subject.proceedLabel}; 0 = stop > `);
       if (extra === "p") {
-        state.converse(`**User decision:** proceed to execution without convergence after round ${n - 1}.\n\n`);
+        state.converse(`**User decision:** ${subject.proceedLabel} without convergence after round ${n - 1} of ${heading}.\n\n`);
         return "proceed";
       }
-      if (!/^[1-9][0-9]*$/.test(extra)) throw new Halt(`stopped by the user at the round limit of planning phase ${phase}`);
+      if (!/^[1-9][0-9]*$/.test(extra)) throw new Halt(`stopped by the user at the round limit of ${heading}`);
       limit += Number(extra);
     }
 
-    // Codex review. Codex runs without a sandbox, so the project and the plan are compared afterwards.
-    ui.say(`\nPlanning phase ${phase}, round ${n} (limit ${limit}): Codex review ...`);
+    // Codex review. Codex runs without a sandbox, so the project and the reviewed file are compared afterwards.
+    ui.say(`\n${heading}, round ${n} (limit ${limit}): Codex review ...`);
     const projectBefore = state.projectState();
-    const planBefore = state.planHash();
-    const review = await ctx.reviewer.review(reviewPrompt(phase, n));
-    if (state.projectState() !== projectBefore || state.planHash() !== planBefore) {
-      throw new Halt("the Codex review changed the project or the plan");
+    const fileBefore = state.fileHash(file);
+    const review = await ctx.reviewer.review(subject.reviewPrompt(n));
+    if (state.projectState() !== projectBefore || state.fileHash(file) !== fileBefore) {
+      throw new Halt(`the Codex review changed the project or ${fileLabel}`);
     }
     state.writeJson(path.join(dir, `review-${n}.json`), review);
     const counted = log.countedIssues(review, config.countMinor);
     counts.push(counted);
     ui.say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`);
     if (counted === 0) {
-      state.converse(`## Planning phase ${phase}, round ${n}\n\n### Codex\n\nNo counted issue. The plan has converged.\n\n`);
+      state.converse(`## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n`);
       return "converged";
     }
 
     // Pause: Codex reused the id of an issue that was not accepted in full.
-    let issueLog = state.loadLog();
+    let issueLog = state.loadLog(logName);
     for (const id of log.reraisedIds(issueLog, review)) {
       ui.say(`\nCodex has raised again an issue that Claude Code did not accept in full:`);
       ui.say(JSON.stringify(issueLog.filter((e) => e.id === id), null, 2));
@@ -94,21 +122,22 @@ export async function reviewLoop(ctx: Context, phase: number): Promise<"converge
     }
 
     // Claude Code response.
-    ui.say(`Planning phase ${phase}, round ${n}: Claude Code response ...`);
-    const call = await planningCall<PlannerResponse>(ctx, respondPrompt(phase, n), plannerResponseSchema);
+    ui.say(`${heading}, round ${n}: Claude Code response ...`);
+    const call = await planningCall<R>(ctx, subject.respondPrompt(n), subject.respondSchema);
     const response = call.output;
     costs.push(call.costUsd);
     state.writeJson(path.join(dir, `cc-${n}.json`), response);
+    subject.afterPlannerCall?.(response);
     const missing = log.missingDispositions(review, response);
     if (missing.length > 0) throw new Halt(`Claude Code returned no disposition for: ${missing.join(", ")}`);
-    state.converse(renderRound(phase, n, review, response));
-    if (response.reviewer_feedback !== "") state.recordFeedback(phase, n, response.reviewer_feedback);
+    state.converse(renderRound(heading, n, review, response));
+    if (response.reviewer_feedback !== "") state.recordFeedback(heading, n, response.reviewer_feedback);
 
     // Pauses: items that require a decision of the user.
     let decided = false;
     const userDecisions: [string, string][] = [];
-    const decide = async (subject: string, id: string | null): Promise<void> => {
-      const decision = await askDecision(ctx, subject);
+    const decide = async (what: string, id: string | null): Promise<void> => {
+      const decision = await askDecision(ctx, what);
       if (decision === "") return;
       decided = true;
       if (id !== null) userDecisions.push([id, decision]);
@@ -143,36 +172,39 @@ export async function reviewLoop(ctx: Context, phase: number): Promise<"converge
       ui.say("");
       await decide(`question from Claude Code: ${question.replace(/\s+/g, " ")}`, null);
     }
-    if (decided) await applyDecisions(ctx);
+    if (decided) await applyDecisions(ctx, subject);
+
+    // Amendments that require the user.
+    if (subject.amend) await subject.amend(ctx, review, response, n);
 
     // Issue log update. Decisions of the user on single issues replace the disposition of the round.
     issueLog = log.appendRound(issueLog, review, response, phase, n);
     for (const [id, decision] of userDecisions) issueLog = log.appendUserDecision(issueLog, id, decision, phase, n);
-    state.saveLog(issueLog);
+    state.saveLog(logName, issueLog);
 
     // Progress checks.
     const accepted = log.acceptedCount(response);
     const selfCount = response.self_corrections.length;
     const last = hashes[hashes.length - 1];
-    let hash = state.planHash();
+    let hash = state.fileHash(file);
 
-    if (accepted > 0 && hash === last) throw new Halt(`Claude Code accepted ${accepted} issues in full or in part but plan.md is unchanged`);
+    if (accepted > 0 && hash === last) throw new Halt(`Claude Code accepted ${accepted} issues in full or in part but ${fileLabel} is unchanged`);
 
     if (accepted === 0 && selfCount === 0 && !decided && hash !== last) {
-      ui.say(`\nplan.md changed in round ${n} without an accepted issue, a self-correction, or a user decision.`);
+      ui.say(`\n${fileLabel} changed in round ${n} without an accepted issue, a self-correction, or a user decision.`);
       ui.say(`The free-text response of Claude Code: ${call.resultText || "none"}`);
-      if ((await askDecision(ctx, `the unexplained change to plan.md in planning phase ${phase}, round ${n}`)) !== "") {
-        await applyDecisions(ctx);
-        hash = state.planHash();
+      if ((await askDecision(ctx, `the unexplained change to ${fileLabel} in ${heading}, round ${n}`)) !== "") {
+        await applyDecisions(ctx, subject);
+        hash = state.fileHash(file);
       }
     }
 
     const earlier = hash !== last ? hashes.indexOf(hash) : -1;
     if (earlier >= 0) {
-      ui.say(`\nplan.md after round ${n} is identical to plan.md after round ${earlier} (round 0 is the plan at the start of the phase).`);
-      if ((await askDecision(ctx, "which of the two alternating plan versions is correct")) !== "") {
-        await applyDecisions(ctx);
-        hash = state.planHash();
+      ui.say(`\n${fileLabel} after round ${n} is identical to ${fileLabel} after round ${earlier} (round 0 is the state at the start).`);
+      if ((await askDecision(ctx, `which of the two alternating versions of ${fileLabel} is correct`)) !== "") {
+        await applyDecisions(ctx, subject);
+        hash = state.fileHash(file);
       }
     }
     hashes.push(hash);
@@ -184,8 +216,8 @@ export async function reviewLoop(ctx: Context, phase: number): Promise<"converge
         ui.say(`  - [${e.id}] (${e.action}) ${e.problem}\n      rationale: ${e.rationale}`);
       }
       if ((await askDecision(ctx, `the issues of the last ${idle} rounds that produced no amendment`)) !== "") {
-        await applyDecisions(ctx);
-        hashes.push(state.planHash());
+        await applyDecisions(ctx, subject);
+        hashes.push(state.fileHash(file));
       }
       idle = 0;
     }

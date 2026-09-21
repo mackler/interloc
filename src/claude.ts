@@ -34,8 +34,8 @@ export class ClaudePlanner implements Planner {
     return this.session;
   }
 
-  async planning<T>(prompt: string, schema: object): Promise<{ output: T; resultText: string; costUsd: number | null }> {
-    const result = await this.call(prompt, {
+  async planning<T>(prompt: string, schema: object, progress = false): Promise<{ output: T; resultText: string; costUsd: number | null }> {
+    const result = await this.call(prompt, progress ? "tools" : "none", {
       permissionMode: "default",
       outputFormat: { type: "json_schema", schema: schema as Record<string, unknown> },
       hooks: { PreToolUse: [{ matcher: EDIT_TOOLS.join("|"), hooks: [this.restrictEdits] }] },
@@ -48,7 +48,7 @@ export class ClaudePlanner implements Planner {
 
   async executing(prompt: string): Promise<ExecOutcome> {
     this.stop = null;
-    const result = await this.call(prompt, {
+    const result = await this.call(prompt, "text", {
       permissionMode: this.config.execPermissionMode,
       outputFormat: { type: "json_schema", schema: execReportSchema },
       hooks: { PreToolUse: [{ hooks: [this.denyAfterStop] }] },
@@ -65,7 +65,7 @@ export class ClaudePlanner implements Planner {
     return { status: report.status, summary: report.summary, question: report.question, remainingWork: report.remaining_work, userInput: null };
   }
 
-  private async call(prompt: string, options: Options): Promise<CallResult> {
+  private async call(prompt: string, show: "none" | "tools" | "text", options: Options): Promise<CallResult> {
     const full: Options = { ...options, cwd: this.state.project };
     if (this.session !== null) full.resume = this.session;
     if (this.config.claudeModel !== null) full.model = this.config.claudeModel;
@@ -74,9 +74,13 @@ export class ClaudePlanner implements Planner {
       for await (const message of query({ prompt, options: full })) {
         if (message.type === "system" && message.subtype === "init") {
           this.session = message.session_id;
-        } else if (message.type === "assistant" && options.permissionMode !== "default") {
+        } else if (message.type === "assistant" && show !== "none") {
           for (const block of message.message.content) {
-            if (block.type === "text" && block.text.trim() !== "") this.ui.say(`[claude] ${block.text.trim()}`);
+            if (show === "text" && block.type === "text" && block.text.trim() !== "") this.ui.say(`[claude] ${block.text.trim()}`);
+            if (show === "tools" && block.type === "tool_use" && block.name !== "StructuredOutput") {
+              const input = block.input as Record<string, unknown>;
+              this.ui.say(`  [claude: ${block.name} ${String(input?.file_path ?? input?.pattern ?? input?.command ?? "")}]`);
+            }
           }
         } else if (message.type === "result") {
           out.costUsd = message.total_cost_usd;

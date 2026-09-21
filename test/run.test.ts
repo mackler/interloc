@@ -22,7 +22,7 @@ test("one accepted issue, then convergence, then finished", async () => {
   assert.equal(log[0].action, "accepted");
   const conversation = fs.readFileSync(path.join(ctx.state.dir, "conversation.md"), "utf8");
   assert.match(conversation, /\[P1-R1-1\]\*\* accepted/);
-  assert.match(conversation, /The plan has converged/);
+  assert.match(conversation, /The review of plan.md has converged/);
 });
 
 test("a rejected issue raised again produces one prompt", async () => {

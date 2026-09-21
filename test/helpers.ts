@@ -35,6 +35,9 @@ export class ScriptedUi implements Ui {
     if (answer === "q") throw new Halt("stopped by the user");
     return answer;
   }
+  askMessage(prompt: string): Promise<string> {
+    return this.ask(prompt);
+  }
 }
 
 export type PlanningStep = { output: unknown; plan?: string; touchProject?: boolean };
@@ -84,7 +87,7 @@ export class ScriptedReviewer implements Reviewer {
   }
 }
 
-export const issue = (id: string, problem = "p"): Review["issues"][number] => ({ id, severity: "major", plan_section: "s", problem, evidence: "e" });
+export const issue = (id: string, problem = "p"): Review["issues"][number] => ({ id, severity: "major", location: "s", problem, evidence: "e" });
 
 export const respond = (dispositions: [string, PlannerResponse["dispositions"][number]["action"]][], extra: Partial<PlannerResponse> = {}): PlannerResponse => ({
   dispositions: dispositions.map(([id, action]) => ({ id, action, rationale: `rationale ${id}`, duplicate_of: "", reverses: "" })),
@@ -98,5 +101,5 @@ export const finished: ExecOutcome = { status: "finished", summary: "done", ques
 
 export function context(repo: string, ui: Ui, steps: PlanningStep[], reviews: Review[], execs: ExecOutcome[], config: Partial<Config> = {}): Context & { planner: ScriptedPlanner; reviewer: ScriptedReviewer } {
   const state = new State(repo);
-  return { state, ui, planner: new ScriptedPlanner(state, steps, execs), reviewer: new ScriptedReviewer(reviews), config: { ...defaultConfig, ...config } };
+  return { state, ui, planner: new ScriptedPlanner(state, steps, execs), reviewer: new ScriptedReviewer(reviews), config: { ...defaultConfig, questionPhase: false, ...config } };
 }

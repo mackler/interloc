@@ -5,7 +5,7 @@ export type Severity = "blocking" | "major" | "minor";
 export type Issue = {
   id: string;
   severity: Severity;
-  plan_section: string;
+  location: string;
   problem: string;
   evidence: string;
 };
@@ -42,6 +42,28 @@ export type PlannerResponse = {
 
 export type PlanWriteResult = { questions_for_user: string[] };
 
+/** One entry of the question list that Claude Code and Codex agree on before the interview. */
+export type QuestionEntry = {
+  id: string;
+  question: string;
+  reason: string;
+  proposed_answers: { label: string; description: string }[];
+  default_answer: string;
+};
+
+export type QuestionList = { questions: QuestionEntry[] };
+
+/** A response to a review of the question list: the dispositions and the complete amended list. */
+export type QuestionListResponse = PlannerResponse & QuestionList;
+
+/** Claude Code's output for one turn of the interview. */
+export type InterviewTurn = {
+  message_to_user: string;
+  answered_ids: string[];
+  complete: boolean;
+  summary: string;
+};
+
 export type ExecReport = {
   status: "finished" | "needs_input" | "blocked";
   summary: string;
@@ -64,7 +86,7 @@ export type LogEntry = {
   round: number;
   source: "review" | "self_correction" | "user";
   severity?: Severity;
-  plan_section?: string;
+  location?: string;
   problem: string;
   evidence?: string;
   action: string;
@@ -75,6 +97,7 @@ export type LogEntry = {
 };
 
 export type Config = {
+  questionPhase: boolean;
   maxRounds: number;
   maxIdleRounds: number;
   countMinor: boolean;
@@ -84,6 +107,7 @@ export type Config = {
 };
 
 export const defaultConfig: Config = {
+  questionPhase: true,
   maxRounds: 5,
   maxIdleRounds: 2,
   countMinor: true,

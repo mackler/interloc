@@ -10,11 +10,11 @@ export const reviewSchema = {
         properties: {
           id: { type: "string" },
           severity: { type: "string", enum: ["blocking", "major", "minor"] },
-          plan_section: { type: "string" },
+          location: { type: "string" },
           problem: { type: "string" },
           evidence: { type: "string" },
         },
-        required: ["id", "severity", "plan_section", "problem", "evidence"],
+        required: ["id", "severity", "location", "problem", "evidence"],
         additionalProperties: false,
       },
     },
@@ -76,4 +76,49 @@ export const execReportSchema = {
     remaining_work: { type: "string" },
   },
   required: ["status", "summary", "question", "remaining_work"],
+};
+
+const questionEntries = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      id: { type: "string" },
+      question: { type: "string" },
+      reason: { type: "string" },
+      proposed_answers: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: { label: { type: "string" }, description: { type: "string" } },
+          required: ["label", "description"],
+        },
+      },
+      default_answer: { type: "string" },
+    },
+    required: ["id", "question", "reason", "proposed_answers", "default_answer"],
+  },
+};
+
+export const questionListSchema = {
+  type: "object",
+  properties: { questions: questionEntries },
+  required: ["questions"],
+};
+
+export const questionListResponseSchema = {
+  type: "object",
+  properties: { ...plannerResponseSchema.properties, questions: questionEntries },
+  required: [...plannerResponseSchema.required, "questions"],
+};
+
+export const interviewTurnSchema = {
+  type: "object",
+  properties: {
+    message_to_user: { type: "string" },
+    answered_ids: { type: "array", items: { type: "string" } },
+    complete: { type: "boolean" },
+    summary: { type: "string" },
+  },
+  required: ["message_to_user", "answered_ids", "complete", "summary"],
 };

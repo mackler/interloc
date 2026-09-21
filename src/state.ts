@@ -14,7 +14,8 @@ export class State {
   readonly project: string;
   readonly dir: string;
   readonly plan: string;
-  private readonly logFile: string;
+  readonly questions: string;
+  readonly requirements: string;
   private readonly decisionsFile: string;
   private readonly feedbackFile: string;
   private readonly conversationFile: string;
@@ -23,7 +24,8 @@ export class State {
     this.project = path.resolve(project);
     this.dir = path.join(this.project, "plan-review");
     this.plan = path.join(this.dir, "plan.md");
-    this.logFile = path.join(this.dir, "issue-log.json");
+    this.questions = path.join(this.dir, "questions.json");
+    this.requirements = path.join(this.dir, "requirements.md");
     this.decisionsFile = path.join(this.dir, "user-decisions.md");
     this.feedbackFile = path.join(this.dir, "reviewer-feedback.md");
     this.conversationFile = path.join(this.dir, "conversation.md");
@@ -38,7 +40,7 @@ export class State {
       fs.mkdirSync(archive);
       for (const name of earlier) fs.renameSync(path.join(this.dir, name), path.join(archive, name));
     }
-    this.saveLog([]);
+    for (const name of ["issue-log.json", "questions-log.json", "requirements-log.json"]) this.saveLog(name, []);
     fs.writeFileSync(this.decisionsFile, "");
     fs.writeFileSync(this.feedbackFile, "");
     fs.writeFileSync(this.conversationFile, `# Conversation record\n\nTask: ${task}\n\n`);
@@ -50,8 +52,8 @@ export class State {
     return { ...defaultConfig, ...(JSON.parse(fs.readFileSync(file, "utf8")) as Partial<Config>) };
   }
 
-  phaseDir(kind: "planning" | "execution", k: number): string {
-    const dir = path.join(this.dir, `${kind}-${k}`);
+  subDir(name: string): string {
+    const dir = path.join(this.dir, name);
     fs.mkdirSync(dir, { recursive: true });
     return dir;
   }
@@ -60,12 +62,12 @@ export class State {
     fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
   }
 
-  loadLog(): LogEntry[] {
-    return JSON.parse(fs.readFileSync(this.logFile, "utf8")) as LogEntry[];
+  loadLog(name = "issue-log.json"): LogEntry[] {
+    return JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as LogEntry[];
   }
 
-  saveLog(log: LogEntry[]): void {
-    this.writeJson(this.logFile, log);
+  saveLog(name: string, log: LogEntry[]): void {
+    this.writeJson(path.join(this.dir, name), log);
   }
 
   recordDecision(subject: string, decision: string): void {
@@ -73,8 +75,8 @@ export class State {
     this.converse(`**User decision** on ${subject}: ${decision}\n\n`);
   }
 
-  recordFeedback(phase: number, round: number, text: string): void {
-    fs.appendFileSync(this.feedbackFile, `## Planning phase ${phase}, round ${round}\n${text}\n\n`);
+  recordFeedback(heading: string, round: number, text: string): void {
+    fs.appendFileSync(this.feedbackFile, `## ${heading}, round ${round}\n${text}\n\n`);
   }
 
   converse(markdown: string): void {
@@ -85,8 +87,12 @@ export class State {
     return fs.existsSync(this.plan) && fs.statSync(this.plan).size > 0;
   }
 
-  planHash(): string {
-    return this.planExists() ? createHash("sha256").update(fs.readFileSync(this.plan)).digest("hex") : "";
+  fileHash(file: string): string {
+    return fs.existsSync(file) ? createHash("sha256").update(fs.readFileSync(file)).digest("hex") : "";
+  }
+
+  writeText(file: string, text: string): void {
+    fs.writeFileSync(file, text);
   }
 
   /**
