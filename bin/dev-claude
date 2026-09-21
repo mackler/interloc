@@ -1,49 +1,71 @@
 #!/usr/bin/env bash
 # bin/dev-claude -- Claude Code in the development container of this repository.
-#
-# Usage:
-#   bin/dev-claude [run] [claude arguments]   start the container if needed, then start Claude Code
-#   bin/dev-claude shell                      open a Bash shell in the container
-#   bin/dev-claude build                      build the image from ../claude-code-image
-#   bin/dev-claude down                       stop and remove the container (the volume is kept)
-#
-# Examples:
-#   bin/dev-claude                  new session
-#   bin/dev-claude --continue       most recent session
-#   bin/dev-claude run --resume     session list
-#
-# The script uses compose.cc.yaml in the root of the clone that contains the script, and that
-# file mounts the same clone at /workspace. Run it from the development clone, not from the
-# installed directory that project containers mount at /opt/plan-review.
+# Usage text: bin/dev-claude help (kept in usage() below, the only copy).
 set -euo pipefail
 
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 compose=(docker compose -f "$root/compose.cc.yaml")
 
+usage() {
+    cat <<'EOF'
+dev-claude -- Claude Code in the development container of plan-review.
+
+Usage:
+  bin/dev-claude [run] [claude arguments]   start the container if needed, then start Claude Code
+  bin/dev-claude shell                      open a Bash shell in the container
+  bin/dev-claude build                      build the image from ../claude-code-image
+  bin/dev-claude down                       stop and remove the container (the volume is kept)
+  bin/dev-claude help | -h | --help         show this text
+
+Any first argument that is not one of the commands above is passed to claude, so 'run' can be
+left out. To pass --help or -h to claude itself, write 'run' first.
+
+Examples:
+  bin/dev-claude                  new session
+  bin/dev-claude --continue       most recent session
+  bin/dev-claude run --resume     session list
+  bin/dev-claude run --help       Claude Code's own help
+
+The script uses compose.cc.yaml in the root of the clone that contains the script, and that
+file mounts the same clone at /workspace. Run it from the development clone, not from the
+installed directory that project containers mount at /opt/plan-review.
+EOF
+}
+
 ensure_running() {
-    # 'up -d' does nothing when the container is already running.
-    "${compose[@]}" up -d
+    # 'up -d' does nothing when the container is already running. Its progress output is held
+    # back so that it does not interfere with the interactive session, and shown only on failure.
+    local output
+    if ! output=$("${compose[@]}" up -d 2>&1); then
+        printf '%s\n' "$output" >&2
+        echo "dev-claude: 'docker compose up' failed" >&2
+        exit 1
+    fi
 }
 
 command=${1:-run}
 case "$command" in
     run | shell | build | down) shift || true ;;
+    help | -h | --help) command=help ;;
     *) command=run ;; # every other first argument belongs to claude
 esac
 
 case "$command" in
     run)
         ensure_running
-        exec "${compose[@]}" exec cc claude "$@"
+        exec "${compose[@]}" exec -it cc claude "$@"
         ;;
     shell)
         ensure_running
-        exec "${compose[@]}" exec cc bash
+        exec "${compose[@]}" exec -it cc bash
         ;;
     build)
         exec "${compose[@]}" build
         ;;
     down)
         exec "${compose[@]}" down
+        ;;
+    help)
+        usage
         ;;
 esac
