@@ -30,4 +30,5 @@ try {
   process.exitCode = 1;
 } finally {
   ui.say(`Claude Code session id: ${planner.sessionId() ?? "none"}`);
+  ui.say(`Usage: ${state.usageSummary()}`);
 }

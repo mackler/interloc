@@ -33,7 +33,9 @@ export class CodexReviewer implements Reviewer {
     if (this.thread === null) throw new Error("newPhase() was not called");
     let text: string;
     try {
-      text = (await this.thread.run(prompt, { outputSchema: reviewSchema })).finalResponse;
+      const turn = await this.thread.run(prompt, { outputSchema: reviewSchema });
+      this.state.recordUsage({ agent: "codex", thread_id: this.thread.id, usage: turn.usage });
+      text = turn.finalResponse;
     } catch (e) {
       throw new Halt(`Codex review failed: ${e instanceof Error ? e.message : String(e)}`);
     }

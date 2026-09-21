@@ -101,5 +101,6 @@ export const finished: ExecOutcome = { status: "finished", summary: "done", ques
 
 export function context(repo: string, ui: Ui, steps: PlanningStep[], reviews: Review[], execs: ExecOutcome[], config: Partial<Config> = {}): Context & { planner: ScriptedPlanner; reviewer: ScriptedReviewer } {
   const state = new State(repo);
+  state.ignorePaths = config.ignorePaths ?? [];
   return { state, ui, planner: new ScriptedPlanner(state, steps, execs), reviewer: new ScriptedReviewer(reviews), config: { ...defaultConfig, questionPhase: false, ...config } };
 }

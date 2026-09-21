@@ -84,6 +84,7 @@ export class ClaudePlanner implements Planner {
           }
         } else if (message.type === "result") {
           out.costUsd = message.total_cost_usd;
+          this.state.recordUsage({ agent: "claude", session_id: this.session, num_turns: message.num_turns, total_cost_usd: message.total_cost_usd });
           if (message.subtype === "success") {
             out.structured = message.structured_output;
             out.resultText = message.result;
@@ -117,14 +118,16 @@ export class ClaudePlanner implements Planner {
 
   // Execution: after Claude Code has asked the user a question, deny every further tool call, so
   // that the turn ends and the plan is revised and reviewed before work continues.
+  // The StructuredOutput tool carries the final status report, so it stays permitted.
   private denyAfterStop: HookCallback = async (input) => {
     if (this.stop === null) return {};
     const pre = input as PreToolUseHookInput;
+    if (pre.tool_name === "StructuredOutput") return {};
     return {
       hookSpecificOutput: {
         hookEventName: pre.hook_event_name,
         permissionDecision: "deny",
-        permissionDecisionReason: "Execution is stopped. End your turn now with status 'needs_input'.",
+        permissionDecisionReason: "Execution is stopped. Make no tool call other than the final structured output, and end your turn with status 'needs_input'.",
       },
     };
   };
@@ -150,7 +153,7 @@ export class ClaudePlanner implements Planner {
       };
       return {
         behavior: "deny",
-        message: "The user's answer is recorded in plan-review/user-decisions.md. Do not continue. Make no further tool calls and end your turn with status 'needs_input'. The plan will be revised and reviewed before work continues.",
+        message: "The user's answer is recorded in plan-review/user-decisions.md. Do not continue the implementation. Make no tool call other than the final structured output, and end your turn with status 'needs_input', a summary, and the remaining work. The plan will be revised and reviewed before work continues.",
       };
     }
     this.ui.say(`\nClaude Code requests permission: ${toolName} ${JSON.stringify(input)}`);

@@ -5,7 +5,7 @@
 import * as path from "node:path";
 import type { Planner, Reviewer } from "./agents.ts";
 import * as log from "./issueLog.ts";
-import { Halt, type State } from "./state.ts";
+import { describeChange, Halt, type State } from "./state.ts";
 import type { Config, PlannerResponse, Review } from "./types.ts";
 import type { Ui } from "./ui.ts";
 
@@ -47,9 +47,12 @@ export async function askDecision(ctx: Context, subject: string): Promise<string
 
 /** A call in which Claude Code may write only under plan-review/. Halts if the project changed. */
 export async function planningCall<T>(ctx: Context, prompt: string, schema: object, progress = false): Promise<{ output: T; resultText: string; costUsd: number | null }> {
-  const before = ctx.state.projectState();
+  const before = ctx.state.projectSnapshot();
   const result = await ctx.planner.planning<T>(prompt, schema, progress);
-  if (ctx.state.projectState() !== before) throw new Halt("a planning-phase call changed the project outside plan-review/");
+  const changes = describeChange(before, ctx.state.projectSnapshot());
+  if (changes.length > 0) {
+    throw new Halt(`the project outside plan-review/ changed during a planning-phase call. Either Claude Code changed it, or another process did (for example another Claude Code session in the same project).\n  ${changes.join("\n  ")}`);
+  }
   return result;
 }
 
@@ -97,11 +100,13 @@ export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subjec
 
     // Codex review. Codex runs without a sandbox, so the project and the reviewed file are compared afterwards.
     ui.say(`\n${heading}, round ${n} (limit ${limit}): Codex review ...`);
-    const projectBefore = state.projectState();
+    const projectBefore = state.projectSnapshot();
     const fileBefore = state.fileHash(file);
     const review = await ctx.reviewer.review(subject.reviewPrompt(n));
-    if (state.projectState() !== projectBefore || state.fileHash(file) !== fileBefore) {
-      throw new Halt(`the Codex review changed the project or ${fileLabel}`);
+    const changes = describeChange(projectBefore, state.projectSnapshot());
+    if (state.fileHash(file) !== fileBefore) changes.push(`content changed: ${fileLabel}`);
+    if (changes.length > 0) {
+      throw new Halt(`the project or ${fileLabel} changed during a Codex review. Either Codex changed it, or another process did.\n  ${changes.join("\n  ")}`);
     }
     state.writeJson(path.join(dir, `review-${n}.json`), review);
     const counted = log.countedIssues(review, config.countMinor);

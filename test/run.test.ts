@@ -71,7 +71,13 @@ test("a stop without a question asks the user for input", async () => {
 test("a planning call that changes the project halts the run", async () => {
   const repo = tempRepo();
   const ctx = context(repo, new ScriptedUi([]), [{ output: noQuestions, plan: "v1", touchProject: true }], [], []);
-  await assert.rejects(run(ctx, "task"), (e: unknown) => e instanceof Halt && /changed the project/.test(e.message));
+  await assert.rejects(run(ctx, "task"), (e: unknown) => e instanceof Halt && /changed during a planning-phase call/.test(e.message) && /a\.txt/.test(e.message));
+});
+
+test("a change to an ignored path does not halt the run", async () => {
+  const repo = tempRepo();
+  const ctx = context(repo, new ScriptedUi([]), [{ output: noQuestions, plan: "v1", touchProject: true }], [{ issues: [] }], [finished], { ignorePaths: ["a.txt"] });
+  assert.equal(await run(ctx, "task"), 1);
 });
 
 test("an accepted issue without a plan change halts the run", async () => {

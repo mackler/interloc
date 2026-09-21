@@ -98,6 +98,8 @@ export type LogEntry = {
 
 export type Config = {
   questionPhase: boolean;
+  /** Paths relative to the project that the change detection ignores. A directory covers everything below it. */
+  ignorePaths: string[];
   maxRounds: number;
   maxIdleRounds: number;
   countMinor: boolean;
@@ -108,6 +110,7 @@ export type Config = {
 
 export const defaultConfig: Config = {
   questionPhase: true,
+  ignorePaths: [],
   maxRounds: 5,
   maxIdleRounds: 2,
   countMinor: true,

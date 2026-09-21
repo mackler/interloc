@@ -176,7 +176,7 @@ Do not modify any file other than plan-review/plan.md.`;
 
 export const executePrompt = `The plan in plan-review/plan.md has been reviewed. Implement its remaining steps in order.
 After you complete a step, set its completion marker in plan-review/plan.md; do not change the content of the remaining steps.
-If you need information or a decision from the user, or if a remaining step proves to be wrong, do not continue on an assumption: ask with the AskUserQuestion tool. After you have asked, make no further tool calls; end your turn with status 'needs_input'.
+If you need information or a decision from the user, or if a remaining step proves to be wrong, do not continue on an assumption: ask with the AskUserQuestion tool. After you have asked, make no tool call other than the final structured output; end your turn with status 'needs_input'.
 If you cannot continue for another reason, for example a command that fails and that you cannot correct or a denied permission, stop and return status 'blocked' with the description in the question field.
 When every step is completed and verified, return status 'finished'.
 In every case put a summary of the work done in summary and a description of the steps not yet completed in remaining_work.`;
