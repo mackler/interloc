@@ -146,8 +146,8 @@ state file is stored in the `claude-config` volume because the base image sets
 
 `npm test` runs the type check before the tests, and a tracked pre-commit hook
 (`.githooks/pre-commit`) refuses a commit with a type error, because Node.js runs the code without
-checking types. The Agent SDK was pinned from `latest` to 0.3.278, the version on which the
-established facts were verified. The developer wants to keep both SDKs current, so CLAUDE.md asks
+checking types. The Agent SDK was pinned from `latest` to 0.3.278 and the Codex SDK from `^0.155.1`
+to 0.155.1, the versions on which the established facts were verified. The developer wants to keep both SDKs current, so CLAUDE.md asks
 for a version check at the start of every session and describes a deliberate upgrade.
 
 ## Rejected or deferred

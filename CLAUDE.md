@@ -73,8 +73,8 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 
 ## SDK versions
 
-`@anthropic-ai/claude-agent-sdk` is pinned to an exact version, because each release bundles a new
-Claude Code and the facts above were established on that version. The developer wants the program to
+Both SDKs are pinned to exact versions, because the facts above were established on those versions
+and each Agent SDK release bundles a new Claude Code. The developer wants the program to
 stay current with both SDKs, which are released often, and does not want it to fall behind.
 
 - At the start of every session in this repository, run `npm outdated` and tell the developer if
