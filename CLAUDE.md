@@ -9,8 +9,8 @@ user for a decision at defined points.
 
 ## Commands
 
-- `npm run check` — type check (`tsc --noEmit`). Must report nothing before every commit.
-- `npm test` — scenario tests with scripted agents (`node --test test/*.test.ts`). No credentials needed; requires `git`.
+- `npm run check` — type check (`tsc --noEmit`). Must report nothing before every commit; `.githooks/pre-commit` runs it and refuses the commit otherwise. Enable the hook once per clone with `git config core.hooksPath .githooks`.
+- `npm test` — type check, then scenario tests with scripted agents (`node --test test/*.test.ts`). A type error fails the tests before any test runs. No credentials needed; requires `git`.
 - Real run, inside a project container that has both agents' credentials and network access:
   `node /opt/plan-review/src/main.ts "task description" [project directory]`
 
@@ -42,6 +42,7 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/agents.ts` | `Planner` and `Reviewer` interfaces, which the tests implement with scripted versions |
 | `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer`, temporary git repository |
 | `prototypes/` | The two SDK prototypes used to verify the environment; not part of the program |
+| `.githooks/pre-commit` | Type check before each commit; not part of the program |
 
 ## Behaviour that is decided and must not change without the developer's instruction
 

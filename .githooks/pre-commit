@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuses the commit if the type check reports anything.
+# Enable once per clone: git config core.hooksPath .githooks
+exec npm run --silent check
