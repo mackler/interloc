@@ -142,6 +142,14 @@ refers to a host path that does not exist inside the container. In the developme
 state file is stored in the `claude-config` volume because the base image sets
 `CLAUDE_CONFIG_DIR`, so no tracked file changes there.
 
+## Type checking and SDK versions (21 Sep 2026)
+
+`npm test` runs the type check before the tests, and a tracked pre-commit hook
+(`.githooks/pre-commit`) refuses a commit with a type error, because Node.js runs the code without
+checking types. The Agent SDK was pinned from `latest` to 0.3.278, the version on which the
+established facts were verified. The developer wants to keep both SDKs current, so CLAUDE.md asks
+for a version check at the start of every session and describes a deliberate upgrade.
+
 ## Rejected or deferred
 
 - `--permission-mode plan` and `plansDirectory` for the planning phases: the location of the

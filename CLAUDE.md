@@ -71,6 +71,19 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 - Resuming an interrupted run is not implemented. The developer wants it later.
 - Threads that the orchestrator starts are stored in the same `~/.codex` volume as the developer's interactive Codex sessions; the effect on `codex resume --last` is unverified.
 
+## SDK versions
+
+`@anthropic-ai/claude-agent-sdk` is pinned to an exact version, because each release bundles a new
+Claude Code and the facts above were established on that version. The developer wants the program to
+stay current with both SDKs, which are released often, and does not want it to fall behind.
+
+- At the start of every session in this repository, run `npm outdated` and tell the developer if
+  either SDK has a newer version, before starting other work.
+- Upgrade procedure: change the version in `package.json`, `npm install`, `npm test`, run the matching
+  prototype in `prototypes/` in a project container, then one real run. Update the version numbers
+  and any changed facts in the section above, and commit. The upgrade reaches real runs after
+  `git pull` and `npm ci` in `~/work/plan-review`.
+
 ## Rules for changes
 
 - Every change to behaviour gets a scenario test in `test/` that uses the scripted agents. `src/issueLog.ts` stays free of I/O so that it can be tested directly.
