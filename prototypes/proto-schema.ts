@@ -84,11 +84,24 @@ function strict(json: Json): Json {
   return walk(json) as Json;
 }
 
+// --only=<agent>:<schema>:<variant>, each part optional, for reproducing one case quickly.
+const only = (process.argv.find((a) => a.startsWith("--only=")) ?? "").slice("--only=".length).split(":");
+const selected = (agent: string, name: string, variant: string): boolean =>
+  [agent, name, variant].every((part, i) => !only[i] || only[i] === part);
+const TIMEOUT_MS = 120_000;
+const say = (line: string): void => void process.stdout.write(line + "\n");
+
 const prompt = (name: string): string =>
   `This is a test of structured output. Do not read or change any file. Return a minimal valid instance of the required output schema (${name}); use empty arrays where allowed.`;
 const decodes = (s: Schema.Top, value: unknown): string =>
   Exit.isSuccess(Schema.decodeUnknownExit(s as any, { onExcessProperty: "error" })(value)) ? "decodes" : "DOES NOT DECODE";
 const oneLine = (e: unknown): string => (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 300);
+const timedOut = (e: unknown): boolean => e instanceof Error && (e.name === "TimeoutError" || /abort|timeout/i.test(e.message));
+const counts = { accepted: 0, other: 0 };
+const report = (line: string, started: number): void => {
+  counts[line.includes(": accepted") ? "accepted" : "other"]++;
+  say(`${line} (${Math.round((Date.now() - started) / 1000)} s)`);
+};
 
 const codex = new Codex();
 for (const variant of ["raw", "strict"] as const) {
@@ -97,25 +110,37 @@ for (const variant of ["raw", "strict"] as const) {
     const json = variant === "raw" ? raw(s) : strict(raw(s));
     fs.writeFileSync(path.join(outDir, `${name}.${variant}.json`), JSON.stringify(json, null, 2) + "\n");
 
-    try {
-      const turn = await thread.run(prompt(name), { outputSchema: json });
-      console.log(`codex  ${name} ${variant}: accepted, ${decodes(s, JSON.parse(turn.finalResponse))}`);
-    } catch (e) {
-      console.log(`codex  ${name} ${variant}: REJECTED: ${oneLine(e)}`);
+    if (selected("codex", name, variant)) {
+      say(`-> codex  ${name} ${variant} ...`);
+      const started = Date.now();
+      try {
+        const turn = await thread.run(prompt(name), { outputSchema: json, signal: AbortSignal.timeout(TIMEOUT_MS) });
+        report(`codex  ${name} ${variant}: accepted, ${decodes(s, JSON.parse(turn.finalResponse))}`, started);
+      } catch (e) {
+        report(`codex  ${name} ${variant}: ${timedOut(e) ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : `REJECTED: ${oneLine(e)}`}`, started);
+      }
     }
 
-    try {
-      let result = "no result message";
-      for await (const m of query({
-        prompt: prompt(name),
-        options: { cwd: projectDir, permissionMode: "default", maxTurns: 3, outputFormat: { type: "json_schema", schema: json }, canUseTool: async () => ({ behavior: "deny", message: "not permitted in this test" }) },
-      })) {
-        if (m.type === "result") result = m.subtype === "success" ? `accepted, ${decodes(s, m.structured_output)}` : `REJECTED: ${m.subtype}`;
+    if (selected("claude", name, variant)) {
+      say(`-> claude ${name} ${variant} ...`);
+      const started = Date.now();
+      const abort = new AbortController();
+      const timer = setTimeout(() => abort.abort(new Error("timeout")), TIMEOUT_MS);
+      try {
+        let result = "no result message";
+        for await (const m of query({
+          prompt: prompt(name),
+          options: { cwd: projectDir, permissionMode: "default", maxTurns: 3, outputFormat: { type: "json_schema", schema: json }, abortController: abort, canUseTool: async () => ({ behavior: "deny", message: "not permitted in this test" }) },
+        })) {
+          if (m.type === "result") result = m.subtype === "success" ? `accepted, ${decodes(s, m.structured_output)}` : `REJECTED: ${m.subtype}`;
+        }
+        report(`claude ${name} ${variant}: ${abort.signal.aborted ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : result}`, started);
+      } catch (e) {
+        report(`claude ${name} ${variant}: ${abort.signal.aborted ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : `REJECTED: ${oneLine(e)}`}`, started);
+      } finally {
+        clearTimeout(timer);
       }
-      console.log(`claude ${name} ${variant}: ${result}`);
-    } catch (e) {
-      console.log(`claude ${name} ${variant}: REJECTED: ${oneLine(e)}`);
     }
   }
 }
-console.log(`\nSchemas written to ${outDir}`);
+say(`\n${counts.accepted} accepted, ${counts.other} not accepted. Schemas written to ${outDir}`);
