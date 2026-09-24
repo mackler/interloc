@@ -1,7 +1,6 @@
 // Typed errors: one per cause that ends a run, and one per I/O or parse failure that used to escape
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
 import { Data } from "effect";
-import { Halt } from "./state.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
 export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: string[] }> {}
@@ -89,7 +88,5 @@ const TAGS = new Set<string>([
 export const haltMessage = (error: unknown): string | null => {
   const tag: unknown = (error as { _tag?: unknown } | null)?._tag;
   if (typeof tag === "string" && TAGS.has(tag)) return `HALTED: ${describe(error as RunError)}`;
-  // Until stage 3 replaces them, src/ui.ts, src/claude.ts and src/codex.ts still throw Halt.
-  if (error instanceof Halt) return `HALTED: ${error.message}`;
   return null;
 };

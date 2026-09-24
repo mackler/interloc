@@ -1,27 +1,28 @@
 // Codex through the Codex SDK. One thread per planning phase.
 
-import { Codex } from "@openai/codex-sdk";
-import type { Thread } from "@openai/codex-sdk";
 import type { Reviewer } from "./agents.ts";
+import type { AgentSdk, SdkThread } from "./sdk.ts";
 import { reviewSchema } from "./schemas.ts";
-import { Halt, type State } from "./state.ts";
+import { CodexCallFailed } from "./errors.ts";
+import type { State } from "./state.ts";
 import type { Config, Review } from "./types.ts";
 
 export class CodexReviewer implements Reviewer {
-  private readonly codex = new Codex();
   private readonly state: State;
   private readonly config: Config;
-  private thread: Thread | null = null;
+  private readonly sdk: AgentSdk;
+  private thread: SdkThread | null = null;
 
-  constructor(state: State, config: Config) {
+  constructor(state: State, config: Config, sdk: AgentSdk) {
     this.state = state;
     this.config = config;
+    this.sdk = sdk;
   }
 
   // Bubblewrap cannot start in the container, so Codex's own sandbox is off. The container and its
   // firewall are the boundary, and the caller compares the project state after every turn.
   newPhase(): void {
-    this.thread = this.codex.startThread({
+    this.thread = this.sdk.startThread({
       workingDirectory: this.state.project,
       sandboxMode: "danger-full-access",
       approvalPolicy: "never",
@@ -37,10 +38,10 @@ export class CodexReviewer implements Reviewer {
       this.state.recordUsage({ agent: "codex", thread_id: this.thread.id, usage: turn.usage });
       text = turn.finalResponse;
     } catch (e) {
-      throw new Halt(`Codex review failed: ${e instanceof Error ? e.message : String(e)}`);
+      throw new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) });
     }
     const parsed = JSON.parse(text) as Review;
-    if (!Array.isArray(parsed.issues)) throw new Halt("the Codex response contains no issues array");
+    if (!Array.isArray(parsed.issues)) throw new CodexCallFailed({ message: "the Codex response contains no issues array" });
     return parsed;
   }
 }

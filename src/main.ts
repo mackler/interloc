@@ -3,6 +3,7 @@
 
 import { ClaudePlanner } from "./claude.ts";
 import { CodexReviewer } from "./codex.ts";
+import { liveSdk } from "./sdkLive.ts";
 import type { Context } from "./review.ts";
 import { run } from "./run.ts";
 import { haltMessage } from "./errors.ts";
@@ -18,8 +19,8 @@ if (!task) {
 const state = new State(process.argv[3] ?? process.cwd());
 const ui = new TerminalUi();
 const config = state.loadConfig();
-const planner = new ClaudePlanner(state, ui, config);
-const ctx: Context = { state, ui, planner, reviewer: new CodexReviewer(state, config), config };
+const planner = new ClaudePlanner(state, ui, config, liveSdk);
+const ctx: Context = { state, ui, planner, reviewer: new CodexReviewer(state, config, liveSdk), config };
 
 try {
   const phases = await run(ctx, task);

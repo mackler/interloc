@@ -9,9 +9,6 @@ import { FileSystemError, GitError, StateFileInvalid } from "./errors.ts";
 import type { Config, LogEntry } from "./types.ts";
 import { defaultConfig } from "./types.ts";
 
-/** Thrown to end the run. State on disk is preserved. Replaced by the typed errors of errors.ts. */
-export class Halt extends Error {}
-
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** Every file-system call of this module goes through here, so no raw error escapes. */

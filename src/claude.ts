@@ -1,11 +1,12 @@
 // Claude Code through the Claude Agent SDK.
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
 import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as path from "node:path";
 import type { Planner } from "./agents.ts";
 import { execReportSchema } from "./schemas.ts";
-import { Halt, type State } from "./state.ts";
+import type { AgentSdk } from "./sdk.ts";
+import { ClaudeCallFailed } from "./errors.ts";
+import type { State } from "./state.ts";
 import type { Config, ExecOutcome, ExecReport } from "./types.ts";
 import type { Ui } from "./ui.ts";
 
@@ -20,13 +21,15 @@ export class ClaudePlanner implements Planner {
   private readonly ui: Ui;
   private readonly config: Config;
   private readonly allowedDir: string;
+  private readonly sdk: AgentSdk;
   private session: string | null = null;
   private stop: Stop | null = null;
 
-  constructor(state: State, ui: Ui, config: Config) {
+  constructor(state: State, ui: Ui, config: Config, sdk: AgentSdk) {
     this.state = state;
     this.ui = ui;
     this.config = config;
+    this.sdk = sdk;
     this.allowedDir = state.dir + path.sep;
   }
 
@@ -41,8 +44,8 @@ export class ClaudePlanner implements Planner {
       hooks: { PreToolUse: [{ matcher: EDIT_TOOLS.join("|"), hooks: [this.restrictEdits] }] },
       canUseTool: this.planningPermission,
     });
-    if (result.error !== null) throw new Halt(`Claude Code planning call failed: ${result.error}`);
-    if (result.structured === undefined || result.structured === null) throw new Halt("Claude Code returned no structured output");
+    if (result.error !== null) throw new ClaudeCallFailed({ message: result.error });
+    if (result.structured === undefined || result.structured === null) throw new ClaudeCallFailed({ message: "Claude Code returned no structured output" });
     return { output: result.structured as T, resultText: result.resultText, costUsd: result.costUsd };
   }
 
@@ -71,7 +74,7 @@ export class ClaudePlanner implements Planner {
     if (this.config.claudeModel !== null) full.model = this.config.claudeModel;
     const out: CallResult = { structured: null, resultText: "", costUsd: null, error: "the call produced no result message" };
     try {
-      for await (const message of query({ prompt, options: full })) {
+      for await (const message of this.sdk.query({ prompt, options: full })) {
         if (message.type === "system" && message.subtype === "init") {
           this.session = message.session_id;
         } else if (message.type === "assistant" && show !== "none") {
