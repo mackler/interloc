@@ -180,3 +180,12 @@ If you need information or a decision from the user, or if a remaining step prov
 If you cannot continue for another reason, for example a command that fails and that you cannot correct or a denied permission, stop and return status 'blocked' with the description in the question field.
 When every step is completed and verified, return status 'finished'.
 In every case put a summary of the work done in summary and a description of the steps not yet completed in remaining_work.`;
+
+// ---- repair of an invalid structured reply ------------------------------------------------------
+
+/** One repair turn in the same session or thread. `issue` is the formatted decode error. */
+export function repairReplyPrompt(issue: string): string {
+  return `Your structured output did not match the required schema:
+${issue}
+Return the complete output again, corrected. Do not modify any file.`;
+}

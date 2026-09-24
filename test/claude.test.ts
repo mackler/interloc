@@ -5,20 +5,22 @@ import { test } from "node:test";
 import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { ClaudePlanner } from "../src/claude.ts";
 import type { RunError } from "../src/errors.ts";
+import { agentJsonSchema } from "../src/jsonSchema.ts";
+import * as S from "../src/schema.ts";
 import { State } from "../src/state.ts";
-import { defaultConfig, type Config } from "../src/types.ts";
 import { assistantText, assistantTool, failure, FakeSdk, init, messages, success, type Script } from "./fakeSdk.ts";
 import { ScriptedUi, tempRepo } from "./helpers.ts";
 
-const planner = (scripts: Script[], answers: string[] = [], config: Partial<Config> = {}): { planner: ClaudePlanner; sdk: FakeSdk; ui: ScriptedUi; state: State } => {
+const planner = (scripts: Script[], answers: string[] = [], config: Partial<typeof S.Config.Type> = {}): { planner: ClaudePlanner; sdk: FakeSdk; ui: ScriptedUi; state: State } => {
   const state = new State(tempRepo());
   state.init("task");
   const ui = new ScriptedUi(answers);
   const sdk = new FakeSdk(scripts);
-  return { planner: new ClaudePlanner(state, ui, { ...defaultConfig, ...config }, sdk), sdk, ui, state };
+  return { planner: new ClaudePlanner(state, ui, { ...S.defaultConfig, ...config }, sdk), sdk, ui, state };
 };
 
-const schema = { type: "object", properties: {}, required: [] };
+// The schema of most planning calls in these tests; the output the fake returns matches it where the output is read.
+const schema = S.PlanWriteResult;
 const hook = (options: Options): HookCallback => {
   const hooks = options.hooks?.PreToolUse;
   assert.ok(hooks !== undefined && hooks.length > 0, "the call registered no PreToolUse hook");
@@ -38,9 +40,9 @@ const callContext = (): Parameters<CanUseTool>[2] => ({ signal: new AbortControl
 
 test("a planning call returns the structured output and records usage", async () => {
   const fake = planner([messages(init("session-7"), assistantTool("Read", { file_path: "/x" }), success({ questions_for_user: ["q?"] }, "done"))]);
-  const call = await fake.planner.planning<{ questions_for_user: string[] }>("write the plan", schema);
+  const call = await fake.planner.planning("write the plan", schema);
 
-  assert.deepEqual(call.output.questions_for_user, ["q?"]);
+  assert.deepEqual(call.output, { questions_for_user: ["q?"] });
   assert.equal(call.resultText, "done");
   assert.equal(call.costUsd, 0.25);
   assert.equal(fake.planner.sessionId(), "session-7");
@@ -54,9 +56,11 @@ test("a failed planning call fails with ClaudeCallFailed", async () => {
   await assert.rejects(fake.planner.planning("write the plan", schema), (e: unknown) => tag(e) === "ClaudeCallFailed");
 });
 
-test("a planning call without structured output fails with ClaudeCallFailed", async () => {
+test("a successful planning call without structured output returns it as absent to the caller", async () => {
   const fake = planner([messages(init(), success(null, "no schema output"))]);
-  await assert.rejects(fake.planner.planning("write the plan", schema), (e: unknown) => tag(e) === "ClaudeCallFailed");
+  const call = await fake.planner.planning("write the plan", schema);
+  assert.equal(call.output ?? null, null);
+  assert.equal(call.resultText, "no schema output");
 });
 
 test("the planning hook denies an edit outside plan-review/ and permits one inside", async () => {
@@ -109,13 +113,19 @@ test("the configured model is passed, and no model key is set when claudeModel i
   assert.ok(!("model" in without.sdk.calls[0].options), "model must be absent when claudeModel is null");
 });
 
-test("a planning call passes the schema and the project directory", async () => {
+test("the planning call passes the agent JSON Schema of the given Effect schema as outputFormat, and the project directory", async () => {
   const fake = planner([messages(init(), success({}))]);
-  await fake.planner.planning("write the plan", schema);
+  await fake.planner.planning("write the plan", S.PlannerResponse);
   const options = fake.sdk.calls[0].options;
-  assert.deepEqual(options.outputFormat, { type: "json_schema", schema });
+  assert.deepEqual(options.outputFormat, { type: "json_schema", schema: agentJsonSchema(S.PlannerResponse) });
   assert.equal(options.cwd, fake.state.project);
   assert.equal(options.permissionMode, "default");
+});
+
+test("the execution call passes the agent JSON Schema of ExecReport as outputFormat", async () => {
+  const fake = planner([messages(init(), success({ status: "finished", summary: "done", question: "", remaining_work: "" }))]);
+  await fake.planner.executing("implement the plan");
+  assert.deepEqual(fake.sdk.calls[0].options.outputFormat, { type: "json_schema", schema: agentJsonSchema(S.ExecReport) });
 });
 
 test("execution AskUserQuestion is a stop: needs_input with the answer, even without a report", async () => {
@@ -151,6 +161,30 @@ test("after a stop, the hook denies tools but permits the final structured outpu
   const fake = planner([script], ["A"]);
   await fake.planner.executing("implement the plan");
   assert.deepEqual(seen, [undefined, "deny", "deny", undefined]);
+});
+
+test("an invalid execution report after a recorded stop still yields needs_input with the user's answer", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }] }];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    yield success({ status: "bogus", summary: 7 });
+  })();
+  const fake = planner([script], ["A"]);
+  const outcome = await fake.planner.executing("implement the plan");
+  assert.equal(outcome.status, "needs_input");
+  assert.equal(outcome.userInput, "A or B? -> A");
+  assert.equal(outcome.summary, "");
+  assert.equal(fake.sdk.calls.length, 1);
+});
+
+test("an invalid execution report without a stop yields aborted, and no repair prompt is sent", async () => {
+  const fake = planner([messages(init(), success({ status: "bogus" }, "text only"))]);
+  const outcome = await fake.planner.executing("implement the plan");
+  assert.equal(outcome.status, "aborted");
+  assert.equal(outcome.summary, "text only");
+  assert.match(outcome.question, /ended without a status report/);
+  assert.equal(fake.sdk.calls.length, 1);
 });
 
 test("execution without a report and without a stop is aborted", async () => {

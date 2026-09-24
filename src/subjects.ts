@@ -4,9 +4,9 @@ import * as path from "node:path";
 import { interview } from "./interview.ts";
 import * as prompts from "./prompts.ts";
 import type { Context, Subject } from "./review.ts";
-import { planWriteSchema, plannerResponseSchema, questionListResponseSchema, questionListSchema } from "./schemas.ts";
+import * as S from "./schema.ts";
+import type { PlannerResponse, QuestionList, QuestionListResponse } from "./schema.ts";
 import type { State } from "./state.ts";
-import type { PlannerResponse, QuestionList, QuestionListResponse } from "./types.ts";
 
 export function writeQuestions(state: State, task: string, list: QuestionList): void {
   state.writeJson(state.questions, { task, questions: list.questions });
@@ -23,9 +23,9 @@ export function questionSubject(state: State, task: string): Subject<QuestionLis
     phase: 0,
     reviewPrompt: prompts.questionReviewPrompt,
     respondPrompt: prompts.questionRespondPrompt,
-    respondSchema: questionListResponseSchema,
+    respondSchema: S.QuestionListResponse,
     applyDecisionsPrompt: prompts.questionApplyDecisionsPrompt,
-    applyDecisionsSchema: questionListSchema,
+    applyDecisionsSchema: S.QuestionList,
     afterPlannerCall: (output) => writeQuestions(state, task, output as QuestionList),
     proceedLabel: "proceed to the interview with the question list as it is",
   };
@@ -42,9 +42,9 @@ export function requirementsSubject(state: State): Subject {
     phase: 0,
     reviewPrompt: prompts.requirementsReviewPrompt,
     respondPrompt: prompts.requirementsRespondPrompt,
-    respondSchema: plannerResponseSchema,
+    respondSchema: S.PlannerResponse,
     applyDecisionsPrompt: prompts.requirementsApplyDecisionsPrompt,
-    applyDecisionsSchema: planWriteSchema,
+    applyDecisionsSchema: S.PlanWriteResult,
     amend: async (ctx: Context, _review, response: PlannerResponse, round: number) => {
       const ids = response.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
       if (ids.length === 0) return;
@@ -65,9 +65,9 @@ export function planSubject(state: State, phase: number, withRequirements: boole
     phase,
     reviewPrompt: (round) => prompts.planReviewPrompt(phase, round, withRequirements),
     respondPrompt: (round) => prompts.planRespondPrompt(phase, round),
-    respondSchema: plannerResponseSchema,
+    respondSchema: S.PlannerResponse,
     applyDecisionsPrompt: prompts.planApplyDecisionsPrompt,
-    applyDecisionsSchema: planWriteSchema,
+    applyDecisionsSchema: S.PlanWriteResult,
     proceedLabel: "proceed to execution with the plan as it is",
   };
 }

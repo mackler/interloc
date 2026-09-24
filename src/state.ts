@@ -5,9 +5,11 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { FileSystemError, GitError, StateFileInvalid } from "./errors.ts";
-import type { Config, LogEntry } from "./types.ts";
-import { defaultConfig } from "./types.ts";
+import { Schema } from "effect";
+import { ConfigInvalid, FileSystemError, GitError, StateFileInvalid } from "./errors.ts";
+import * as S from "./schema.ts";
+import { defaultConfig, firstIssue, PartialConfig } from "./schema.ts";
+import type { Config, LogEntry, QuestionsFile } from "./schema.ts";
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -20,13 +22,51 @@ const io = <T>(operation: string, file: string, action: () => T): T => {
   }
 };
 
-/** Reads and parses a JSON file of the program's own records. */
-const readJson = <T>(file: string): T => {
-  const text = io("read", file, () => fs.readFileSync(file, "utf8"));
+/** Parses JSON of one of the program's own records; a parse error is StateFileInvalid. */
+const parseJson = (file: string, text: string): unknown => {
   try {
-    return JSON.parse(text) as T;
+    return JSON.parse(text);
   } catch (e) {
     throw new StateFileInvalid({ file, message: message(e) });
+  }
+};
+
+/** Decodes parsed JSON of one of the program's own records; a mismatch is StateFileInvalid with the field path. */
+const decodeRecord = <Out extends Schema.ConstraintDecoder<unknown>>(file: string, schema: Out, json: unknown, options: { readonly onExcessProperty: "ignore" | "error" } = { onExcessProperty: "error" }): Out["Type"] => {
+  try {
+    return Schema.decodeUnknownSync(schema, options)(json);
+  } catch (e) {
+    if (!Schema.isSchemaError(e)) throw e;
+    const { path: at, message: text } = firstIssue(e);
+    throw new StateFileInvalid({ file, message: at === "" ? text : `${text} (at ${at})` });
+  }
+};
+
+/** Reads, parses and decodes a JSON file of the program's own records. */
+const readJson = <Out extends Schema.ConstraintDecoder<unknown>>(file: string, schema: Out): Out["Type"] => {
+  const text = io("read", file, () => fs.readFileSync(file, "utf8"));
+  return decodeRecord(file, schema, parseJson(file, text));
+};
+
+const LogFile = Schema.Array(S.LogEntry);
+
+const decodeConfigFile = Schema.decodeUnknownSync(PartialConfig, { onExcessProperty: "error" });
+
+/** One config file, or {} if it does not exist. Invalid JSON, a wrong type and an unknown key are ConfigInvalid. */
+const readConfigFile = (file: string): Partial<Config> => {
+  if (!fs.existsSync(file)) return {};
+  const text = io("read", file, () => fs.readFileSync(file, "utf8"));
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    throw new ConfigInvalid({ file, path: "", message: message(e) });
+  }
+  try {
+    return decodeConfigFile(json);
+  } catch (e) {
+    if (Schema.isSchemaError(e)) throw new ConfigInvalid({ file, ...firstIssue(e) });
+    throw e;
   }
 };
 
@@ -39,7 +79,7 @@ export class State {
   private readonly decisionsFile: string;
   private readonly feedbackFile: string;
   private readonly conversationFile: string;
-  ignorePaths: string[] = [];
+  ignorePaths: readonly string[] = [];
 
   constructor(project: string) {
     this.project = path.resolve(project);
@@ -73,10 +113,8 @@ export class State {
    * Settings, in increasing precedence: the defaults, config.json in the orchestrator's repository
    * (for all projects), and plan-review/config.json in the project.
    */
-  loadConfig(): Config {
-    const read = (file: string): Partial<Config> => (fs.existsSync(file) ? readJson<Partial<Config>>(file) : {});
-    const shared = fileURLToPath(new URL("../config.json", import.meta.url));
-    const config = { ...defaultConfig, ...read(shared), ...read(path.join(this.dir, "config.json")) };
+  loadConfig(sharedFile: string = fileURLToPath(new URL("../config.json", import.meta.url)), projectFile: string = path.join(this.dir, "config.json")): Config {
+    const config = { ...defaultConfig, ...readConfigFile(sharedFile), ...readConfigFile(projectFile) };
     this.ignorePaths = config.ignorePaths;
     return config;
   }
@@ -95,12 +133,26 @@ export class State {
     this.writeText(file, JSON.stringify(value, null, 2) + "\n");
   }
 
+  /** plan-review/questions.json: the task and the agreed question list. */
+  loadQuestions(): QuestionsFile {
+    return readJson(this.questions, S.QuestionsFile);
+  }
+
   loadLog(name = "issue-log.json"): LogEntry[] {
-    return readJson<LogEntry[]>(path.join(this.dir, name));
+    return [...readJson(path.join(this.dir, name), LogFile)];
   }
 
   saveLog(name: string, log: LogEntry[]): void {
     this.writeJson(path.join(this.dir, name), log);
+  }
+
+  /** Keeps a reply that did not match its schema, as plan-review/invalid-replies/<agent>-<n>.json. Returns that relative path. */
+  saveInvalidReply(agent: "claude" | "codex", content: string): string {
+    const dir = this.subDir("invalid-replies");
+    const n = io("list", dir, () => fs.readdirSync(dir)).filter((name) => name.startsWith(`${agent}-`)).length + 1;
+    const name = `${agent}-${n}.json`;
+    this.writeText(path.join(dir, name), content);
+    return path.join("plan-review", "invalid-replies", name);
   }
 
   recordDecision(subject: string, decision: string): void {
@@ -122,13 +174,8 @@ export class State {
     const file = path.join(this.dir, "usage.jsonl");
     if (!fs.existsSync(file)) return "no usage recorded";
     const lines = io("read", file, () => fs.readFileSync(file, "utf8")).split("\n").filter((l) => l !== "");
-    const entries = lines.map((line) => {
-      try {
-        return JSON.parse(line) as Record<string, any>;
-      } catch (e) {
-        throw new StateFileInvalid({ file, message: message(e) });
-      }
-    });
+    // Excess properties are ignored: the SDKs decide which usage fields they report.
+    const entries = lines.map((line) => decodeRecord(file, S.UsageEntry, parseJson(file, line), { onExcessProperty: "ignore" }));
     const claude = entries.filter((e) => e.agent === "claude");
     const codex = entries.filter((e) => e.agent === "codex");
     const cost = claude.reduce((sum, e) => sum + (typeof e.total_cost_usd === "number" ? e.total_cost_usd : 0), 0);

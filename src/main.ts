@@ -18,11 +18,13 @@ if (!task) {
 
 const state = new State(process.argv[3] ?? process.cwd());
 const ui = new TerminalUi();
-const config = state.loadConfig();
-const planner = new ClaudePlanner(state, ui, config, liveSdk);
-const ctx: Context = { state, ui, planner, reviewer: new CodexReviewer(state, config, liveSdk), config };
+// Undefined until the configuration is valid: an invalid config.json halts before any agent exists.
+let planner: ClaudePlanner | undefined;
 
 try {
+  const config = state.loadConfig();
+  planner = new ClaudePlanner(state, ui, config, liveSdk);
+  const ctx: Context = { state, ui, planner, reviewer: new CodexReviewer(state, config, liveSdk), config };
   const phases = await run(ctx, task);
   ui.say(`\nClaude Code reports that the task is finished after ${phases} execution phase(s).`);
   ui.say(`Plan: ${state.plan}\nConversation record: ${state.dir}/conversation.md`);
@@ -32,6 +34,6 @@ try {
   ui.say(`\n${message}\nState is preserved in ${state.dir}.`);
   process.exitCode = 1;
 } finally {
-  ui.say(`Claude Code session id: ${planner.sessionId() ?? "none"}`);
+  ui.say(`Claude Code session id: ${planner?.sessionId() ?? "none"}`);
   ui.say(`Usage: ${state.usageSummary()}`);
 }

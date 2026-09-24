@@ -1,6 +1,6 @@
 // Pure functions on the issue log. No file access and no agent calls.
 
-import type { LogEntry, PlannerResponse, Review } from "./types.ts";
+import type { LogEntry, PlannerResponse, Review } from "./schema.ts";
 
 const NOT_ACCEPTED_IN_FULL = new Set(["rejected", "partially_accepted", "no_change_needed"]);
 

@@ -4,18 +4,18 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { CodexReviewer } from "../src/codex.ts";
 import type { RunError } from "../src/errors.ts";
-import { reviewSchema } from "../src/schemas.ts";
+import { agentJsonSchema } from "../src/jsonSchema.ts";
+import * as S from "../src/schema.ts";
 import { State } from "../src/state.ts";
-import { defaultConfig, type Config } from "../src/types.ts";
 import { FakeSdk, turn } from "./fakeSdk.ts";
 import { tempRepo } from "./helpers.ts";
 import type { RunResult } from "@openai/codex-sdk";
 
-const reviewer = (turns: (RunResult | Error)[], config: Partial<Config> = {}): { reviewer: CodexReviewer; sdk: FakeSdk; state: State } => {
+const reviewer = (turns: (RunResult | Error)[], config: Partial<typeof S.Config.Type> = {}): { reviewer: CodexReviewer; sdk: FakeSdk; state: State } => {
   const state = new State(tempRepo());
   state.init("task");
   const sdk = new FakeSdk([], turns);
-  return { reviewer: new CodexReviewer(state, { ...defaultConfig, ...config }, sdk), sdk, state };
+  return { reviewer: new CodexReviewer(state, { ...S.defaultConfig, ...config }, sdk), sdk, state };
 };
 
 const tag = (e: unknown): string => (e as RunError)._tag;
@@ -41,13 +41,13 @@ test("the configured model is passed, and no model key is set when codexModel is
   assert.ok(!("model" in (without.sdk.threads[0].options ?? {})), "model must be absent when codexModel is null");
 });
 
-test("review passes the review JSON Schema as outputSchema and records usage", async () => {
+test("review passes agentJsonSchema(Review) as outputSchema and records usage", async () => {
   const fake = reviewer([turn(JSON.stringify({ issues: [{ id: "A", severity: "major", location: "l", problem: "p", evidence: "e" }] }))]);
   fake.reviewer.newPhase();
-  const review = await fake.reviewer.review("review the plan");
+  const text = await fake.reviewer.review("review the plan");
 
-  assert.deepEqual(review.issues.map((i) => i.id), ["A"]);
-  assert.deepEqual(fake.sdk.threads[0].calls[0].turnOptions?.outputSchema, reviewSchema);
+  assert.deepEqual(JSON.parse(text).issues.map((i: { id: string }) => i.id), ["A"]);
+  assert.deepEqual(fake.sdk.threads[0].calls[0].turnOptions?.outputSchema, agentJsonSchema(S.Review));
   assert.equal(fake.sdk.threads[0].calls[0].input, "review the plan");
   const usage = JSON.parse(fs.readFileSync(path.join(fake.state.dir, "usage.jsonl"), "utf8").trim());
   assert.equal(usage.agent, "codex");
@@ -61,10 +61,10 @@ test("a failed turn fails with CodexCallFailed", async () => {
   await assert.rejects(fake.reviewer.review("review the plan"), (e: unknown) => tag(e) === "CodexCallFailed");
 });
 
-test("a reply without an issues array fails with CodexCallFailed", async () => {
+test("the reviewer returns a reply without an issues array unchanged to the caller", async () => {
   const fake = reviewer([turn(JSON.stringify({ findings: [] }))]);
   fake.reviewer.newPhase();
-  await assert.rejects(fake.reviewer.review("review the plan"), (e: unknown) => tag(e) === "CodexCallFailed");
+  assert.equal(await fake.reviewer.review("review the plan"), JSON.stringify({ findings: [] }));
 });
 
 test("each newPhase starts a new thread", async () => {

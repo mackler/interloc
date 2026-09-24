@@ -1,11 +1,10 @@
 // The question phase: question list, its review, the interview, and the review of its result.
 
-import * as fs from "node:fs";
 import * as prompts from "./prompts.ts";
 import { planningCall, reviewLoop, type Context } from "./review.ts";
-import { interviewTurnSchema, questionListSchema } from "./schemas.ts";
+import * as S from "./schema.ts";
+import type { QuestionList } from "./schema.ts";
 import { questionSubject, requirementsSubject, writeQuestions } from "./subjects.ts";
-import type { InterviewTurn, QuestionList } from "./types.ts";
 
 /**
  * A conversation between the user and Claude Code in the program's terminal. It ends when Claude Code
@@ -17,7 +16,7 @@ export async function interview(ctx: Context, opening: string, heading: string):
   state.converse(`## ${heading}\n\n`);
   let prompt = opening;
   for (;;) {
-    const turn = (await planningCall<InterviewTurn>(ctx, prompt, interviewTurnSchema, true)).output;
+    const turn = (await planningCall(ctx, prompt, S.InterviewTurn, true)).output;
     ui.say(`\n${turn.message_to_user}\n`);
     state.converse(`**Claude Code:** ${turn.message_to_user}\n\n`);
 
@@ -46,13 +45,13 @@ export async function questionPhase(ctx: Context, task: string): Promise<void> {
   const { state, ui } = ctx;
 
   ui.say("Question phase: Claude Code generates the question list ...");
-  const generated = await planningCall<QuestionList>(ctx, prompts.questionListPrompt(task), questionListSchema);
+  const generated = await planningCall(ctx, prompts.questionListPrompt(task), S.QuestionList);
   writeQuestions(state, task, generated.output);
   state.converse(`## Question list proposed by Claude Code\n\n${renderQuestions(generated.output)}\n`);
 
   await reviewLoop(ctx, questionSubject(state, task));
 
-  const agreed = (JSON.parse(fs.readFileSync(state.questions, "utf8")) as QuestionList).questions;
+  const agreed = state.loadQuestions().questions;
   state.converse(`## Agreed question list\n\n${renderQuestions({ questions: agreed })}\n`);
 
   if (agreed.length === 0) {

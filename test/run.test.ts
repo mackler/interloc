@@ -109,9 +109,11 @@ test("the round limit offers to proceed to execution", async () => {
 test("a reversal and a disputed self-correction each produce a prompt and a decided_by_user entry", async () => {
   const repo = tempRepo();
   const ui = new ScriptedUi(["keep A", "keep A again"]);
-  const reversal = respond([["C", "rejected"]]);
-  reversal.dispositions[0].reverses = "A";
-  reversal.self_corrections = [{ id: "A", new_action: "rejected", explanation: "A breaks the migration" }, { id: "", new_action: "plan_error", explanation: "wrong module" }];
+  const reversal = {
+    ...respond([["C", "rejected"]]),
+    dispositions: [{ id: "C", action: "rejected" as const, rationale: "rationale C", duplicate_of: "", reverses: "A" }],
+    self_corrections: [{ id: "A", new_action: "rejected" as const, explanation: "A breaks the migration" }, { id: "", new_action: "plan_error" as const, explanation: "wrong module" }],
+  };
   const ctx = context(repo, ui,
     [
       { output: noQuestions, plan: "v1" },

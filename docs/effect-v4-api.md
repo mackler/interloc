@@ -91,9 +91,20 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Schema.decodeUnknownExit` | 1223 | `(schema, options?) => (input) => Exit<Type, SchemaError>` |
 | `Schema.decodeUnknownSync` | 1460 | throws `SchemaError` |
 | `Schema.SchemaError` | 949 | class, `_tag: "SchemaError"`, `issue: SchemaIssue.Issue`, `message` is the formatted issue with the path (for example `Expected string\n  at ["issues"][0]["id"]`, observed). Use `message` as the formatted parse issue. |
+| `Schema.Decoder<T>` | 838 | `interface Decoder<out T> extends Schema<T>` with `Encoded: unknown`: a `Top` (so `toJsonSchemaDocument` accepts it) that also satisfies `ConstraintDecoder<T>` (so `decodeUnknownSync` accepts it). The type of every schema parameter that is both sent to an agent and used to decode its reply (`planningCall`, `decodeWithRepair`, `Subject.respondSchema` / `applyDecisionsSchema`). |
+| `Schema.ConstraintDecoder<T>` | 621 | the constraint of `decodeUnknownSync` / `decodeUnknownExit` (`Schema.Top` does not satisfy it); a generic helper that decodes takes `Out extends Schema.ConstraintDecoder<unknown>` and returns `Out["Type"]` |
 | `Schema.isSchemaError` | 977 | type guard |
 | `Schema.Type` / `Schema.Schema.Type` | — | `typeof S["Type"]` gives the decoded type |
+| `Schema.Top` | 540 | the base interface of every schema; a parameter `schema: Schema.Top` accepts any schema, and `Out extends Schema.Top` with `Out["Type"]` gives the decoded type of the schema passed (used by `Planner.planning`, `planningCall`, `Subject.applyDecisionsSchema`) |
+| `Schema.Schema<T>` | 714 | `interface Schema<out T> extends Top { Type: T }`: "lightweight structural constraint" for a schema whose decoded type is `T` (used by `Subject.respondSchema`) |
+| `Schema.decodeUnknownResult` | 1337 | `(schema, options?) => (input, options?) => Result<Type, SchemaError>` |
+| `ParseOptions.errors` | SchemaAST.d.ts (ParseOptions) | `"first"` (default) or `"all"` |
 | `ParseOptions.onExcessProperty` | SchemaAST.d.ts:414 | `"ignore"` (default, strips) or `"error"`. Observed message: `Expected no excess property\n  at ["extra"]`. |
+| `Schema.isSchemaError` | 977 | type guard, used where a `decodeUnknownSync` throw is turned into `ConfigInvalid` / `StateFileInvalid` |
+| `Struct.mapFields` (on a `Schema.Struct`) | 2805 | `mapFields(f: (fields) => To) => Struct<To>`; with `Struct.map(Schema.optionalKey)` every field becomes optional (`PartialConfig`) |
+| `Struct.map` | Struct.d.ts:1101 | `Struct.map(lambda)`: applies a lambda to every value of a struct; `Schema.optionalKey` is such a lambda |
+| `SchemaIssue.makeFormatterStandardSchemaV1` | SchemaIssue.d.ts:752 | `({ leafHook?, checkHook? }) => (issue) => { issues: [{ path: PropertyKey[] \| PathSegment[], message }] }`. Observed: `{maxRounds:"5"}` → path `["maxRounds"]`, message `Expected number`; an excess key → `Expected no excess property`; `["a", 2]` for an array of strings → path `["ignorePaths", 1]`. Used by `firstIssue` in src/schema.ts. |
+| `SchemaIssue.defaultLeafHook` | SchemaIssue.d.ts:667 | the built-in leaf renderer, passed to the formatter above |
 | `Schema.toJsonSchemaDocument` | 10619 | `(schema, options?: ToJsonSchemaOptions) => JsonSchema.Document<"draft-2020-12">`, which returns `{ dialect, schema, definitions }`. The JSON Schema to pass to an agent is `.schema` (plus `$defs` if `definitions` is not empty). |
 | `ToJsonSchemaOptions.onExcessProperty` | 10524 | with `"error"`, every object gets `additionalProperties: false` (observed); with the default, `additionalProperties: true`. |
 

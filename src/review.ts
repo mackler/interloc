@@ -2,15 +2,21 @@
 // rounds end when a review contains no counted issue or when the user chooses to proceed.
 // The procedure is applied to three subjects: the question list, the requirements, and the plan.
 
+import { Schema } from "effect";
 import * as path from "node:path";
 import type { Planner, Reviewer } from "./agents.ts";
 import * as log from "./issueLog.ts";
-import { AcceptedWithoutChange, MissingDispositions, ProjectChanged, ReviewedFileChanged, RoundLimitStop } from "./errors.ts";
+import { AcceptedWithoutChange, AgentReplyInvalid, MissingDispositions, ProjectChanged, ReviewedFileChanged, RoundLimitStop } from "./errors.ts";
+import { repairReplyPrompt } from "./prompts.ts";
+import * as S from "./schema.ts";
+import type { Config, PlannerResponse, Review } from "./schema.ts";
 import { describeChange, type State } from "./state.ts";
-import type { Config, PlannerResponse, Review } from "./types.ts";
 import type { Ui } from "./ui.ts";
 
 export type Context = { state: State; ui: Ui; planner: Planner; reviewer: Reviewer; config: Config };
+
+/** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
+const ReviewText = Schema.fromJsonString(S.Review);
 
 /** What the review procedure is applied to. */
 export type Subject<R extends PlannerResponse = PlannerResponse> = {
@@ -28,9 +34,11 @@ export type Subject<R extends PlannerResponse = PlannerResponse> = {
   phase: number;
   reviewPrompt(round: number): string;
   respondPrompt(round: number): string;
-  respondSchema: object;
+  /** Effect schema of Claude Code's response to a review. */
+  respondSchema: Schema.Decoder<R>;
   applyDecisionsPrompt: string;
-  applyDecisionsSchema: object;
+  /** Effect schema of the output of the call that applies the user's decisions. */
+  applyDecisionsSchema: Schema.Decoder<unknown>;
   /** Called after every Claude Code call of this subject, for output that the program writes to the file. */
   afterPlannerCall?(output: unknown): void;
   /** Called after the response of a round, for amendments that require the user (the requirements). */
@@ -46,19 +54,56 @@ export async function askDecision(ctx: Context, subject: string): Promise<string
   return decision;
 }
 
+const AGENT_LABEL = { claude: "Claude Code", codex: "Codex" } as const;
+
+/**
+ * Decodes an agent's reply with its schema. A reply that does not match is kept on disk and the agent
+ * gets one repair turn in the same session or thread; a second mismatch fails with AgentReplyInvalid.
+ * Excess properties are ignored: they break no assumption of the program.
+ */
+export async function decodeWithRepair<Out extends Schema.Decoder<unknown>>(
+  state: State,
+  agent: keyof typeof AGENT_LABEL,
+  schema: Out,
+  reply: unknown,
+  repair: (prompt: string) => Promise<unknown>,
+): Promise<Out["Type"]> {
+  const decode = (value: unknown): { ok: true; value: Out["Type"] } | { ok: false; issue: string } => {
+    try {
+      return { ok: true, value: Schema.decodeUnknownSync(schema, { errors: "all" })(value) };
+    } catch (e) {
+      if (Schema.isSchemaError(e)) return { ok: false, issue: e.message };
+      throw e;
+    }
+  };
+  const keep = (value: unknown): string => state.saveInvalidReply(agent, typeof value === "string" ? value : JSON.stringify(value ?? null, null, 2));
+
+  const first = decode(reply);
+  if (first.ok) return first.value;
+  const firstFile = keep(reply);
+  const secondReply = await repair(repairReplyPrompt(first.issue));
+  const second = decode(secondReply);
+  if (second.ok) return second.value;
+  const secondFile = keep(secondReply);
+  throw new AgentReplyInvalid({ agent: AGENT_LABEL[agent], issue: second.issue, files: [firstFile, secondFile] });
+}
+
 /** A call in which Claude Code may write only under plan-review/. Halts if the project changed. */
-export async function planningCall<T>(ctx: Context, prompt: string, schema: object, progress = false): Promise<{ output: T; resultText: string; costUsd: number | null }> {
-  const before = ctx.state.projectSnapshot();
-  const result = await ctx.planner.planning<T>(prompt, schema, progress);
-  const changes = describeChange(before, ctx.state.projectSnapshot());
-  if (changes.length > 0) {
-    throw new ProjectChanged({ during: "planning", fileLabel: null, changes });
-  }
-  return result;
+export async function planningCall<Out extends Schema.Decoder<unknown>>(ctx: Context, prompt: string, schema: Out, progress = false): Promise<{ output: Out["Type"]; resultText: string; costUsd: number | null }> {
+  const call = async (text: string): Promise<{ output: unknown; resultText: string; costUsd: number | null }> => {
+    const before = ctx.state.projectSnapshot();
+    const result = await ctx.planner.planning(text, schema, progress);
+    const changes = describeChange(before, ctx.state.projectSnapshot());
+    if (changes.length > 0) throw new ProjectChanged({ during: "planning", fileLabel: null, changes });
+    return result;
+  };
+  let last = await call(prompt);
+  const output = await decodeWithRepair(ctx.state, "claude", schema, last.output, async (repairPrompt) => (last = await call(repairPrompt)).output);
+  return { output, resultText: last.resultText, costUsd: last.costUsd };
 }
 
 export async function applyDecisions(ctx: Context, subject: Subject<any>): Promise<void> {
-  const call = await planningCall<unknown>(ctx, subject.applyDecisionsPrompt, subject.applyDecisionsSchema);
+  const call = await planningCall(ctx, subject.applyDecisionsPrompt, subject.applyDecisionsSchema);
   subject.afterPlannerCall?.(call.output);
 }
 
@@ -99,16 +144,21 @@ export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subjec
       limit += Number(extra);
     }
 
-    // Codex review. Codex runs without a sandbox, so the project and the reviewed file are compared afterwards.
+    // Codex review. Codex runs without a sandbox, so the project and the reviewed file are compared
+    // after every turn, including a repair turn.
     ui.say(`\n${heading}, round ${n} (limit ${limit}): Codex review ...`);
-    const projectBefore = state.projectSnapshot();
-    const fileBefore = state.fileHash(file);
-    const review = await ctx.reviewer.review(subject.reviewPrompt(n));
-    const changes = describeChange(projectBefore, state.projectSnapshot());
-    const fileChanged = state.fileHash(file) !== fileBefore;
-    if (fileChanged) changes.push(`content changed: ${fileLabel}`);
-    if (fileChanged) throw new ReviewedFileChanged({ fileLabel, changes });
-    if (changes.length > 0) throw new ProjectChanged({ during: "review", fileLabel, changes });
+    const reviewCall = async (text: string): Promise<string> => {
+      const projectBefore = state.projectSnapshot();
+      const fileBefore = state.fileHash(file);
+      const reply = await ctx.reviewer.review(text);
+      const changes = describeChange(projectBefore, state.projectSnapshot());
+      const fileChanged = state.fileHash(file) !== fileBefore;
+      if (fileChanged) changes.push(`content changed: ${fileLabel}`);
+      if (fileChanged) throw new ReviewedFileChanged({ fileLabel, changes });
+      if (changes.length > 0) throw new ProjectChanged({ during: "review", fileLabel, changes });
+      return reply;
+    };
+    const review: Review = await decodeWithRepair(state, "codex", ReviewText, await reviewCall(subject.reviewPrompt(n)), reviewCall);
     state.writeJson(path.join(dir, `review-${n}.json`), review);
     const counted = log.countedIssues(review, config.countMinor);
     counts.push(counted);
@@ -129,8 +179,8 @@ export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subjec
 
     // Claude Code response.
     ui.say(`${heading}, round ${n}: Claude Code response ...`);
-    const call = await planningCall<R>(ctx, subject.respondPrompt(n), subject.respondSchema);
-    const response = call.output;
+    const call = await planningCall(ctx, subject.respondPrompt(n), subject.respondSchema);
+    const response: R = call.output;
     costs.push(call.costUsd);
     state.writeJson(path.join(dir, `cc-${n}.json`), response);
     subject.afterPlannerCall?.(response);

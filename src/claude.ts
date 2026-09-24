@@ -1,13 +1,15 @@
 // Claude Code through the Claude Agent SDK.
 
 import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
+import { Schema } from "effect";
 import * as path from "node:path";
 import type { Planner } from "./agents.ts";
-import { execReportSchema } from "./schemas.ts";
-import type { AgentSdk } from "./sdk.ts";
 import { ClaudeCallFailed } from "./errors.ts";
+import { agentJsonSchema } from "./jsonSchema.ts";
+import * as S from "./schema.ts";
+import type { Config, ExecOutcome, ExecReport } from "./schema.ts";
+import type { AgentSdk } from "./sdk.ts";
 import type { State } from "./state.ts";
-import type { Config, ExecOutcome, ExecReport } from "./types.ts";
 import type { Ui } from "./ui.ts";
 
 const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
@@ -15,6 +17,17 @@ const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 type Question = { question: string; options: { label: string; description: string }[] };
 type Stop = { question: string; input: string };
 type CallResult = { structured: unknown; resultText: string; costUsd: number | null; error: string | null };
+
+const decodeExecReport = Schema.decodeUnknownSync(S.ExecReport);
+/** The status report of an execution call, or null if there is none or it does not match its schema. */
+const execReport = (structured: unknown): ExecReport | null => {
+  try {
+    return decodeExecReport(structured);
+  } catch (e) {
+    if (Schema.isSchemaError(e)) return null;
+    throw e;
+  }
+};
 
 export class ClaudePlanner implements Planner {
   private readonly state: State;
@@ -37,33 +50,35 @@ export class ClaudePlanner implements Planner {
     return this.session;
   }
 
-  async planning<T>(prompt: string, schema: object, progress = false): Promise<{ output: T; resultText: string; costUsd: number | null }> {
+  async planning(prompt: string, schema: Schema.Top, progress = false): Promise<{ output: unknown; resultText: string; costUsd: number | null }> {
     const result = await this.call(prompt, progress ? "tools" : "none", {
       permissionMode: "default",
-      outputFormat: { type: "json_schema", schema: schema as Record<string, unknown> },
+      outputFormat: { type: "json_schema", schema: agentJsonSchema(schema) },
       hooks: { PreToolUse: [{ matcher: EDIT_TOOLS.join("|"), hooks: [this.restrictEdits] }] },
       canUseTool: this.planningPermission,
     });
     if (result.error !== null) throw new ClaudeCallFailed({ message: result.error });
-    if (result.structured === undefined || result.structured === null) throw new ClaudeCallFailed({ message: "Claude Code returned no structured output" });
-    return { output: result.structured as T, resultText: result.resultText, costUsd: result.costUsd };
+    return { output: result.structured, resultText: result.resultText, costUsd: result.costUsd };
   }
 
   async executing(prompt: string): Promise<ExecOutcome> {
     this.stop = null;
     const result = await this.call(prompt, "text", {
       permissionMode: this.config.execPermissionMode,
-      outputFormat: { type: "json_schema", schema: execReportSchema },
+      outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
       hooks: { PreToolUse: [{ hooks: [this.denyAfterStop] }] },
       canUseTool: this.executionPermission,
     });
-    const report = (result.structured ?? null) as ExecReport | null;
+    // A recorded stop takes precedence over any report; an invalid report is treated as a missing one.
+    // Execution calls never get a repair turn (decision Q5).
+    const report = execReport(result.structured);
     const stop = this.stop as Stop | null;
     if (stop !== null) {
       return { status: "needs_input", summary: report?.summary ?? "", question: stop.question, remainingWork: report?.remaining_work ?? "", userInput: stop.input };
     }
     if (result.error !== null || report === null) {
-      return { status: "aborted", summary: result.resultText, question: `The execution call ended without a status report: ${result.error ?? "no structured output"}`, remainingWork: "", userInput: null };
+      const reason = result.error ?? (result.structured === null || result.structured === undefined ? "no structured output" : "the status report does not match its schema");
+      return { status: "aborted", summary: result.resultText, question: `The execution call ended without a status report: ${reason}`, remainingWork: "", userInput: null };
     }
     return { status: report.status, summary: report.summary, question: report.question, remainingWork: report.remaining_work, userInput: null };
   }

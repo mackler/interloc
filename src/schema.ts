@@ -2,7 +2,7 @@
 // (`typeof X.Type`), the JSON Schema for the agents (src/jsonSchema.ts) and runtime validation.
 // Replaces src/types.ts and src/schemas.ts. API names: docs/effect-v4-api.md.
 
-import { Schema } from "effect";
+import { Schema, SchemaIssue, Struct } from "effect";
 
 export const Severity = Schema.Literals(["blocking", "major", "minor"]);
 
@@ -119,13 +119,19 @@ export const Config = Schema.Struct({
   codexModel: Schema.NullOr(Schema.String),
 });
 
+/** A config file: any subset of the keys of Config. Unknown keys are rejected where it is decoded. */
+export const PartialConfig = Config.mapFields(Struct.map(Schema.optionalKey));
+
 /** plan-review/questions.json: the task and the agreed list. */
 export const QuestionsFile = Schema.Struct({
   task: Schema.String,
   questions: Schema.Array(QuestionEntry),
 });
 
-/** One line of plan-review/usage.jsonl. The reported fields differ per agent, so they stay open. */
+/**
+ * One line of plan-review/usage.jsonl. The reported fields differ per agent and may grow with the
+ * SDKs, so a line is decoded with excess properties ignored, and only the summed fields are named.
+ */
 export const UsageEntry = Schema.Struct({
   time: Schema.String,
   agent: Schema.String,
@@ -133,10 +139,43 @@ export const UsageEntry = Schema.Struct({
   thread_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
   num_turns: Schema.optionalKey(Schema.Finite),
   total_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
-  usage: Schema.optionalKey(Schema.NullOr(Schema.Unknown)),
+  usage: Schema.optionalKey(
+    Schema.NullOr(Schema.Struct({ input_tokens: Schema.optionalKey(Schema.Finite), output_tokens: Schema.optionalKey(Schema.Finite) })),
+  ),
 });
 
-export const defaultConfig: typeof Config.Type = {
+// The types, under the names the program used before the schemas existed.
+export type Severity = typeof Severity.Type;
+export type Issue = typeof Issue.Type;
+export type Review = typeof Review.Type;
+export type Action = typeof Action.Type;
+export type Disposition = typeof Disposition.Type;
+export type SelfCorrection = typeof SelfCorrection.Type;
+export type PlannerResponse = typeof PlannerResponse.Type;
+export type PlanWriteResult = typeof PlanWriteResult.Type;
+export type QuestionEntry = typeof QuestionEntry.Type;
+export type QuestionList = typeof QuestionList.Type;
+export type QuestionListResponse = typeof QuestionListResponse.Type;
+export type InterviewTurn = typeof InterviewTurn.Type;
+export type ExecReport = typeof ExecReport.Type;
+export type ExecOutcome = typeof ExecOutcome.Type;
+export type LogEntry = typeof LogEntry.Type;
+export type Config = typeof Config.Type;
+export type QuestionsFile = typeof QuestionsFile.Type;
+export type UsageEntry = typeof UsageEntry.Type;
+
+/** The first problem of a failed decode: the field path (`a.b[0]`, or "" at the root) and the message. */
+export const firstIssue = (error: Schema.SchemaError): { path: string; message: string } => {
+  const { issues } = formatIssue(error.issue);
+  const first = issues[0];
+  // A segment is a key, or an object that carries the key (Standard Schema's PathSegment).
+  const keys = Array.from(first?.path ?? [], (segment) => (typeof segment === "object" && segment !== null ? segment.key : segment));
+  const path = keys.map((key, i) => (typeof key === "number" ? `[${key}]` : i === 0 ? String(key) : `.${String(key)}`)).join("");
+  return { path, message: first?.message ?? error.message };
+};
+const formatIssue = SchemaIssue.makeFormatterStandardSchemaV1({ leafHook: SchemaIssue.defaultLeafHook });
+
+export const defaultConfig: Config = {
   questionPhase: true,
   ignorePaths: [],
   maxRounds: 5,

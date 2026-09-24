@@ -4,10 +4,9 @@ import * as path from "node:path";
 import { questionPhase } from "./interview.ts";
 import { executePrompt, initialPlanPrompt, revisePlanPrompt } from "./prompts.ts";
 import { applyDecisions, askDecision, planningCall, reviewLoop, type Context } from "./review.ts";
-import { planWriteSchema } from "./schemas.ts";
 import { PlanNotWritten } from "./errors.ts";
+import * as S from "./schema.ts";
 import { planSubject } from "./subjects.ts";
-import type { PlanWriteResult } from "./types.ts";
 
 export async function run(ctx: Context, task: string): Promise<number> {
   const { state, ui } = ctx;
@@ -19,7 +18,7 @@ export async function run(ctx: Context, task: string): Promise<number> {
     const subject = planSubject(state, k, withRequirements);
     // Planning phase K: write or revise the plan, then review it.
     ui.say(k === 1 ? "Planning phase 1: requesting the initial plan from Claude Code ..." : `\nPlanning phase ${k}: Claude Code revises the plan from the user's input ...`);
-    const written = await planningCall<PlanWriteResult>(ctx, k === 1 ? initialPlanPrompt(task, withRequirements) : revisePlanPrompt, planWriteSchema);
+    const written = await planningCall(ctx, k === 1 ? initialPlanPrompt(task, withRequirements) : revisePlanPrompt, S.PlanWriteResult);
     state.writeJson(path.join(state.subDir(subject.dirName), "cc-0.json"), written.output);
     if (!state.planExists()) throw new PlanNotWritten({ file: "plan-review/plan.md" });
 

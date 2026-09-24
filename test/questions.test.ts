@@ -3,8 +3,11 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import { run } from "../src/run.ts";
-import type { InterviewTurn, QuestionEntry } from "../src/types.ts";
+import type * as S from "../src/schema.ts";
 import { context, finished, issue, respond, ScriptedUi, tempRepo } from "./helpers.ts";
+
+type QuestionEntry = typeof S.QuestionEntry.Type;
+type InterviewTurn = typeof S.InterviewTurn.Type;
 
 const noQuestions = { questions_for_user: [] };
 const q = (id: string): QuestionEntry => ({
