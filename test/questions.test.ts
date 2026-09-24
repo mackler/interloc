@@ -42,15 +42,15 @@ test("question list is amended in review, the interview runs, the summary is con
   });
   await runTask(layer);
 
-  const questions = JSON.parse(read(probe.state.dir, "questions.json"));
+  const questions = JSON.parse(read(probe.dir, "questions.json"));
   assert.equal(questions.task, "task");
   assert.deepEqual(questions.questions.map((x: QuestionEntry) => x.id), ["Q1", "Q2"]);
-  assert.match(read(probe.state.dir, "requirements.md"), /Q2: B because of X/);
-  assert.equal(probe.state.loadLog("questions-log.json")[0].action, "accepted");
+  assert.match(read(probe.dir, "requirements.md"), /Q2: B because of X/);
+  assert.equal((await probe.loadLog("questions-log.json"))[0].action, "accepted");
   assert.equal(probe.reviewer.phases, 3); // question review, requirements review, plan review
   assert.ok(probe.planner.prompts.some((p) => p.includes("User: B, because of X")));
   assert.match(probe.planner.prompts.at(-1) ?? "", /requirements\.md contains the user's confirmed answers/);
-  const conversation = read(probe.state.dir, "conversation.md");
+  const conversation = read(probe.dir, "conversation.md");
   assert.match(conversation, /## Agreed question list/);
   assert.match(conversation, /\*\*User:\*\* B, because of X/);
   assert.match(conversation, /### Confirmed summary/);
@@ -66,7 +66,7 @@ test("an empty agreed list offers the conversation; Enter starts planning", asyn
   });
   await runTask(layer);
   assert.match(probe.ui.asked[0], /no question is needed/);
-  assert.match(read(probe.state.dir, "requirements.md"), /No question was needed/);
+  assert.match(read(probe.dir, "requirements.md"), /No question was needed/);
   assert.equal(probe.reviewer.phases, 2); // no requirements review without a conversation
 });
 
@@ -80,7 +80,7 @@ test("an empty agreed list with a first message opens a conversation", async () 
   });
   await runTask(layer);
   assert.ok(probe.planner.prompts[1].includes("use the existing logger"));
-  assert.match(read(probe.state.dir, "requirements.md"), /existing logger/);
+  assert.match(read(probe.dir, "requirements.md"), /existing logger/);
 });
 
 test("an unconfirmed summary continues the conversation", async () => {
@@ -98,7 +98,7 @@ test("an unconfirmed summary continues the conversation", async () => {
     config: withQuestions,
   });
   await runTask(layer);
-  assert.equal(read(probe.state.dir, "requirements.md"), "Q1: B\n");
+  assert.equal(read(probe.dir, "requirements.md"), "Q1: B\n");
   assert.ok(probe.planner.prompts.some((p) => p.startsWith("The user does not confirm the summary")));
 });
 
@@ -119,9 +119,9 @@ test("a gap that Claude Code accepts produces a second interview and a revised r
     config: withQuestions,
   });
   await runTask(layer);
-  assert.equal(read(probe.state.dir, "requirements.md"), "Q1: A\nRetries: 3\n");
-  assert.match(read(probe.state.dir, "conversation.md"), /## Second interview/);
-  assert.equal(probe.state.loadLog("requirements-log.json")[0].id, "G-R1-1");
+  assert.equal(read(probe.dir, "requirements.md"), "Q1: A\nRetries: 3\n");
+  assert.match(read(probe.dir, "conversation.md"), /## Second interview/);
+  assert.equal((await probe.loadLog("requirements-log.json"))[0].id, "G-R1-1");
 });
 
 test("/done ends the interview early", async () => {
@@ -134,5 +134,5 @@ test("/done ends the interview early", async () => {
   });
   await runTask(layer);
   assert.ok(probe.planner.prompts.some((p) => p.startsWith("The user ends the interview now")));
-  assert.match(read(probe.state.dir, "requirements.md"), /default A/);
+  assert.match(read(probe.dir, "requirements.md"), /default A/);
 });

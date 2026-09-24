@@ -117,7 +117,25 @@ Observed in a probe (not a test): with `onExcessProperty: "error"`, `Literals` a
 fields, the generated object has `required` listing all keys and `additionalProperties: false`,
 which is the strict form that Codex requires. `definitions` was empty for plain Structs.
 
-## Platform
+## Platform (verified 24 Sep, stage 5.2; module paths and names as imported)
+
+Imports: `import { FileSystem, Path } from "effect"` (namespaces; the service keys are `FileSystem.FileSystem`,
+`Path.Path`); `import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"` (namespaces; the
+service class is `ChildProcessSpawner.ChildProcessSpawner`); the Node layers from
+`@effect/platform-node/NodeFileSystem`, `.../NodePath`, `.../NodeChildProcessSpawner` (package export `./*`).
+
+| Name | File:line | Notes |
+|---|---|---|
+| `ChildProcess.make("git", args)` | ChildProcess.d.ts:456 | the `(command, args, options?)` overload gives a `StandardCommand` with `_tag`, `command`, `args`, `options` (line 21) |
+| `ChildProcessSpawner.spawn(command)` | ChildProcessSpawner.d.ts:~205 | `Effect<ChildProcessHandle, PlatformError, Scope>`; the handle (line 71) has `exitCode: Effect<ExitCode>`, `stdout` / `stderr` / `all: Stream<Uint8Array>`, `kill`. **Observed**: `string` and `lines` do not fail on a non-zero exit (a plain directory gave "" and exit code 128), so the store uses `spawn` and checks `exitCode` itself. |
+| `ChildProcessSpawner.make(spawn)` | ChildProcessSpawner.d.ts:~200 | builds the whole service from a `spawn` function; used by the test's recording spawner |
+| `Stream.decodeText(stream)` / `Stream.mkString` / `Stream.make` / `Stream.empty` | Stream.d.ts:12761 / 15449 / — / 585 | bytes → text → one string |
+| `Effect.all([a, b], { concurrency: "unbounded" })` | Effect.d.ts:388 | stdout and stderr are drained together |
+| `Effect.andThen` / `Effect.flatMap` / `Effect.mapError` | — / 2525 / 5769 | |
+| `FileSystem` methods used | FileSystem.d.ts:103–285 | `exists`, `makeDirectory(path, { recursive })`, `readDirectory`, `readFileString`, `readFile`, `writeFileString(path, text, { flag: "a" })` (OpenFlag, line 321), `rename`, `stat` → `Info.size: ByteSize` (a branded bigint: compare with `0n`) |
+| `PlatformError` | PlatformError.d.ts:141 | `_tag: "PlatformError"`, `message` getter; mapped to `FileSystemError` / `GitError` in src/store.ts |
+| `Layer.provide(self, that)` / `Layer.provideMerge` / `Layer.effect(key, effect)` | Layer.d.ts:1704 / 2116 / 1131 | `platformLayer = provideMerge(NodeChildProcessSpawner.layer, mergeAll(NodeFileSystem.layer, NodePath.layer))` |
+
 
 | Name | File:line | Notes |
 |---|---|---|

@@ -5,12 +5,11 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { Layer, Schema } from "effect";
+import { Schema } from "effect";
 import { ConfigInvalid, FileSystemError, GitError, StateFileInvalid } from "./errors.ts";
 import * as S from "./schema.ts";
 import { defaultConfig, firstIssue, PartialConfig } from "./schema.ts";
 import type { Config, LogEntry, QuestionsFile } from "./schema.ts";
-import { lift, Store, type StoreError, type StoreShape } from "./services.ts";
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -24,7 +23,7 @@ const io = <T>(operation: string, file: string, action: () => T): T => {
 };
 
 /** Parses JSON of one of the program's own records; a parse error is StateFileInvalid. */
-const parseJson = (file: string, text: string): unknown => {
+export const parseJson = (file: string, text: string): unknown => {
   try {
     return JSON.parse(text);
   } catch (e) {
@@ -33,7 +32,7 @@ const parseJson = (file: string, text: string): unknown => {
 };
 
 /** Decodes parsed JSON of one of the program's own records; a mismatch is StateFileInvalid with the field path. */
-const decodeRecord = <Out extends Schema.ConstraintDecoder<unknown>>(file: string, schema: Out, json: unknown, options: { readonly onExcessProperty: "ignore" | "error" } = { onExcessProperty: "error" }): Out["Type"] => {
+export const decodeRecord = <Out extends Schema.ConstraintDecoder<unknown>>(file: string, schema: Out, json: unknown, options: { readonly onExcessProperty: "ignore" | "error" } = { onExcessProperty: "error" }): Out["Type"] => {
   try {
     return Schema.decodeUnknownSync(schema, options)(json);
   } catch (e) {
@@ -230,33 +229,6 @@ export class State {
 }
 
 export type Snapshot = { status: string[]; diffs: Map<string, string> };
-
-/** The Store service over a State: every method lifted into an Effect (transitional, plan stage 5.1). */
-export const storeOf = (state: State): StoreShape => ({
-  project: state.project,
-  dir: state.dir,
-  plan: state.plan,
-  questions: state.questions,
-  requirements: state.requirements,
-  init: (task) => lift<void, StoreError>(() => state.init(task)),
-  subDir: (name) => lift<string, StoreError>(() => state.subDir(name)),
-  writeJson: (file, value) => lift<void, StoreError>(() => state.writeJson(file, value)),
-  writeText: (file, text) => lift<void, StoreError>(() => state.writeText(file, text)),
-  loadLog: (name) => lift<LogEntry[], StoreError>(() => state.loadLog(name)),
-  saveLog: (name, log) => lift<void, StoreError>(() => state.saveLog(name, log)),
-  loadQuestions: () => lift<QuestionsFile, StoreError>(() => state.loadQuestions()),
-  recordDecision: (subject, decision) => lift<void, StoreError>(() => state.recordDecision(subject, decision)),
-  recordFeedback: (heading, round, text) => lift<void, StoreError>(() => state.recordFeedback(heading, round, text)),
-  recordUsage: (entry) => lift<void, StoreError>(() => state.recordUsage(entry)),
-  usageSummary: () => lift<string, StoreError>(() => state.usageSummary()),
-  converse: (markdown) => lift<void, StoreError>(() => state.converse(markdown)),
-  planExists: () => lift<boolean, StoreError>(() => state.planExists()),
-  fileHash: (file) => lift<string, StoreError>(() => state.fileHash(file)),
-  saveInvalidReply: (agent, content) => lift<string, StoreError>(() => state.saveInvalidReply(agent, content)),
-  projectSnapshot: () => lift<Snapshot, StoreError>(() => state.projectSnapshot()),
-});
-
-export const storeLayer = (state: State): Layer.Layer<Store> => Layer.succeed(Store, storeOf(state));
 
 /** The differences between two snapshots, one line per path. An empty result means no change. */
 export function describeChange(before: Snapshot, after: Snapshot): string[] {

@@ -15,10 +15,10 @@ test("one accepted issue, then convergence, then finished", async () => {
   });
   assert.equal(await runTask(layer), 1);
   assert.deepEqual(probe.ui.asked, []);
-  const log = probe.state.loadLog();
+  const log = await probe.loadLog();
   assert.equal(log.length, 1);
   assert.equal(log[0].action, "accepted");
-  const conversation = fs.readFileSync(path.join(probe.state.dir, "conversation.md"), "utf8");
+  const conversation = fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8");
   assert.match(conversation, /\[P1-R1-1\]\*\* accepted/);
   assert.match(conversation, /The review of plan.md has converged/);
 });
@@ -37,7 +37,7 @@ test("a rejected issue raised again produces one prompt", async () => {
   await runTask(layer);
   assert.equal(probe.ui.asked.length, 1);
   assert.match(probe.ui.asked[0], /issue B, raised again/);
-  const entries = probe.state.loadLog().filter((e) => e.id === "B");
+  const entries = (await probe.loadLog()).filter((e) => e.id === "B");
   assert.deepEqual(entries.map((e) => e.superseded === true), [true, false]);
 });
 
@@ -49,8 +49,8 @@ test("a stop with a question starts a second planning phase with a new Codex thr
   });
   assert.equal(await runTask(layer), 2);
   assert.equal(probe.reviewer.phases, 2);
-  assert.ok(fs.existsSync(path.join(probe.state.dir, "planning-2", "cc-0.json")));
-  assert.match(fs.readFileSync(path.join(probe.state.dir, "user-decisions.md"), "utf8"), /stop in execution phase 1 \(needs_input\): A or B\?\nDecision: B/);
+  assert.ok(fs.existsSync(path.join(probe.dir, "planning-2", "cc-0.json")));
+  assert.match(fs.readFileSync(path.join(probe.dir, "user-decisions.md"), "utf8"), /stop in execution phase 1 \(needs_input\): A or B\?\nDecision: B/);
   assert.deepEqual(probe.ui.asked, []);
 });
 
@@ -119,7 +119,7 @@ test("a reversal and a disputed self-correction each produce a prompt and a deci
   });
   await runTask(layer);
   assert.equal(probe.ui.asked.length, 2);
-  const log = probe.state.loadLog();
+  const log = await probe.loadLog();
   assert.ok(log.some((e) => e.id === "P1-S2-2" && e.action === "plan_error"));
   assert.equal(log.filter((e) => e.action === "decided_by_user").length, 2);
   assert.equal(log.filter((e) => e.id === "A" && e.superseded !== true).length, 1);
@@ -133,10 +133,10 @@ test("a second run archives the files of the first", async () => {
   execFileSync("git", ["-C", repo, "checkout", "-q", "a.txt"]);
   const second = mk();
   await runTask(second.layer, "second");
-  const names = fs.readdirSync(second.probe.state.dir);
+  const names = fs.readdirSync(second.probe.dir);
   assert.equal(names.filter((n) => n.startsWith("archive-")).length, 1);
   assert.ok(names.includes("config.json"));
-  assert.match(fs.readFileSync(path.join(second.probe.state.dir, "conversation.md"), "utf8"), /Task: second/);
+  assert.match(fs.readFileSync(path.join(second.probe.dir, "conversation.md"), "utf8"), /Task: second/);
 });
 
 test("0 at the round limit stops with RoundLimitStop", async () => {

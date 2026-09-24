@@ -12,7 +12,7 @@ import { describe, UserStopped } from "../src/errors.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
 import { RunConfig, type Services } from "../src/services.ts";
-import { State, storeLayer } from "../src/state.ts";
+import { makeStore, platformLayer, storeLayer } from "../src/store.ts";
 import type { Ui } from "../src/ui.ts";
 import { uiLayer } from "../src/ui.ts";
 
@@ -20,7 +20,12 @@ type Config = typeof S.Config.Type;
 type ExecOutcome = typeof S.ExecOutcome.Type;
 type PlannerResponse = typeof S.PlannerResponse.Type;
 type Review = typeof S.Review.Type;
+type LogEntry = typeof S.LogEntry.Type;
 const { defaultConfig } = S;
+
+/** The paths a scripted agent writes to. */
+export type Paths = { readonly project: string; readonly plan: string };
+export const pathsOf = (repo: string): Paths => ({ project: path.resolve(repo), plan: path.join(repo, "plan-review", "plan.md") });
 
 export function tempRepo(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pr-test-"));
@@ -60,10 +65,10 @@ export class ScriptedPlanner implements Planner {
   readonly prompts: string[] = [];
   /** The Effect schema of each planning call, in order. */
   readonly schemas: Schema.Top[] = [];
-  private readonly state: State;
+  private readonly state: Paths;
   private readonly steps: PlanningStep[];
   private readonly execs: ExecOutcome[];
-  constructor(state: State, steps: PlanningStep[], execs: ExecOutcome[]) {
+  constructor(state: Paths, steps: PlanningStep[], execs: ExecOutcome[]) {
     this.state = state;
     this.steps = [...steps];
     this.execs = [...execs];
@@ -100,9 +105,9 @@ export class ScriptedReviewer implements Reviewer {
   readonly prompts: string[] = [];
   /** The phase number at each review call, so that a test can see that two calls shared a thread. */
   readonly callPhases: number[] = [];
-  private readonly state: State;
+  private readonly state: Paths;
   private readonly reviews: ReviewStep[];
-  constructor(state: State, reviews: ReviewStep[]) {
+  constructor(state: Paths, reviews: ReviewStep[]) {
     this.state = state;
     this.reviews = [...reviews];
   }
@@ -133,19 +138,31 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
 export type TestOptions = { answers?: string[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; config?: Partial<Config> };
-/** What a test inspects after a run: the scripted implementations and the state on disk. */
-export type Probe = { state: State; ui: ScriptedUi; planner: ScriptedPlanner; reviewer: ScriptedReviewer; config: Config };
+/** What a test inspects after a run: the scripted implementations, the paths, and a reader of the logs on disk. */
+export type Probe = {
+  dir: string;
+  plan: string;
+  requirements: string;
+  loadLog: (name?: string) => Promise<LogEntry[]>;
+  ui: ScriptedUi;
+  planner: ScriptedPlanner;
+  reviewer: ScriptedReviewer;
+  config: Config;
+};
 
 /** The layer of the five services with scripted agents and Ui over a temporary repository. */
 export function testLayer(repo: string, options: TestOptions = {}): { layer: Layer.Layer<Services>; probe: Probe } {
-  const state = new State(repo);
+  const paths = pathsOf(repo);
   const config: Config = { ...defaultConfig, questionPhase: false, ...options.config };
-  state.ignorePaths = config.ignorePaths;
   const ui = new ScriptedUi(options.answers ?? []);
-  const planner = new ScriptedPlanner(state, options.steps ?? [], options.execs ?? []);
-  const reviewer = new ScriptedReviewer(state, options.reviews ?? []);
-  const layer = Layer.mergeAll(storeLayer(state), uiLayer(ui), plannerLayer(planner), reviewerLayer(reviewer), Layer.succeed(RunConfig, config));
-  return { layer, probe: { state, ui, planner, reviewer, config } };
+  const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? []);
+  const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
+  const store = Layer.provide(storeLayer(repo, config.ignorePaths), platformLayer);
+  const layer = Layer.mergeAll(store, uiLayer(ui), plannerLayer(planner), reviewerLayer(reviewer), Layer.succeed(RunConfig, config));
+  const dir = path.join(paths.project, "plan-review");
+  const loadLog = (name?: string): Promise<LogEntry[]> =>
+    Effect.runPromise(makeStore(repo, config.ignorePaths).pipe(Effect.flatMap((s) => s.loadLog(name)), Effect.provide(platformLayer)));
+  return { layer, probe: { dir, plan: paths.plan, requirements: path.join(dir, "requirements.md"), loadLog, ui, planner, reviewer, config } };
 }
 
 /** Runs the procedure against a layer and returns the number of execution phases. */

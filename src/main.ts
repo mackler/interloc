@@ -9,7 +9,8 @@ import { haltMessage } from "./errors.ts";
 import { run } from "./run.ts";
 import { liveSdk } from "./sdkLive.ts";
 import { RunConfig } from "./services.ts";
-import { State, storeLayer } from "./state.ts";
+import { State } from "./state.ts";
+import { platformLayer, storeLayer } from "./store.ts";
 import { TerminalUi, uiLayer } from "./ui.ts";
 
 const task = process.argv[2];
@@ -26,7 +27,8 @@ let planner: ClaudePlanner | undefined;
 try {
   const config = state.loadConfig();
   planner = new ClaudePlanner(state, ui, config, liveSdk);
-  const live = Layer.mergeAll(storeLayer(state), uiLayer(ui), plannerLayer(planner), reviewerLayer(new CodexReviewer(state, config, liveSdk)), Layer.succeed(RunConfig, config));
+  const store = Layer.provide(storeLayer(state.project, config.ignorePaths), platformLayer);
+  const live = Layer.mergeAll(store, uiLayer(ui), plannerLayer(planner), reviewerLayer(new CodexReviewer(state, config, liveSdk)), Layer.succeed(RunConfig, config));
   // A typed failure rejects with the error object itself, which haltMessage recognises.
   const phases = await Effect.runPromise(run(task).pipe(Effect.provide(live)));
   ui.say(`\nClaude Code reports that the task is finished after ${phases} execution phase(s).`);
