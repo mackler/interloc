@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": [
+        "finished",
+        "needs_input",
+        "blocked"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "question": {
+      "type": "string"
+    },
+    "remaining_work": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "status",
+    "summary",
+    "question",
+    "remaining_work"
+  ],
+  "additionalProperties": false
+}

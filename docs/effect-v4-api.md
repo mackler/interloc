@@ -126,3 +126,25 @@ which is the strict form that Codex requires. `definitions` was empty for plain 
 | `TurnOptions.signal?: AbortSignal` | @openai/codex-sdk/dist/index.d.ts:173 | aborts `thread.run` |
 | `TurnOptions.outputSchema?: unknown` | index.d.ts:171 | JSON Schema per turn |
 | `ThreadOptions.sandboxMode`, `approvalPolicy`, `workingDirectory`, `model` | index.d.ts:246–259 | unchanged from src/codex.ts |
+
+## Schema acceptance proof (plan step 0.4, run 24 Sep 2026)
+
+Run in the development container with `node prototypes/proto-schema.ts /workspace <out>`; the
+terminal output is kept as `prototypes/proto-schema-output/run.txt`.
+
+**Result: all 28 calls accepted, 0 not accepted, and every reply decoded** with the Effect schema
+(7 schemas × {raw, strict} × {Codex `thread.run` with `outputSchema`, Agent SDK `query` with
+`outputFormat: { type: "json_schema" }`}). Times per call: Codex 8–17 s, Agent SDK 4–13 s; the whole
+run took about 4 minutes.
+
+So Codex's strict structured output and the Agent SDK both accept what
+`Schema.toJsonSchemaDocument(s, { onExcessProperty: "error" }).schema` generates. The chosen variant
+is **raw**, recorded in `prototypes/proto-schema-output/CHOSEN`.
+
+The two variants were byte-identical for all seven schemas (checked with a JSON comparison), because
+`onExcessProperty: "error"` already yields `additionalProperties: false` and a `required` list of every
+key, and none of the seven produced a `$ref`/`$defs`. The strict transform therefore stays in the
+program as a tested function and as the fallback if a future Effect version generates a looser schema.
+
+No JSON Schema keyword of the generated documents was rejected. `definitions` was empty for all seven,
+so nothing had to be inlined.

@@ -1,0 +1,15 @@
+{
+  "type": "object",
+  "properties": {
+    "questions_for_user": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "questions_for_user"
+  ],
+  "additionalProperties": false
+}
