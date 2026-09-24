@@ -1,7 +1,9 @@
 // Terminal input and output. The interface permits a scripted implementation in tests.
 
+import { Effect, Layer } from "effect";
 import * as readline from "node:readline/promises";
 import { UserStopped } from "./errors.ts";
+import { liftPromise, Ui as UiService } from "./services.ts";
 
 export interface Ui {
   say(text: string): void;
@@ -58,3 +60,11 @@ export class TerminalUi implements Ui {
     return message;
   }
 }
+
+/** The Ui service over a Ui implementation (transitional, plan stage 5.1). */
+export const uiLayer = (ui: Ui): Layer.Layer<UiService> =>
+  Layer.succeed(UiService, {
+    say: (text) => Effect.sync(() => ui.say(text)),
+    ask: (prompt) => liftPromise<string, UserStopped>(() => ui.ask(prompt)),
+    askMessage: (prompt) => liftPromise<string, UserStopped>(() => ui.askMessage(prompt)),
+  });

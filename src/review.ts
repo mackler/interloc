@@ -2,18 +2,15 @@
 // rounds end when a review contains no counted issue or when the user chooses to proceed.
 // The procedure is applied to three subjects: the question list, the requirements, and the plan.
 
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import * as path from "node:path";
-import type { Planner, Reviewer } from "./agents.ts";
 import * as log from "./issueLog.ts";
-import { AcceptedWithoutChange, AgentReplyInvalid, MissingDispositions, ProjectChanged, ReviewedFileChanged, RoundLimitStop } from "./errors.ts";
+import { AcceptedWithoutChange, AgentReplyInvalid, MissingDispositions, ProjectChanged, ReviewedFileChanged, RoundLimitStop, type RunError } from "./errors.ts";
 import { repairReplyPrompt } from "./prompts.ts";
 import * as S from "./schema.ts";
-import type { Config, PlannerResponse, Review } from "./schema.ts";
-import { describeChange, type State } from "./state.ts";
-import type { Ui } from "./ui.ts";
-
-export type Context = { state: State; ui: Ui; planner: Planner; reviewer: Reviewer; config: Config };
+import type { PlannerResponse, Review } from "./schema.ts";
+import { Planner, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
+import { describeChange } from "./state.ts";
 
 /** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
 const ReviewText = Schema.fromJsonString(S.Review);
@@ -40,19 +37,22 @@ export type Subject<R extends PlannerResponse = PlannerResponse> = {
   /** Effect schema of the output of the call that applies the user's decisions. */
   applyDecisionsSchema: Schema.Decoder<unknown>;
   /** Called after every Claude Code call of this subject, for output that the program writes to the file. */
-  afterPlannerCall?(output: unknown): void;
+  afterPlannerCall?(output: unknown): Effect.Effect<void, StoreError>;
   /** Called after the response of a round, for amendments that require the user (the requirements). */
-  amend?(ctx: Context, review: Review, response: R, round: number): Promise<void>;
+  amend?(review: Review, response: R, round: number): Effect.Effect<void, RunError, Services>;
   /** Text of the "p" choice at the round limit. */
   proceedLabel: string;
 };
 
 /** Reads one decision. An empty answer records nothing and returns "". */
-export async function askDecision(ctx: Context, subject: string): Promise<string> {
-  const decision = await ctx.ui.ask(`Decision on: ${subject} (Enter = none, q = quit) > `);
-  if (decision !== "") ctx.state.recordDecision(subject, decision);
-  return decision;
-}
+export const askDecision = (subject: string): Effect.Effect<string, RunError, Ui | Store> =>
+  Effect.gen(function* () {
+    const ui = yield* Ui;
+    const store = yield* Store;
+    const decision = yield* ui.ask(`Decision on: ${subject} (Enter = none, q = quit) > `);
+    if (decision !== "") yield* store.recordDecision(subject, decision);
+    return decision;
+  });
 
 const AGENT_LABEL = { claude: "Claude Code", codex: "Codex" } as const;
 
@@ -61,51 +61,61 @@ const AGENT_LABEL = { claude: "Claude Code", codex: "Codex" } as const;
  * gets one repair turn in the same session or thread; a second mismatch fails with AgentReplyInvalid.
  * Excess properties are ignored: they break no assumption of the program.
  */
-export async function decodeWithRepair<Out extends Schema.Decoder<unknown>>(
-  state: State,
+export const decodeWithRepair = <Out extends Schema.Decoder<unknown>, E, R>(
   agent: keyof typeof AGENT_LABEL,
   schema: Out,
   reply: unknown,
-  repair: (prompt: string) => Promise<unknown>,
-): Promise<Out["Type"]> {
-  const decode = (value: unknown): { ok: true; value: Out["Type"] } | { ok: false; issue: string } => {
-    try {
-      return { ok: true, value: Schema.decodeUnknownSync(schema, { errors: "all" })(value) };
-    } catch (e) {
-      if (Schema.isSchemaError(e)) return { ok: false, issue: e.message };
-      throw e;
-    }
-  };
-  const keep = (value: unknown): string => state.saveInvalidReply(agent, typeof value === "string" ? value : JSON.stringify(value ?? null, null, 2));
+  repair: (prompt: string) => Effect.Effect<unknown, E, R>,
+): Effect.Effect<Out["Type"], E | AgentReplyInvalid | StoreError, R | Store> =>
+  Effect.gen(function* () {
+    const store = yield* Store;
+    const decode = (value: unknown): { ok: true; value: Out["Type"] } | { ok: false; issue: string } => {
+      try {
+        return { ok: true, value: Schema.decodeUnknownSync(schema, { errors: "all" })(value) };
+      } catch (e) {
+        if (Schema.isSchemaError(e)) return { ok: false, issue: e.message };
+        throw e;
+      }
+    };
+    const keep = (value: unknown): Effect.Effect<string, StoreError> =>
+      store.saveInvalidReply(agent, typeof value === "string" ? value : JSON.stringify(value ?? null, null, 2));
 
-  const first = decode(reply);
-  if (first.ok) return first.value;
-  const firstFile = keep(reply);
-  const secondReply = await repair(repairReplyPrompt(first.issue));
-  const second = decode(secondReply);
-  if (second.ok) return second.value;
-  const secondFile = keep(secondReply);
-  throw new AgentReplyInvalid({ agent: AGENT_LABEL[agent], issue: second.issue, files: [firstFile, secondFile] });
-}
+    const first = decode(reply);
+    if (first.ok) return first.value;
+    const firstFile = yield* keep(reply);
+    const secondReply = yield* repair(repairReplyPrompt(first.issue));
+    const second = decode(secondReply);
+    if (second.ok) return second.value;
+    const secondFile = yield* keep(secondReply);
+    return yield* Effect.fail(new AgentReplyInvalid({ agent: AGENT_LABEL[agent], issue: second.issue, files: [firstFile, secondFile] }));
+  });
+
+export type PlanningCall<Out> = { output: Out; resultText: string; costUsd: number | null };
 
 /** A call in which Claude Code may write only under plan-review/. Halts if the project changed. */
-export async function planningCall<Out extends Schema.Decoder<unknown>>(ctx: Context, prompt: string, schema: Out, progress = false): Promise<{ output: Out["Type"]; resultText: string; costUsd: number | null }> {
-  const call = async (text: string): Promise<{ output: unknown; resultText: string; costUsd: number | null }> => {
-    const before = ctx.state.projectSnapshot();
-    const result = await ctx.planner.planning(text, schema, progress);
-    const changes = describeChange(before, ctx.state.projectSnapshot());
-    if (changes.length > 0) throw new ProjectChanged({ during: "planning", fileLabel: null, changes });
-    return result;
-  };
-  let last = await call(prompt);
-  const output = await decodeWithRepair(ctx.state, "claude", schema, last.output, async (repairPrompt) => (last = await call(repairPrompt)).output);
-  return { output, resultText: last.resultText, costUsd: last.costUsd };
-}
+export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, progress = false): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner> =>
+  Effect.gen(function* () {
+    const store = yield* Store;
+    const planner = yield* Planner;
+    const call = (text: string) =>
+      Effect.gen(function* () {
+        const before = yield* store.projectSnapshot();
+        const result = yield* planner.planning(text, schema, progress);
+        const changes = describeChange(before, yield* store.projectSnapshot());
+        if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "planning", fileLabel: null, changes }));
+        return result;
+      });
+    let last = yield* call(prompt);
+    const repair = (text: string) => call(text).pipe(Effect.map((result) => (last = result).output));
+    const output = yield* decodeWithRepair("claude", schema, last.output, repair);
+    return { output, resultText: last.resultText, costUsd: last.costUsd };
+  });
 
-export async function applyDecisions(ctx: Context, subject: Subject<any>): Promise<void> {
-  const call = await planningCall(ctx, subject.applyDecisionsPrompt, subject.applyDecisionsSchema);
-  subject.afterPlannerCall?.(call.output);
-}
+export const applyDecisions = (subject: Subject<any>): Effect.Effect<void, RunError, Services> =>
+  Effect.gen(function* () {
+    const call = yield* planningCall(subject.applyDecisionsPrompt, subject.applyDecisionsSchema);
+    if (subject.afterPlannerCall) yield* subject.afterPlannerCall(call.output);
+  });
 
 function renderRound(heading: string, round: number, review: Review, response: PlannerResponse): string {
   const issues = review.issues.map((i) => `- **[${i.id}]** (${i.severity}, ${i.location}) ${i.problem}\n  Evidence: ${i.evidence}`);
@@ -119,163 +129,169 @@ function renderRound(heading: string, round: number, review: Review, response: P
   return `## ${heading}, round ${round}\n\n### Codex\n\n${issues.join("\n")}\n\n### Claude Code\n\n${[...answers, ...self, ...feedback].join("\n")}\n\n`;
 }
 
-export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subject: Subject<R>): Promise<"converged" | "proceed"> {
-  const { state, ui, config } = ctx;
-  const { heading, fileLabel, file, logName, phase } = subject;
-  const dir = state.subDir(subject.dirName);
-  const hashes: string[] = [state.fileHash(file)];
-  const counts: number[] = [];
-  const costs: (number | null)[] = [];
-  let idle = 0;
-  let limit = config.maxRounds;
-  ctx.reviewer.newPhase();
+export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effect.Effect<"converged" | "proceed", RunError, Services> =>
+  Effect.gen(function* () {
+    const store = yield* Store;
+    const ui = yield* Ui;
+    const config = yield* RunConfig;
+    const reviewer = yield* Reviewer;
+    const { heading, fileLabel, file, logName, phase } = subject;
+    const dir = yield* store.subDir(subject.dirName);
+    const hashes: string[] = [yield* store.fileHash(file)];
+    const counts: number[] = [];
+    const costs: (number | null)[] = [];
+    let idle = 0;
+    let limit = config.maxRounds;
+    yield* reviewer.newPhase;
 
-  for (let n = 1; ; n++) {
-    // Pause at the round limit (usage and time).
-    if (n > limit) {
-      ui.say(`\nCounted issues and reported Claude Code usage per round of ${heading}:`);
-      counts.forEach((c, i) => ui.say(`  round ${i + 1}: counted issues = ${c}, total_cost_usd = ${costs[i] ?? "not reported"}`));
-      const extra = await ui.ask(`${limit} rounds completed without convergence. Number = additional rounds; p = ${subject.proceedLabel}; 0 = stop > `);
-      if (extra === "p") {
-        state.converse(`**User decision:** ${subject.proceedLabel} without convergence after round ${n - 1} of ${heading}.\n\n`);
-        return "proceed";
+    for (let n = 1; ; n++) {
+      // Pause at the round limit (usage and time).
+      if (n > limit) {
+        yield* ui.say(`\nCounted issues and reported Claude Code usage per round of ${heading}:`);
+        for (const [i, c] of counts.entries()) yield* ui.say(`  round ${i + 1}: counted issues = ${c}, total_cost_usd = ${costs[i] ?? "not reported"}`);
+        const extra = yield* ui.ask(`${limit} rounds completed without convergence. Number = additional rounds; p = ${subject.proceedLabel}; 0 = stop > `);
+        if (extra === "p") {
+          yield* store.converse(`**User decision:** ${subject.proceedLabel} without convergence after round ${n - 1} of ${heading}.\n\n`);
+          return "proceed" as const;
+        }
+        if (!/^[1-9][0-9]*$/.test(extra)) return yield* Effect.fail(new RoundLimitStop({ heading }));
+        limit += Number(extra);
       }
-      if (!/^[1-9][0-9]*$/.test(extra)) throw new RoundLimitStop({ heading });
-      limit += Number(extra);
-    }
 
-    // Codex review. Codex runs without a sandbox, so the project and the reviewed file are compared
-    // after every turn, including a repair turn.
-    ui.say(`\n${heading}, round ${n} (limit ${limit}): Codex review ...`);
-    const reviewCall = async (text: string): Promise<string> => {
-      const projectBefore = state.projectSnapshot();
-      const fileBefore = state.fileHash(file);
-      const reply = await ctx.reviewer.review(text);
-      const changes = describeChange(projectBefore, state.projectSnapshot());
-      const fileChanged = state.fileHash(file) !== fileBefore;
-      if (fileChanged) changes.push(`content changed: ${fileLabel}`);
-      if (fileChanged) throw new ReviewedFileChanged({ fileLabel, changes });
-      if (changes.length > 0) throw new ProjectChanged({ during: "review", fileLabel, changes });
-      return reply;
-    };
-    const review: Review = await decodeWithRepair(state, "codex", ReviewText, await reviewCall(subject.reviewPrompt(n)), reviewCall);
-    state.writeJson(path.join(dir, `review-${n}.json`), review);
-    const counted = log.countedIssues(review, config.countMinor);
-    counts.push(counted);
-    ui.say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`);
-    if (counted === 0) {
-      state.converse(`## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n`);
-      return "converged";
-    }
+      // Codex review. Codex runs without a sandbox, so the project and the reviewed file are compared
+      // after every turn, including a repair turn.
+      yield* ui.say(`\n${heading}, round ${n} (limit ${limit}): Codex review ...`);
+      const reviewCall = (text: string) =>
+        Effect.gen(function* () {
+          const projectBefore = yield* store.projectSnapshot();
+          const fileBefore = yield* store.fileHash(file);
+          const reply = yield* reviewer.review(text);
+          const changes = describeChange(projectBefore, yield* store.projectSnapshot());
+          const fileChanged = (yield* store.fileHash(file)) !== fileBefore;
+          if (fileChanged) changes.push(`content changed: ${fileLabel}`);
+          if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes }));
+          if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "review", fileLabel, changes }));
+          return reply;
+        });
+      const review: Review = yield* decodeWithRepair("codex", ReviewText, yield* reviewCall(subject.reviewPrompt(n)), reviewCall);
+      yield* store.writeJson(path.join(dir, `review-${n}.json`), review);
+      const counted = log.countedIssues(review, config.countMinor);
+      counts.push(counted);
+      yield* ui.say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`);
+      if (counted === 0) {
+        yield* store.converse(`## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n`);
+        return "converged" as const;
+      }
 
-    // Pause: Codex reused the id of an issue that was not accepted in full.
-    let issueLog = state.loadLog(logName);
-    for (const id of log.reraisedIds(issueLog, review)) {
-      ui.say(`\nCodex has raised again an issue that Claude Code did not accept in full:`);
-      ui.say(JSON.stringify(issueLog.filter((e) => e.id === id), null, 2));
-      ui.say(JSON.stringify(review.issues.find((i) => i.id === id), null, 2));
-      await askDecision(ctx, `issue ${id}, raised again after Claude Code did not accept it in full`);
-    }
+      // Pause: Codex reused the id of an issue that was not accepted in full.
+      let issueLog = yield* store.loadLog(logName);
+      for (const id of log.reraisedIds(issueLog, review)) {
+        yield* ui.say(`\nCodex has raised again an issue that Claude Code did not accept in full:`);
+        yield* ui.say(JSON.stringify(issueLog.filter((e) => e.id === id), null, 2));
+        yield* ui.say(JSON.stringify(review.issues.find((i) => i.id === id), null, 2));
+        yield* askDecision(`issue ${id}, raised again after Claude Code did not accept it in full`);
+      }
 
-    // Claude Code response.
-    ui.say(`${heading}, round ${n}: Claude Code response ...`);
-    const call = await planningCall(ctx, subject.respondPrompt(n), subject.respondSchema);
-    const response: R = call.output;
-    costs.push(call.costUsd);
-    state.writeJson(path.join(dir, `cc-${n}.json`), response);
-    subject.afterPlannerCall?.(response);
-    const missing = log.missingDispositions(review, response);
-    if (missing.length > 0) throw new MissingDispositions({ ids: missing });
-    state.converse(renderRound(heading, n, review, response));
-    if (response.reviewer_feedback !== "") state.recordFeedback(heading, n, response.reviewer_feedback);
+      // Claude Code response.
+      yield* ui.say(`${heading}, round ${n}: Claude Code response ...`);
+      const call = yield* planningCall(subject.respondPrompt(n), subject.respondSchema);
+      const response: R = call.output;
+      costs.push(call.costUsd);
+      yield* store.writeJson(path.join(dir, `cc-${n}.json`), response);
+      if (subject.afterPlannerCall) yield* subject.afterPlannerCall(response);
+      const missing = log.missingDispositions(review, response);
+      if (missing.length > 0) return yield* Effect.fail(new MissingDispositions({ ids: missing }));
+      yield* store.converse(renderRound(heading, n, review, response));
+      if (response.reviewer_feedback !== "") yield* store.recordFeedback(heading, n, response.reviewer_feedback);
 
-    // Pauses: items that require a decision of the user.
-    let decided = false;
-    const userDecisions: [string, string][] = [];
-    const decide = async (what: string, id: string | null): Promise<void> => {
-      const decision = await askDecision(ctx, what);
-      if (decision === "") return;
-      decided = true;
-      if (id !== null) userDecisions.push([id, decision]);
-    };
-    const show = (value: unknown): void => ui.say(JSON.stringify(value, null, 2));
+      // Pauses: items that require a decision of the user.
+      let decided = false;
+      const userDecisions: [string, string][] = [];
+      const decide = (what: string, id: string | null) =>
+        Effect.gen(function* () {
+          const decision = yield* askDecision(what);
+          if (decision === "") return;
+          decided = true;
+          if (id !== null) userDecisions.push([id, decision]);
+        });
+      const show = (value: unknown): Effect.Effect<void> => ui.say(JSON.stringify(value, null, 2));
 
-    for (const id of log.secondClarifications(issueLog, response)) {
-      ui.say(`\nClaude Code requests clarification of issue ${id} a second time:`);
-      show(issueLog.filter((e) => e.id === id));
-      show(response.dispositions.find((d) => d.id === id));
-      await decide(`issue ${id}, for which one clarification exchange did not produce a disposition`, id);
-    }
-    for (const sc of response.self_corrections.filter((s) => s.new_action === "rejected")) {
-      ui.say(`\nClaude Code now considers wrong the correction that it made for issue ${sc.id}: ${sc.explanation}`);
-      show(issueLog.filter((e) => e.id === sc.id));
-      await decide(`the accepted correction for ${sc.id}, which Claude Code now considers wrong`, sc.id);
-    }
-    for (const [idNew, idOld] of log.reversals(response)) {
-      ui.say(`\nIssue ${idNew} requests the reversal of the correction made for issue ${idOld}:`);
-      show(issueLog.filter((e) => e.id === idOld));
-      show(review.issues.find((i) => i.id === idNew));
-      show(response.dispositions.find((d) => d.id === idNew));
-      await decide(`issue ${idNew} against the accepted correction for ${idOld}`, idNew);
-    }
-    for (const [idNew, idOld] of log.repeatedUnderNewId(issueLog, response)) {
-      ui.say(`\nIssue ${idNew} repeats issue ${idOld}, which Claude Code did not accept in full, under a new id:`);
-      show(issueLog.filter((e) => e.id === idOld));
-      show(review.issues.find((i) => i.id === idNew));
-      await decide(`issue ${idNew}, a repetition of issue ${idOld}`, idNew);
-    }
-    for (const question of response.questions_for_user) {
-      ui.say("");
-      await decide(`question from Claude Code: ${question.replace(/\s+/g, " ")}`, null);
-    }
-    if (decided) await applyDecisions(ctx, subject);
+      for (const id of log.secondClarifications(issueLog, response)) {
+        yield* ui.say(`\nClaude Code requests clarification of issue ${id} a second time:`);
+        yield* show(issueLog.filter((e) => e.id === id));
+        yield* show(response.dispositions.find((d) => d.id === id));
+        yield* decide(`issue ${id}, for which one clarification exchange did not produce a disposition`, id);
+      }
+      for (const sc of response.self_corrections.filter((s) => s.new_action === "rejected")) {
+        yield* ui.say(`\nClaude Code now considers wrong the correction that it made for issue ${sc.id}: ${sc.explanation}`);
+        yield* show(issueLog.filter((e) => e.id === sc.id));
+        yield* decide(`the accepted correction for ${sc.id}, which Claude Code now considers wrong`, sc.id);
+      }
+      for (const [idNew, idOld] of log.reversals(response)) {
+        yield* ui.say(`\nIssue ${idNew} requests the reversal of the correction made for issue ${idOld}:`);
+        yield* show(issueLog.filter((e) => e.id === idOld));
+        yield* show(review.issues.find((i) => i.id === idNew));
+        yield* show(response.dispositions.find((d) => d.id === idNew));
+        yield* decide(`issue ${idNew} against the accepted correction for ${idOld}`, idNew);
+      }
+      for (const [idNew, idOld] of log.repeatedUnderNewId(issueLog, response)) {
+        yield* ui.say(`\nIssue ${idNew} repeats issue ${idOld}, which Claude Code did not accept in full, under a new id:`);
+        yield* show(issueLog.filter((e) => e.id === idOld));
+        yield* show(review.issues.find((i) => i.id === idNew));
+        yield* decide(`issue ${idNew}, a repetition of issue ${idOld}`, idNew);
+      }
+      for (const question of response.questions_for_user) {
+        yield* ui.say("");
+        yield* decide(`question from Claude Code: ${question.replace(/\s+/g, " ")}`, null);
+      }
+      if (decided) yield* applyDecisions(subject);
 
-    // Amendments that require the user.
-    if (subject.amend) await subject.amend(ctx, review, response, n);
+      // Amendments that require the user.
+      if (subject.amend) yield* subject.amend(review, response, n);
 
-    // Issue log update. Decisions of the user on single issues replace the disposition of the round.
-    issueLog = log.appendRound(issueLog, review, response, phase, n);
-    for (const [id, decision] of userDecisions) issueLog = log.appendUserDecision(issueLog, id, decision, phase, n);
-    state.saveLog(logName, issueLog);
+      // Issue log update. Decisions of the user on single issues replace the disposition of the round.
+      issueLog = log.appendRound(issueLog, review, response, phase, n);
+      for (const [id, decision] of userDecisions) issueLog = log.appendUserDecision(issueLog, id, decision, phase, n);
+      yield* store.saveLog(logName, issueLog);
 
-    // Progress checks.
-    const accepted = log.acceptedCount(response);
-    const selfCount = response.self_corrections.length;
-    const last = hashes[hashes.length - 1];
-    let hash = state.fileHash(file);
+      // Progress checks.
+      const accepted = log.acceptedCount(response);
+      const selfCount = response.self_corrections.length;
+      const last = hashes[hashes.length - 1];
+      let hash = yield* store.fileHash(file);
 
-    if (accepted > 0 && hash === last) throw new AcceptedWithoutChange({ fileLabel, accepted });
+      if (accepted > 0 && hash === last) return yield* Effect.fail(new AcceptedWithoutChange({ fileLabel, accepted }));
 
-    if (accepted === 0 && selfCount === 0 && !decided && hash !== last) {
-      ui.say(`\n${fileLabel} changed in round ${n} without an accepted issue, a self-correction, or a user decision.`);
-      ui.say(`The free-text response of Claude Code: ${call.resultText || "none"}`);
-      if ((await askDecision(ctx, `the unexplained change to ${fileLabel} in ${heading}, round ${n}`)) !== "") {
-        await applyDecisions(ctx, subject);
-        hash = state.fileHash(file);
+      if (accepted === 0 && selfCount === 0 && !decided && hash !== last) {
+        yield* ui.say(`\n${fileLabel} changed in round ${n} without an accepted issue, a self-correction, or a user decision.`);
+        yield* ui.say(`The free-text response of Claude Code: ${call.resultText || "none"}`);
+        if ((yield* askDecision(`the unexplained change to ${fileLabel} in ${heading}, round ${n}`)) !== "") {
+          yield* applyDecisions(subject);
+          hash = yield* store.fileHash(file);
+        }
+      }
+
+      const earlier = hash !== last ? hashes.indexOf(hash) : -1;
+      if (earlier >= 0) {
+        yield* ui.say(`\n${fileLabel} after round ${n} is identical to ${fileLabel} after round ${earlier} (round 0 is the state at the start).`);
+        if ((yield* askDecision(`which of the two alternating versions of ${fileLabel} is correct`)) !== "") {
+          yield* applyDecisions(subject);
+          hash = yield* store.fileHash(file);
+        }
+      }
+      hashes.push(hash);
+
+      idle = accepted === 0 && selfCount === 0 ? idle + 1 : 0;
+      if (idle >= config.maxIdleRounds) {
+        yield* ui.say(`\nClaude Code accepted no issue in ${idle} consecutive rounds. Issues of round ${n} without amendment:`);
+        for (const e of issueLog.filter((x) => x.phase === phase && x.round === n && x.source === "review" && x.action !== "accepted")) {
+          yield* ui.say(`  - [${e.id}] (${e.action}) ${e.problem}\n      rationale: ${e.rationale}`);
+        }
+        if ((yield* askDecision(`the issues of the last ${idle} rounds that produced no amendment`)) !== "") {
+          yield* applyDecisions(subject);
+          hashes.push(yield* store.fileHash(file));
+        }
+        idle = 0;
       }
     }
-
-    const earlier = hash !== last ? hashes.indexOf(hash) : -1;
-    if (earlier >= 0) {
-      ui.say(`\n${fileLabel} after round ${n} is identical to ${fileLabel} after round ${earlier} (round 0 is the state at the start).`);
-      if ((await askDecision(ctx, `which of the two alternating versions of ${fileLabel} is correct`)) !== "") {
-        await applyDecisions(ctx, subject);
-        hash = state.fileHash(file);
-      }
-    }
-    hashes.push(hash);
-
-    idle = accepted === 0 && selfCount === 0 ? idle + 1 : 0;
-    if (idle >= config.maxIdleRounds) {
-      ui.say(`\nClaude Code accepted no issue in ${idle} consecutive rounds. Issues of round ${n} without amendment:`);
-      for (const e of issueLog.filter((x) => x.phase === phase && x.round === n && x.source === "review" && x.action !== "accepted")) {
-        ui.say(`  - [${e.id}] (${e.action}) ${e.problem}\n      rationale: ${e.rationale}`);
-      }
-      if ((await askDecision(ctx, `the issues of the last ${idle} rounds that produced no amendment`)) !== "") {
-        await applyDecisions(ctx, subject);
-        hashes.push(state.fileHash(file));
-      }
-      idle = 0;
-    }
-  }
-}
+  });

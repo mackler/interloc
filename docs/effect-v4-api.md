@@ -38,6 +38,11 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Effect.runPromise` | 16701 | `(effect: Effect<A, E>, options?: RunOptions) => Promise<A>` |
 | `Effect.runPromiseExit` | 16769 | `(effect, options?) => Promise<Exit<A, E>>` |
 | `Effect.runPromiseWith` | 16736 | `(context: Context<R>) => (effect: Effect<A, E, R>, options?) => Promise<A>`. **Bridge for SDK callbacks** (canUseTool, hooks): capture `yield* Effect.context<R>()` when the layer is built, then run callback Effects with `Effect.runPromiseWith(ctx)(eff, { signal })`. v4 has no `Runtime.runPromise`. |
+| `Effect.suspend` | 1538 | `(effect: LazyArg<Effect<A, E, R>>) => Effect<A, E, R>`; used by `lift` to turn a throwing call into a failure or a defect |
+| `Effect.catch` (`catch_ as catch`) | 4143 | `(f: (e: E) => Effect<A2, E2, R2>)`: handles every failure (v3 `catchAll`); used by `liftPromise` |
+| `Effect.map` | 3568 | data-first and data-last |
+| `Effect.runPromise` rejection | 16701 | **Observed**: a typed failure rejects with the error object itself (`instanceof` the tagged class, `_tag` set), so `haltMessage(e)` in main.ts recognises it; a defect rejects with the defect |
+| `Option.isSome` / `isNone` | Option.d.ts:350 / 324 | type guards; `Cause.findErrorOption(exit.cause)` is `None` for a defect (observed) |
 | `RunOptions` | 16495 | `{ signal?: AbortSignal; scheduler?; uninterruptible?; onFiberStart? }` |
 
 ## Fiber, Exit, Cause, Ref
@@ -60,7 +65,7 @@ new name. Material online describes v3 in most cases and is not a source.
 
 | Name | File:line | Signature |
 |---|---|---|
-| `Context.Service` | Context.d.ts:188 | `Context.Service<Shape>("Key")` (function form) or `class X extends Context.Service<X, Shape>()("Key") {}` (class form). Replaces v3 `Context.Tag` / `Effect.Service`. The key can be yielded in `Effect.gen` to get the service. |
+| `Context.Service` (verified 24 Sep, stage 5.1) | Context.d.ts:180 | `Context.Service<Shape>("Key")` (function form) or `class X extends Context.Service<X, Shape>()("Key") {}` (class form). Replaces v3 `Context.Tag` / `Effect.Service`. The key can be yielded in `Effect.gen` to get the service. |
 | `Context.make` / `add` / `get` | Context.d.ts:646 / 683 / 1220 | `make(key, service)`; `get(context, key)` |
 | `Layer.succeed` | Layer.d.ts:813 | `(key, resource) => Layer<I>` |
 | `Layer.sync` | Layer.d.ts:983 | `(key, evaluate) => Layer<I>` |

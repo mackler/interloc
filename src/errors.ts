@@ -81,12 +81,14 @@ const TAGS = new Set<string>([
   "ConfigInvalid", "StateFileInvalid", "FileSystemError", "GitError", "Interrupted",
 ]);
 
+/** True for one of the program's typed errors. */
+export const isRunError = (error: unknown): error is RunError => {
+  const tag: unknown = (error as { _tag?: unknown } | null)?._tag;
+  return typeof tag === "string" && TAGS.has(tag);
+};
+
 /**
  * What the entry point prints for an error, or null if the error is none of ours, in which case the
  * entry point rethrows it. Keeps that decision out of the untested main.ts.
  */
-export const haltMessage = (error: unknown): string | null => {
-  const tag: unknown = (error as { _tag?: unknown } | null)?._tag;
-  if (typeof tag === "string" && TAGS.has(tag)) return `HALTED: ${describe(error as RunError)}`;
-  return null;
-};
+export const haltMessage = (error: unknown): string | null => (isRunError(error) ? `HALTED: ${describe(error)}` : null);

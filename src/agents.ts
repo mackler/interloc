@@ -1,7 +1,9 @@
 // The two agents as the orchestrator sees them. Tests supply scripted implementations.
 
+import { Effect, Layer } from "effect";
 import type { Schema } from "effect";
 import type { ExecOutcome } from "./schema.ts";
+import { liftPromise, Planner as PlannerService, type PlannerError, type PlanningResult, Reviewer as ReviewerService, type ReviewerError } from "./services.ts";
 
 export interface Planner {
   /**
@@ -21,3 +23,18 @@ export interface Reviewer {
   /** One review turn. Returns the reply text as Codex produced it; the caller decodes it (review.ts). */
   review(prompt: string): Promise<string>;
 }
+
+/** The Planner service over a Promise adapter (transitional, plan stage 5.1). */
+export const plannerLayer = (planner: Planner): Layer.Layer<PlannerService> =>
+  Layer.succeed(PlannerService, {
+    planning: (prompt, schema, progress) => liftPromise<PlanningResult, PlannerError>(() => planner.planning(prompt, schema, progress)),
+    executing: (prompt) => liftPromise<ExecOutcome, PlannerError>(() => planner.executing(prompt)),
+    sessionId: Effect.sync(() => planner.sessionId()),
+  });
+
+/** The Reviewer service over a Promise adapter (transitional, plan stage 5.1). */
+export const reviewerLayer = (reviewer: Reviewer): Layer.Layer<ReviewerService> =>
+  Layer.succeed(ReviewerService, {
+    newPhase: Effect.sync(() => reviewer.newPhase()),
+    review: (prompt) => liftPromise<string, ReviewerError>(() => reviewer.review(prompt)),
+  });
