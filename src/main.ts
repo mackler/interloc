@@ -8,10 +8,10 @@ import { CodexReviewer } from "./codex.ts";
 import { haltMessage } from "./errors.ts";
 import { run } from "./run.ts";
 import { liveSdk } from "./sdkLive.ts";
-import { RunConfig } from "./services.ts";
+import { RunConfig, Ui } from "./services.ts";
 import { State } from "./state.ts";
 import { platformLayer, storeLayer } from "./store.ts";
-import { TerminalUi, uiLayer } from "./ui.ts";
+import { promiseUi, terminalUi } from "./ui.ts";
 
 const task = process.argv[2];
 if (!task) {
@@ -20,25 +20,30 @@ if (!task) {
 }
 
 const state = new State(process.argv[3] ?? process.cwd());
-const ui = new TerminalUi();
+const say = (text: string): void => void process.stdout.write(text + "\n");
 // Undefined until the configuration is valid: an invalid config.json halts before any agent exists.
 let planner: ClaudePlanner | undefined;
 
 try {
   const config = state.loadConfig();
-  planner = new ClaudePlanner(state, ui, config, liveSdk);
-  const store = Layer.provide(storeLayer(state.project, config.ignorePaths), platformLayer);
-  const live = Layer.mergeAll(store, uiLayer(ui), plannerLayer(planner), reviewerLayer(new CodexReviewer(state, config, liveSdk)), Layer.succeed(RunConfig, config));
+  // The terminal Ui is a scoped resource; the scope closes when the run ends or is interrupted.
+  const program = Effect.gen(function* () {
+    const ui = yield* terminalUi(process.stdin, process.stdout);
+    planner = new ClaudePlanner(state, promiseUi(ui), config, liveSdk);
+    const store = Layer.provide(storeLayer(state.project, config.ignorePaths), platformLayer);
+    const live = Layer.mergeAll(store, Layer.succeed(Ui, ui), plannerLayer(planner), reviewerLayer(new CodexReviewer(state, config, liveSdk)), Layer.succeed(RunConfig, config));
+    return yield* run(task).pipe(Effect.provide(live));
+  });
   // A typed failure rejects with the error object itself, which haltMessage recognises.
-  const phases = await Effect.runPromise(run(task).pipe(Effect.provide(live)));
-  ui.say(`\nClaude Code reports that the task is finished after ${phases} execution phase(s).`);
-  ui.say(`Plan: ${state.plan}\nConversation record: ${state.dir}/conversation.md`);
+  const phases = await Effect.runPromise(Effect.scoped(program));
+  say(`\nClaude Code reports that the task is finished after ${phases} execution phase(s).`);
+  say(`Plan: ${state.plan}\nConversation record: ${state.dir}/conversation.md`);
 } catch (e) {
   const message = haltMessage(e);
   if (message === null) throw e;
-  ui.say(`\n${message}\nState is preserved in ${state.dir}.`);
+  say(`\n${message}\nState is preserved in ${state.dir}.`);
   process.exitCode = 1;
 } finally {
-  ui.say(`Claude Code session id: ${planner?.sessionId() ?? "none"}`);
-  ui.say(`Usage: ${state.usageSummary()}`);
+  say(`Claude Code session id: ${planner?.sessionId() ?? "none"}`);
+  say(`Usage: ${state.usageSummary()}`);
 }
