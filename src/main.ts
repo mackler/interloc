@@ -5,7 +5,8 @@ import { ClaudePlanner } from "./claude.ts";
 import { CodexReviewer } from "./codex.ts";
 import type { Context } from "./review.ts";
 import { run } from "./run.ts";
-import { Halt, State } from "./state.ts";
+import { haltMessage } from "./errors.ts";
+import { State } from "./state.ts";
 import { TerminalUi } from "./ui.ts";
 
 const task = process.argv[2];
@@ -25,8 +26,9 @@ try {
   ui.say(`\nClaude Code reports that the task is finished after ${phases} execution phase(s).`);
   ui.say(`Plan: ${state.plan}\nConversation record: ${state.dir}/conversation.md`);
 } catch (e) {
-  if (!(e instanceof Halt)) throw e;
-  ui.say(`\nHALTED: ${e.message}\nState is preserved in ${state.dir}.`);
+  const message = haltMessage(e);
+  if (message === null) throw e;
+  ui.say(`\n${message}\nState is preserved in ${state.dir}.`);
   process.exitCode = 1;
 } finally {
   ui.say(`Claude Code session id: ${planner.sessionId() ?? "none"}`);

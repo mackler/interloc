@@ -1,7 +1,7 @@
 // Terminal input and output. The interface permits a scripted implementation in tests.
 
 import * as readline from "node:readline/promises";
-import { Halt } from "./state.ts";
+import { UserStopped } from "./errors.ts";
 
 export interface Ui {
   say(text: string): void;
@@ -15,21 +15,30 @@ export interface Ui {
 }
 
 export class TerminalUi implements Ui {
+  private readonly input: NodeJS.ReadableStream;
+  private readonly output: NodeJS.WritableStream;
+
+  // The streams are parameters so that a test can drive the interface without a terminal.
+  constructor(input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout) {
+    this.input = input;
+    this.output = output;
+  }
+
   say(text: string): void {
-    console.log(text);
+    this.output.write(text + "\n");
   }
 
   async ask(prompt: string): Promise<string> {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = readline.createInterface({ input: this.input, output: this.output });
     const answer = (await rl.question(prompt)).trim();
     rl.close();
-    if (answer === "q") throw new Halt("stopped by the user");
+    if (answer === "q") throw new UserStopped({ where: prompt });
     return answer;
   }
 
   async askMessage(prompt: string): Promise<string> {
     // The line iterator buffers pasted lines, which separate question() calls would lose.
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    const rl = readline.createInterface({ input: this.input, output: this.output });
     rl.setPrompt(prompt);
     rl.prompt();
     const lines: string[] = [];
@@ -45,7 +54,7 @@ export class TerminalUi implements Ui {
     }
     rl.close();
     const message = lines.join("\n").trim();
-    if (message === "/quit") throw new Halt("stopped by the user");
+    if (message === "/quit") throw new UserStopped({ where: prompt });
     return message;
   }
 }

@@ -5,7 +5,8 @@
 import * as path from "node:path";
 import type { Planner, Reviewer } from "./agents.ts";
 import * as log from "./issueLog.ts";
-import { describeChange, Halt, type State } from "./state.ts";
+import { AcceptedWithoutChange, MissingDispositions, ProjectChanged, ReviewedFileChanged, RoundLimitStop } from "./errors.ts";
+import { describeChange, type State } from "./state.ts";
 import type { Config, PlannerResponse, Review } from "./types.ts";
 import type { Ui } from "./ui.ts";
 
@@ -51,7 +52,7 @@ export async function planningCall<T>(ctx: Context, prompt: string, schema: obje
   const result = await ctx.planner.planning<T>(prompt, schema, progress);
   const changes = describeChange(before, ctx.state.projectSnapshot());
   if (changes.length > 0) {
-    throw new Halt(`the project outside plan-review/ changed during a planning-phase call. Either Claude Code changed it, or another process did (for example another Claude Code session in the same project).\n  ${changes.join("\n  ")}`);
+    throw new ProjectChanged({ during: "planning", fileLabel: null, changes });
   }
   return result;
 }
@@ -94,7 +95,7 @@ export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subjec
         state.converse(`**User decision:** ${subject.proceedLabel} without convergence after round ${n - 1} of ${heading}.\n\n`);
         return "proceed";
       }
-      if (!/^[1-9][0-9]*$/.test(extra)) throw new Halt(`stopped by the user at the round limit of ${heading}`);
+      if (!/^[1-9][0-9]*$/.test(extra)) throw new RoundLimitStop({ heading });
       limit += Number(extra);
     }
 
@@ -104,10 +105,10 @@ export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subjec
     const fileBefore = state.fileHash(file);
     const review = await ctx.reviewer.review(subject.reviewPrompt(n));
     const changes = describeChange(projectBefore, state.projectSnapshot());
-    if (state.fileHash(file) !== fileBefore) changes.push(`content changed: ${fileLabel}`);
-    if (changes.length > 0) {
-      throw new Halt(`the project or ${fileLabel} changed during a Codex review. Either Codex changed it, or another process did.\n  ${changes.join("\n  ")}`);
-    }
+    const fileChanged = state.fileHash(file) !== fileBefore;
+    if (fileChanged) changes.push(`content changed: ${fileLabel}`);
+    if (fileChanged) throw new ReviewedFileChanged({ fileLabel, changes });
+    if (changes.length > 0) throw new ProjectChanged({ during: "review", fileLabel, changes });
     state.writeJson(path.join(dir, `review-${n}.json`), review);
     const counted = log.countedIssues(review, config.countMinor);
     counts.push(counted);
@@ -134,7 +135,7 @@ export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subjec
     state.writeJson(path.join(dir, `cc-${n}.json`), response);
     subject.afterPlannerCall?.(response);
     const missing = log.missingDispositions(review, response);
-    if (missing.length > 0) throw new Halt(`Claude Code returned no disposition for: ${missing.join(", ")}`);
+    if (missing.length > 0) throw new MissingDispositions({ ids: missing });
     state.converse(renderRound(heading, n, review, response));
     if (response.reviewer_feedback !== "") state.recordFeedback(heading, n, response.reviewer_feedback);
 
@@ -193,7 +194,7 @@ export async function reviewLoop<R extends PlannerResponse>(ctx: Context, subjec
     const last = hashes[hashes.length - 1];
     let hash = state.fileHash(file);
 
-    if (accepted > 0 && hash === last) throw new Halt(`Claude Code accepted ${accepted} issues in full or in part but ${fileLabel} is unchanged`);
+    if (accepted > 0 && hash === last) throw new AcceptedWithoutChange({ fileLabel, accepted });
 
     if (accepted === 0 && selfCount === 0 && !decided && hash !== last) {
       ui.say(`\n${fileLabel} changed in round ${n} without an accepted issue, a self-correction, or a user decision.`);

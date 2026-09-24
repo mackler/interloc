@@ -4,7 +4,8 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { Planner, Reviewer } from "../src/agents.ts";
 import type { Context } from "../src/review.ts";
-import { Halt, State } from "../src/state.ts";
+import { UserStopped } from "../src/errors.ts";
+import { State } from "../src/state.ts";
 import { defaultConfig, type Config, type ExecOutcome, type PlannerResponse, type Review } from "../src/types.ts";
 import type { Ui } from "../src/ui.ts";
 
@@ -32,7 +33,7 @@ export class ScriptedUi implements Ui {
     this.asked.push(prompt);
     const answer = this.answers.shift();
     if (answer === undefined) throw new Error(`no scripted answer for: ${prompt}`);
-    if (answer === "q") throw new Halt("stopped by the user");
+    if (answer === "q") throw new UserStopped({ where: prompt });
     return answer;
   }
   askMessage(prompt: string): Promise<string> {
@@ -71,19 +72,25 @@ export class ScriptedPlanner implements Planner {
   }
 }
 
+/** A scripted review. `plan` makes the reviewer change plan.md during its turn, as Codex could. */
+export type ReviewStep = Review & { plan?: string };
+
 export class ScriptedReviewer implements Reviewer {
   phases = 0;
-  private readonly reviews: Review[];
-  constructor(reviews: Review[]) {
+  private readonly state: State;
+  private readonly reviews: ReviewStep[];
+  constructor(state: State, reviews: ReviewStep[]) {
+    this.state = state;
     this.reviews = [...reviews];
   }
   newPhase(): void {
     this.phases++;
   }
   async review(): Promise<Review> {
-    const review = this.reviews.shift();
-    if (!review) throw new Error("no scripted review");
-    return review;
+    const step = this.reviews.shift();
+    if (!step) throw new Error("no scripted review");
+    if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
+    return { issues: step.issues };
   }
 }
 
@@ -99,8 +106,8 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
-export function context(repo: string, ui: Ui, steps: PlanningStep[], reviews: Review[], execs: ExecOutcome[], config: Partial<Config> = {}): Context & { planner: ScriptedPlanner; reviewer: ScriptedReviewer } {
+export function context(repo: string, ui: Ui, steps: PlanningStep[], reviews: ReviewStep[], execs: ExecOutcome[], config: Partial<Config> = {}): Context & { planner: ScriptedPlanner; reviewer: ScriptedReviewer } {
   const state = new State(repo);
   state.ignorePaths = config.ignorePaths ?? [];
-  return { state, ui, planner: new ScriptedPlanner(state, steps, execs), reviewer: new ScriptedReviewer(reviews), config: { ...defaultConfig, questionPhase: false, ...config } };
+  return { state, ui, planner: new ScriptedPlanner(state, steps, execs), reviewer: new ScriptedReviewer(state, reviews), config: { ...defaultConfig, questionPhase: false, ...config } };
 }

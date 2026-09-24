@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import { run } from "../src/run.ts";
-import { Halt } from "../src/state.ts";
+import type { RunError } from "../src/errors.ts";
+import { describe } from "../src/errors.ts";
 import { context, finished, issue, respond, ScriptedUi, tempRepo } from "./helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
@@ -71,7 +72,10 @@ test("a stop without a question asks the user for input", async () => {
 test("a planning call that changes the project halts the run", async () => {
   const repo = tempRepo();
   const ctx = context(repo, new ScriptedUi([]), [{ output: noQuestions, plan: "v1", touchProject: true }], [], []);
-  await assert.rejects(run(ctx, "task"), (e: unknown) => e instanceof Halt && /changed during a planning-phase call/.test(e.message) && /a\.txt/.test(e.message));
+  await assert.rejects(run(ctx, "task"), (e: unknown) => {
+    const error = e as RunError;
+    return error._tag === "ProjectChanged" && /changed during a planning-phase call/.test(describe(error)) && /a\.txt/.test(describe(error));
+  });
 });
 
 test("a change to an ignored path does not halt the run", async () => {
@@ -85,7 +89,10 @@ test("an accepted issue without a plan change halts the run", async () => {
   const ctx = context(repo, new ScriptedUi([]),
     [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]) }],
     [{ issues: [issue("A")] }], []);
-  await assert.rejects(run(ctx, "task"), (e: unknown) => e instanceof Halt && /plan.md is unchanged/.test(e.message));
+  await assert.rejects(run(ctx, "task"), (e: unknown) => {
+    const error = e as RunError;
+    return error._tag === "AcceptedWithoutChange" && /plan\.md is unchanged/.test(describe(error));
+  });
 });
 
 test("the round limit offers to proceed to execution", async () => {
@@ -140,3 +147,52 @@ import { execFileSync } from "node:child_process";
 function execFileSyncReset(repo: string): void {
   execFileSync("git", ["-C", repo, "checkout", "-q", "a.txt"]);
 }
+
+const fails = async (ctx: ReturnType<typeof context>, tag: RunError["_tag"], text: RegExp): Promise<void> => {
+  await assert.rejects(run(ctx, "task"), (e: unknown) => {
+    const error = e as RunError;
+    assert.equal(error._tag, tag);
+    assert.match(describe(error), text);
+    return true;
+  });
+};
+
+test("0 at the round limit stops with RoundLimitStop", async () => {
+  const ctx = context(tempRepo(), new ScriptedUi(["0"]),
+    [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    [{ issues: [issue("A")] }], [], { maxRounds: 1 });
+  await fails(ctx, "RoundLimitStop", /stopped by the user at the round limit of Planning phase 1/);
+});
+
+test("q at the round limit stops with UserStopped", async () => {
+  const ctx = context(tempRepo(), new ScriptedUi(["q"]),
+    [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    [{ issues: [issue("A")] }], [], { maxRounds: 1 });
+  await fails(ctx, "UserStopped", /stopped by the user/);
+});
+
+test("q at a decision prompt stops with UserStopped", async () => {
+  const ctx = context(tempRepo(), new ScriptedUi(["q"]),
+    [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"], ["B", "rejected"]]), plan: "v2" }],
+    [{ issues: [issue("A"), issue("B")] }, { issues: [issue("B")] }], []);
+  await fails(ctx, "UserStopped", /stopped by the user/);
+});
+
+test("a missing disposition stops with MissingDispositions naming the id", async () => {
+  const ctx = context(tempRepo(), new ScriptedUi([]),
+    [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    [{ issues: [issue("A"), issue("B")] }], []);
+  await fails(ctx, "MissingDispositions", /Claude Code returned no disposition for: B/);
+});
+
+test("no plan written stops with PlanNotWritten", async () => {
+  const ctx = context(tempRepo(), new ScriptedUi([]), [{ output: noQuestions }], [], []);
+  await fails(ctx, "PlanNotWritten", /did not write plan-review\/plan\.md/);
+});
+
+test("Codex changing the reviewed file stops with ReviewedFileChanged", async () => {
+  const ctx = context(tempRepo(), new ScriptedUi([]),
+    [{ output: noQuestions, plan: "v1" }],
+    [{ issues: [issue("A")], plan: "changed by the reviewer" }], []);
+  await fails(ctx, "ReviewedFileChanged", /plan\.md changed during a Codex review/);
+});

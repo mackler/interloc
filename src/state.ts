@@ -5,11 +5,33 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { FileSystemError, GitError, StateFileInvalid } from "./errors.ts";
 import type { Config, LogEntry } from "./types.ts";
 import { defaultConfig } from "./types.ts";
 
-/** Thrown to end the run. State on disk is preserved. */
+/** Thrown to end the run. State on disk is preserved. Replaced by the typed errors of errors.ts. */
 export class Halt extends Error {}
+
+const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** Every file-system call of this module goes through here, so no raw error escapes. */
+const io = <T>(operation: string, file: string, action: () => T): T => {
+  try {
+    return action();
+  } catch (e) {
+    throw new FileSystemError({ operation, path: file, message: message(e) });
+  }
+};
+
+/** Reads and parses a JSON file of the program's own records. */
+const readJson = <T>(file: string): T => {
+  const text = io("read", file, () => fs.readFileSync(file, "utf8"));
+  try {
+    return JSON.parse(text) as T;
+  } catch (e) {
+    throw new StateFileInvalid({ file, message: message(e) });
+  }
+};
 
 export class State {
   readonly project: string;
@@ -35,17 +57,19 @@ export class State {
 
   /** Starts a new run. The files of an earlier run are moved to plan-review/archive-<time>/; config.json stays. */
   init(task: string): void {
-    fs.mkdirSync(this.dir, { recursive: true });
-    const earlier = fs.readdirSync(this.dir).filter((name) => name !== "config.json" && !name.startsWith("archive-"));
+    io("create directory", this.dir, () => fs.mkdirSync(this.dir, { recursive: true }));
+    const earlier = io("list", this.dir, () => fs.readdirSync(this.dir)).filter((name) => name !== "config.json" && !name.startsWith("archive-"));
     if (earlier.length > 0) {
       const archive = path.join(this.dir, `archive-${new Date().toISOString().replace(/[:.]/g, "-")}`);
-      fs.mkdirSync(archive);
-      for (const name of earlier) fs.renameSync(path.join(this.dir, name), path.join(archive, name));
+      io("create directory", archive, () => fs.mkdirSync(archive));
+      for (const name of earlier) {
+        io("move", path.join(this.dir, name), () => fs.renameSync(path.join(this.dir, name), path.join(archive, name)));
+      }
     }
     for (const name of ["issue-log.json", "questions-log.json", "requirements-log.json"]) this.saveLog(name, []);
-    fs.writeFileSync(this.decisionsFile, "");
-    fs.writeFileSync(this.feedbackFile, "");
-    fs.writeFileSync(this.conversationFile, `# Conversation record\n\nTask: ${task}\n\n`);
+    this.writeText(this.decisionsFile, "");
+    this.writeText(this.feedbackFile, "");
+    this.writeText(this.conversationFile, `# Conversation record\n\nTask: ${task}\n\n`);
   }
 
   /**
@@ -53,7 +77,7 @@ export class State {
    * (for all projects), and plan-review/config.json in the project.
    */
   loadConfig(): Config {
-    const read = (file: string): Partial<Config> => (fs.existsSync(file) ? (JSON.parse(fs.readFileSync(file, "utf8")) as Partial<Config>) : {});
+    const read = (file: string): Partial<Config> => (fs.existsSync(file) ? readJson<Partial<Config>>(file) : {});
     const shared = fileURLToPath(new URL("../config.json", import.meta.url));
     const config = { ...defaultConfig, ...read(shared), ...read(path.join(this.dir, "config.json")) };
     this.ignorePaths = config.ignorePaths;
@@ -66,16 +90,16 @@ export class State {
 
   subDir(name: string): string {
     const dir = path.join(this.dir, name);
-    fs.mkdirSync(dir, { recursive: true });
+    io("create directory", dir, () => fs.mkdirSync(dir, { recursive: true }));
     return dir;
   }
 
   writeJson(file: string, value: unknown): void {
-    fs.writeFileSync(file, JSON.stringify(value, null, 2) + "\n");
+    this.writeText(file, JSON.stringify(value, null, 2) + "\n");
   }
 
   loadLog(name = "issue-log.json"): LogEntry[] {
-    return JSON.parse(fs.readFileSync(path.join(this.dir, name), "utf8")) as LogEntry[];
+    return readJson<LogEntry[]>(path.join(this.dir, name));
   }
 
   saveLog(name: string, log: LogEntry[]): void {
@@ -83,24 +107,31 @@ export class State {
   }
 
   recordDecision(subject: string, decision: string): void {
-    fs.appendFileSync(this.decisionsFile, `Subject: ${subject}\nDecision: ${decision}\n\n`);
+    this.append(this.decisionsFile, `Subject: ${subject}\nDecision: ${decision}\n\n`);
     this.converse(`**User decision** on ${subject}: ${decision}\n\n`);
   }
 
   recordFeedback(heading: string, round: number, text: string): void {
-    fs.appendFileSync(this.feedbackFile, `## ${heading}, round ${round}\n${text}\n\n`);
+    this.append(this.feedbackFile, `## ${heading}, round ${round}\n${text}\n\n`);
   }
 
   /** Appends one line to usage.jsonl: the usage that an agent reported for one call. */
   recordUsage(entry: Record<string, unknown>): void {
-    fs.appendFileSync(path.join(this.dir, "usage.jsonl"), JSON.stringify({ time: new Date().toISOString(), ...entry }) + "\n");
+    this.append(path.join(this.dir, "usage.jsonl"), JSON.stringify({ time: new Date().toISOString(), ...entry }) + "\n");
   }
 
   /** Number of calls and sum of the reported values per agent. */
   usageSummary(): string {
     const file = path.join(this.dir, "usage.jsonl");
     if (!fs.existsSync(file)) return "no usage recorded";
-    const entries = fs.readFileSync(file, "utf8").split("\n").filter((l) => l !== "").map((l) => JSON.parse(l) as Record<string, any>);
+    const lines = io("read", file, () => fs.readFileSync(file, "utf8")).split("\n").filter((l) => l !== "");
+    const entries = lines.map((line) => {
+      try {
+        return JSON.parse(line) as Record<string, any>;
+      } catch (e) {
+        throw new StateFileInvalid({ file, message: message(e) });
+      }
+    });
     const claude = entries.filter((e) => e.agent === "claude");
     const codex = entries.filter((e) => e.agent === "codex");
     const cost = claude.reduce((sum, e) => sum + (typeof e.total_cost_usd === "number" ? e.total_cost_usd : 0), 0);
@@ -110,19 +141,23 @@ export class State {
   }
 
   converse(markdown: string): void {
-    fs.appendFileSync(this.conversationFile, markdown);
+    this.append(this.conversationFile, markdown);
+  }
+
+  private append(file: string, text: string): void {
+    io("append to", file, () => fs.appendFileSync(file, text));
   }
 
   planExists(): boolean {
-    return fs.existsSync(this.plan) && fs.statSync(this.plan).size > 0;
+    return fs.existsSync(this.plan) && io("read", this.plan, () => fs.statSync(this.plan)).size > 0;
   }
 
   fileHash(file: string): string {
-    return fs.existsSync(file) ? createHash("sha256").update(fs.readFileSync(file)).digest("hex") : "";
+    return fs.existsSync(file) ? createHash("sha256").update(io("read", file, () => fs.readFileSync(file))).digest("hex") : "";
   }
 
   writeText(file: string, text: string): void {
-    fs.writeFileSync(file, text);
+    io("write", file, () => fs.writeFileSync(file, text));
   }
 
   /**
@@ -130,8 +165,13 @@ export class State {
    * modified tracked file. A change to the content of an untracked file is not detected.
    */
   projectSnapshot(): Snapshot {
-    const git = (args: string[]): string =>
-      execFileSync("git", ["-C", this.project, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    const git = (args: string[]): string => {
+      try {
+        return execFileSync("git", ["-C", this.project, ...args], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "pipe"] });
+      } catch (e) {
+        throw new GitError({ args, message: message(e) });
+      }
+    };
     const status = git(["status", "--porcelain"])
       .split("\n")
       .filter((line) => line !== "" && !/^.. "?plan-review\//.test(line))
