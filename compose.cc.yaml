@@ -23,6 +23,9 @@ services:
     # Keeps the container running between sessions; the image's own CMD would start
     # claude without a terminal, which exits at once.
     command: sleep infinity
+    # An init process as PID 1, so that orphaned children are reaped. Without it, `sleep` is PID 1
+    # and every helper that git leaves behind stays as a zombie (thousands after a day of test runs).
+    init: true
 
 volumes:
   claude-config:
