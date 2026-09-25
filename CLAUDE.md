@@ -82,6 +82,15 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 10. Validation of agent replies (decision Q5): a structured reply of a planning, interview or review call that does not match its schema is kept in `invalid-replies/`, and the agent gets one repair turn in the same session or thread; a second mismatch stops the run. Execution reports get no repair turn: a recorded `AskUserQuestion` stop takes precedence, and an invalid report without a stop is treated like a missing one (status `aborted`).
 11. Interruption (decision Q3): Ctrl+C aborts both SDK calls, closes the terminal interface, prints `INTERRUPTED by the user. State is preserved in …`, appends `**Interrupted by the user.**` to `conversation.md`, prints the Claude Code session id and the usage summary, and exits with code 130. A halt exits with 1, a missing task with 2.
 
+## User interface
+
+Adherence to Jakob Nielsen's ten usability heuristics is a top priority for every user interface of
+this program, the terminal and the web page alike: visibility of system status; match between the
+system and the real world; user control and freedom; consistency and standards; error prevention;
+recognition rather than recall; flexibility and efficiency of use; aesthetic and minimalist design;
+help users recognize, diagnose, and recover from errors; help and documentation. A design decision
+about the interface is argued from these heuristics, and a review of the interface checks against them.
+
 ## Facts established by runs in the developer's containers
 
 Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
