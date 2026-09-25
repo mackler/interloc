@@ -25,6 +25,19 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 - Node.js does not type check. `npm run check` is the only type check.
 - Every Effect and `@effect/platform-node` name used in the program is recorded in `docs/effect-v4-api.md` with the file and line of its declaration in `node_modules`. Look a name up there, or read the `.d.ts` file and add it, before using it. Material online describes v3 in most cases and is not a source.
 
+## Programming principles
+
+The program follows functional programming: pure functions everywhere except at the edges, which are
+identified as such (the layers of `src/store.ts`, `src/ui.ts`, `src/claude.ts`, `src/codex.ts`, and the
+untested wiring); no exception is thrown — a failure is a typed error in the `Result` or the error
+channel of an Effect, and a defect is a bug; data are immutable algebraic data types (readonly records,
+tagged unions, `Result`, `Option`), never mutated after construction; recursion instead of iteration
+where it is stack safe (`Effect.gen` and Effect's own combinators are, plain recursion over
+unbounded input is not); effects are values, composed and run at the edge; and the rest that goes
+with it: no shared mutable state, no `null`-or-throw signatures, no hidden preconditions,
+exhaustiveness over variants, and a pure core that the tests exercise directly. The findings and
+recommendations of `docs/functional-design-review.md` are the reference for what this means here.
+
 ## Layout
 
 | File | Content |
@@ -90,6 +103,10 @@ system and the real world; user control and freedom; consistency and standards; 
 recognition rather than recall; flexibility and efficiency of use; aesthetic and minimalist design;
 help users recognize, diagnose, and recover from errors; help and documentation. A design decision
 about the interface is argued from these heuristics, and a review of the interface checks against them.
+The visual design follows Material Design (Google's design system, m3.material.io): its components,
+layout, typography, colour roles, elevation, motion and states. A component library that implements it
+is a dependency and needs the developer's instruction like any other; without one, the guidelines are
+followed by hand.
 
 ## Facts established by runs in the developer's containers
 
