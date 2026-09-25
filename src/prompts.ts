@@ -1,5 +1,7 @@
 // Prompt texts. All paths are relative to the project directory.
 
+import { pathOf } from "./artifacts.ts";
+
 const SEVERITY = `Severity: blocking = the work cannot succeed with the file as written; major = the file as written will produce a defect or omits something required; minor = everything else.`;
 
 /** Rules for the use of an issue log. They are the same for every reviewed file. */
@@ -61,12 +63,12 @@ Task: ${task}`;
 }
 
 export function questionReviewPrompt(round: number): string {
-  if (round > 1) return laterRound("questions.json", "questions-log.json", "Q", round);
+  if (round > 1) return laterRound(pathOf({ kind: "questions" }), pathOf({ kind: "log", subject: "questions" }), "Q", round);
   return `Review the question list in plan-review/questions.json against the task text in the same file and against the codebase. Do not modify any file.
 The planner will ask the user these questions in an interview and will then write an implementation plan from the answers.
 Raise an issue when: a question whose answer the plan needs is missing; a question is unnecessary because the task text or the codebase determines the answer (name the file); a question is ambiguous or combines several decisions; a reason is wrong; a feasible answer is missing from the proposed answers, or a proposed answer is not feasible in this codebase; a default contradicts the task or the codebase.
 Put the question id, or 'list' for an issue that concerns the list as a whole, in the location field.
-${logRules("questions-log.json", "Q", round)}`;
+${logRules(pathOf({ kind: "log", subject: "questions" }), "Q", round)}`;
 }
 
 export function questionRespondPrompt(round: number): string {
@@ -119,12 +121,12 @@ export function interviewNotConfirmed(text: string): string {
 // ---- requirements -------------------------------------------------------------------------------
 
 export function requirementsReviewPrompt(round: number): string {
-  if (round > 1) return laterRound("requirements.md", "requirements-log.json", "G", round);
+  if (round > 1) return laterRound(pathOf({ kind: "requirements" }), pathOf({ kind: "log", subject: "requirements" }), "G", round);
   return `Review plan-review/requirements.md. It is the result of an interview between the planner and the user, confirmed by the user. plan-review/questions.json contains the task and the questions that were agreed before the interview. Do not modify any file.
 The planner will write an implementation plan from the task and this file.
 Raise an issue when: an agreed question has no clear answer in the file; two statements in the file contradict each other; a statement cannot be followed in this codebase (name the file); a decision that the plan needs is still absent.
 Put the question id or the heading in the location field.
-${logRules("requirements-log.json", "G", round)}`;
+${logRules(pathOf({ kind: "log", subject: "requirements" }), "G", round)}`;
 }
 
 export function requirementsRespondPrompt(round: number): string {
@@ -159,14 +161,14 @@ Return an empty questions_for_user array.`;
 
 export function planReviewPrompt(phase: number, round: number, withRequirements: boolean): string {
   const prefix = `P${phase}`;
-  if (round > 1) return laterRound("plan.md", "issue-log.json", prefix, round);
+  if (round > 1) return laterRound(pathOf({ kind: "plan" }), pathOf({ kind: "log", subject: { plan: phase } }), prefix, round);
   const requirements = withRequirements
     ? "plan-review/requirements.md contains the user's confirmed answers and decisions. It must be followed; raise an issue when a plan step contradicts it or omits something it requires.\n"
     : "";
   return `Review the implementation plan in plan-review/plan.md against the codebase. Do not modify any file.
 ${requirements}Steps that the plan marks as completed are already implemented in the codebase; review the remaining steps, and review whether the remaining steps are consistent with the implemented state.
 Put the step number or the heading in the location field.
-${logRules("issue-log.json", prefix, round)}`;
+${logRules(pathOf({ kind: "log", subject: { plan: phase } }), prefix, round)}`;
 }
 
 export function planRespondPrompt(phase: number, round: number): string {

@@ -35,8 +35,13 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/review.ts` | `reviewLoop` as the interpreter of `src/reviewState.ts` (it executes the commands against the services and feeds the events back); `planningCall`; `decodeWithRepair`; generic over a `Subject<R, D>` whose two planning operations are typed by their schemas |
 | `src/reviewState.ts` | The review loop as a pure state machine: `advance(state, event)` returns the next state and the commands; every pause condition of behaviour 7, in its order, the log update and the progress checks live here. No I/O, no Effect |
 | `src/usage.ts` | The usage summary as a pure fold over the lines of `usage.jsonl` (per-agent lines, each identified session's last running total, unidentified calls counted separately) and its rendering |
-| `src/subjects.ts` | The three subjects: question list, requirements, plan |
-| `src/interview.ts` | Question phase and the interview in the terminal |
+| `src/subjects.ts` | The three subjects: question list, requirements, plan; `writeQuestions` (normalised, then recorded) |
+| `src/interview.ts` | The question phase |
+| `src/conversation.ts` | The interview in the terminal (separate from the question phase so that the subjects can use it without an import cycle) |
+| `src/artifacts.ts` | The catalog of the records (pure): `SubjectId`, `Artifact`, `pathOf`, `subjectDir`, `subjectOf`, `reviewedFile` — no workflow builds a path |
+| `src/render.ts` | Markdown rendering of the records (pure): the round in `conversation.md`, the decision lines, the question lists, the subject headings |
+| `src/config.ts` | `loadConfig` and `decodeConfigText` (behaviour 9) |
+| `src/platform.ts` | `platformLayer`: the live FileSystem, Path and child-process services |
 | `src/issueLog.ts` | Pure functions on the issue log (no I/O, no Effect). Detection of repeated issues, supersession, user decisions |
 | `src/services.ts` | The five services (`Ui`, `Planner`, `Reviewer`, `Store`, `RunConfig`) and the `Sdk` service, with their error unions; `ReviewSession` (one thread per review loop, returned by `startPhase`); the path brands `ProjectPath` / `RecordPath` |
 | `src/errors.ts` | The typed errors (one per cause that ends a run, and per I/O or parse failure), `describe` over their data, `decodeRunError` (a schema per tag) and `haltMessage` |
@@ -52,8 +57,9 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/snapshot.ts` | The project snapshot (pure): git's porcelain v2 records decoded, the working-tree entry per path, `compareSnapshots`, the exclusion predicate |
 | `src/prompts.ts` | Every prompt text. Prompts are not written anywhere else |
 | `src/input.ts` | Pure interpretation of what the user types: the option a reply chooses, the extra rounds at the round limit, the `q` and `/quit` commands (shared by the terminal and the scripted Ui), the interview's `/done`, and the fold of the `"""` line protocol |
-| `src/store.ts` | The `Store` layer on Effect's FileSystem, Path and child-process services: files in `<project>/plan-review/`, the project snapshot, `loadConfig`; `platformLayer` |
+| `src/store.ts` | The `Store` layer on Effect's FileSystem, Path, child-process and Clock services: one domain operation per artifact of the catalog (JSON records written to a temporary name and renamed into place), the project snapshot, the checkpoint |
 | `src/state.ts` | The decoders of the program's own JSON records, returning `Result` |
+| `prototypes/classify.ts` | The classification of one call of the schema acceptance prototype (tested; the prototype counts `accepted && decoded` only) |
 | `src/ui.ts` | The `Ui` layer: one readline interface as a scoped resource; the dialogue is serialized (a second concurrent `ask` waits) |
 | `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer` (the services, scripted), `testLayer`, `testWiring`, temporary git repository |
 | `test/fakeSdk.ts` | A fake of the two SDKs for the adapter tests |
@@ -72,7 +78,7 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 5. Codex runs with `sandboxMode: "danger-full-access"` and `approvalPolicy: "never"`, because bubblewrap cannot start in the containers. The program halts if the project or the reviewed file changed during a Codex turn. Codex keeps one thread per review loop.
 6. Five dispositions (`accepted`, `partially_accepted`, `rejected`, `no_change_needed`, `clarification_requested`), self-corrections, and reviewer feedback. Every rationale is returned to Codex through the issue log.
 7. Pause conditions in `reviewLoop`: repeated issue that was not accepted in full (same id, or new id reported through `duplicate_of`); reversal of an accepted correction; disputed self-correction; second clarification request for one id; identical file content to an earlier round; unexplained change; `maxIdleRounds` rounds without an accepted issue; round limit (`maxRounds`).
-8. Records: `conversation.md` (readable, in order), JSON files per round (`review-<n>.json` and `cc-<n>.json` are the agents' raw replies; `round-<n>.json` is the program's validated record of the round, `no_response` after the review and `validated` after the response), the three issue logs as `{ version: 2, entries }` with entries tagged by `source`, `usage.jsonl` with one per-agent record per line, `questions.json`, and `invalid-replies/` for agent replies that did not match their schema. Record files carry `version: 2`; the readers also accept the version-1 files of earlier runs (decision Q5). A new run moves the previous run to `plan-review/archive-<time>/`.
+8. Records: `conversation.md` (readable, in order), JSON files per round (`review-<n>.json` and `cc-<n>.json` are the agents' raw replies; `round-<n>.json` is the program's validated record of the round, `no_response` after the review and `validated` after the response), the three issue logs as `{ version: 2, entries }` with entries tagged by `source`, `usage.jsonl` with one per-agent record per line, `questions.json`, and `invalid-replies/` for agent replies that did not match their schema. Record files carry `version: 2`; the readers also accept the version-1 files of earlier runs (decision Q5). JSON records are written to a temporary name and renamed into place, and `checkpoint.json` (`{ version: 2, subject, phase, round, stage, time }`) is replaced after all records of a transition are written: it identifies the last committed transition (decision Q6; no resume). A new run moves the previous run to `plan-review/archive-<time>/` (a second run in the same clock instant gets a `-2` suffix).
 9. Configuration precedence: defaults in `src/schema.ts`, then `config.json` in this repository (all projects), then `<project>/plan-review/config.json`. Invalid JSON, a wrong type or an unknown key in either file stops the program before any agent call and before the records are initialised (decision Q4 of the Effect rewrite).
 10. Validation of agent replies (decision Q5): a structured reply of a planning, interview or review call that does not match its schema is kept in `invalid-replies/`, and the agent gets one repair turn in the same session or thread; a second mismatch stops the run. Execution reports get no repair turn: a recorded `AskUserQuestion` stop takes precedence, and an invalid report without a stop is treated like a missing one (status `aborted`).
 11. Interruption (decision Q3): Ctrl+C aborts both SDK calls, closes the terminal interface, prints `INTERRUPTED by the user. State is preserved in …`, appends `**Interrupted by the user.**` to `conversation.md`, prints the Claude Code session id and the usage summary, and exits with code 130. A halt exits with 1, a missing task with 2.
@@ -96,7 +102,7 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
 ## Not yet known or not yet built
 
 - The exchange between the agents has run for real once (25 Sep 2026, the plan for the functional design review: 6, 4 and 1 issues in three rounds, all accepted); rejections, clarifications, the pause conditions and the repair turn have run only in scripted tests. That run also showed Codex's turns growing with the thread (147k to 1.35M input tokens over seven turns) until its usage limit halted the run.
-- Resuming an interrupted run is not implemented. The developer wants it later.
+- Resuming an interrupted run is not implemented. The developer wants it later; `plan-review/checkpoint.json` identifies the last committed transition, and `readCheckpoint` in `src/records.ts` verifies that the records it names exist and decode.
 - Threads that the orchestrator starts are stored in the same `~/.codex` volume as the developer's interactive Codex sessions; the effect on `codex resume --last` is unverified.
 
 ## Pinned versions

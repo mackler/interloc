@@ -1,7 +1,7 @@
 // The complete run: planning phase K, then execution phase K, until Claude Code reports 'finished'.
 
 import { Effect } from "effect";
-import * as path from "node:path";
+import { recordPath } from "./artifacts.ts";
 import { PlanNotWritten, type RunError } from "./errors.ts";
 import { questionPhase } from "./interview.ts";
 import { executePrompt, initialPlanPrompt, revisePlanPrompt } from "./prompts.ts";
@@ -23,17 +23,17 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
     if (withRequirements) yield* questionPhase(task);
 
     for (let k = 1; ; k++) {
-      const subject = planSubject(store, k, withRequirements);
+      const subject = planSubject(k, withRequirements);
       // Planning phase K: write or revise the plan, then review it.
       yield* ui.say(k === 1 ? "Planning phase 1: requesting the initial plan from Claude Code ..." : `\nPlanning phase ${k}: Claude Code revises the plan from the user's input ...`);
       const written = yield* planningCall(k === 1 ? initialPlanPrompt(task, withRequirements) : revisePlanPrompt, S.PlanWriteResult);
-      yield* store.writeJson(path.join(yield* store.subDir(subject.dirName), "cc-0.json"), written.output);
-      if (!(yield* store.planExists())) return yield* Effect.fail(new PlanNotWritten({ file: "plan-review/plan.md" }));
+      yield* store.savePlanWrite(k, written.output);
+      if (!(yield* store.planExists())) return yield* Effect.fail(new PlanNotWritten({ file: recordPath({ kind: "plan" }) }));
 
       let answered = false;
       for (const question of written.output.questions_for_user) {
         yield* ui.say("");
-        if ((yield* askDecision(`question from Claude Code: ${question.replace(/\s+/g, " ")}`)) !== "") answered = true;
+        if ((yield* askDecision(`question from Claude Code: ${question.replace(/\s+/g, " ")}`, k, 0)) !== "") answered = true;
       }
       if (answered) yield* applyDecisions(subject);
 
@@ -42,7 +42,8 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
       // Execution phase K.
       yield* ui.say(`\nExecution phase ${k}: Claude Code implements the plan (permission mode ${config.execPermissionMode}) ...`);
       const outcome = yield* planner.executing(executePrompt);
-      yield* store.writeJson(path.join(yield* store.subDir(`execution-${k}`), "result.json"), outcome);
+      yield* store.saveExecution(k, outcome);
+      yield* store.checkpoint({ subject: "execution", phase: k, round: 0, stage: "executed" });
       yield* ui.say(`\nExecution phase ${k} ended with status: ${outcome.status}`);
       yield* ui.say(`Summary: ${outcome.summary || "none"}`);
       if (outcome.status === "finished") return k;
@@ -52,6 +53,6 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
         outcome.userInput ??
         (yield* ui.say(`Question or description: ${outcome.question}`).pipe(Effect.andThen(askNonEmpty((p) => ui.ask(p), "Your input for Claude Code (q = quit) > "))));
       const question = outcome.question.replace(/\s+/g, " ");
-      yield* store.recordDecision(`stop in execution phase ${k} (${outcome.status}): ${question}`, input);
+      yield* store.appendDecision({ subject: `stop in execution phase ${k} (${outcome.status}): ${question}`, id: null, decision: input, phase: k, round: 0 });
     }
   });

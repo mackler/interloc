@@ -4,9 +4,9 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { Effect, Result, Schema } from "effect";
 import { describe, type StateFileInvalid } from "../src/errors.ts";
-import { convertPlanReviewDir, LogFile, readLog, readQuestions, readRound, readUsage, RoundFile, type RoundRecord } from "../src/records.ts";
+import { convertPlanReviewDir, LogFile, readCheckpoint, readLog, readQuestions, readRound, readUsage, RoundFile, type RoundRecord } from "../src/records.ts";
 import * as S from "../src/schema.ts";
-import { type Platform, platformLayer } from "../src/store.ts";
+import { type Platform, platformLayer } from "../src/platform.ts";
 import { tempDir } from "./helpers.ts";
 
 // Decision Q5 and its follow-up: tagged version-2 records, readers that accept version 1 as well, and a
@@ -151,4 +151,25 @@ test("convertPlanReviewDir rewrites a copy of the fixture to version 2, idempote
   const second = await run(convertPlanReviewDir(dir));
   assert.deepEqual(second.written, []);
   assert.deepEqual(bytesOf(dir), after);
+});
+
+// Q6: the checkpoint reader verifies that the records the checkpoint names exist and decode.
+test("readCheckpoint gives null without a file, the checkpoint when its records are complete, and StateFileInvalid otherwise", async () => {
+  const dir = copyOfFixture();
+  await run(convertPlanReviewDir(dir));
+  assert.equal(await run(readCheckpoint(dir)), null);
+  const write = (point: Record<string, unknown>) => fs.writeFileSync(path.join(dir, "checkpoint.json"), JSON.stringify({ version: 2, ...point, time: "2026-09-25T12:00:00.000Z" }));
+  write({ subject: "planning-1", phase: 1, round: 1, stage: "responded" });
+  assert.equal((await run(readCheckpoint(dir)))?.stage, "responded");
+  write({ subject: "execution", phase: 1, round: 0, stage: "executed" });
+  assert.equal((await run(readCheckpoint(dir)))?.stage, "executed");
+  const rejects = async (point: Record<string, unknown>, what: string) => {
+    write(point);
+    const exit = await Effect.runPromiseExit(readCheckpoint(dir).pipe(Effect.provide(platformLayer)));
+    assert.ok(exit._tag === "Failure", `${what}: the checkpoint was accepted`);
+  };
+  await rejects({ subject: "planning-1", phase: 1, round: 3, stage: "reviewed" }, "a round without a review file");
+  await rejects({ subject: "planning-1", phase: 1, round: 2, stage: "responded" }, "a responded stage without a response file");
+  await rejects({ subject: "execution", phase: 2, round: 0, stage: "executed" }, "an execution without a result file");
+  await rejects({ subject: "planning-1", phase: 1, round: 1, stage: "shipped" }, "an unknown stage");
 });

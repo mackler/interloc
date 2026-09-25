@@ -279,6 +279,21 @@ thread's context growing with every round). Resume is not implemented, so the re
   second check). The strict JSON Schema fallback is total (`Result<Json, UnsupportedSchema>`, finding 24).
   Readonly views for the exchanged records (finding 26). Properties: `historyBefore` against the log as
   it was, the question-list normalisation, and the strict transform on generated acyclic schema graphs.
+- Stage 5: the catalog of the records (`src/artifacts.ts`: `SubjectId`, `Artifact`, one `pathOf` used by the
+  subjects, the store, the readers and the prompts) and the interview in its own module, so that the
+  value-import graph of `src/` is acyclic (`test/modules.test.ts` checks it; finding 28). The Store offers
+  one domain operation per artifact and no path-taking write (finding 27, recommendation D); the markdown
+  of the records is rendered in `src/render.ts`; `loadConfig` and `platformLayer` are `src/config.ts` and
+  `src/platform.ts`. The store reads the Clock service (finding 22), a second archive in the same clock
+  instant gets a suffix, and invalid-reply files are created exclusively with the number retried (finding
+  23). JSON records are written to a temporary name and renamed into place, and `checkpoint.json` names
+  the last committed transition (`started`, `reviewed`, `responded`, `logged`, `decided`, `executed`;
+  finding 16, Q6; no journal, no resume); `readCheckpoint` verifies the named records. The prototype
+  counts a call as accepted only when its reply decoded (`prototypes/classify.ts`; finding 32). Properties:
+  a decision's log entry and transcript lines agree and rendering is pure; with a write failure injected
+  at any one persistence step of a scripted run, the checkpoint never names incomplete records. The
+  `liveSdk()` factory of finding 29 waits for the developer's approval of the `src/sdkLive.ts` and
+  `src/main.ts` texts, like `src/convert.ts` of stage 4.
 
 ## Rejected or deferred
 

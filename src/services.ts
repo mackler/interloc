@@ -4,8 +4,11 @@
 import { Context, Effect } from "effect";
 import type { Brand, Schema } from "effect";
 import type { ClaudeCallFailed, CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
-import type { Config, ExecOutcome, LogEntry, QuestionsFile } from "./schema.ts";
-import type { UsageLine, UsageSummary } from "./usage.ts";
+import type { SubjectId } from "./artifacts.ts";
+import type { CheckpointPoint, RoundRecord } from "./records.ts";
+import type { DecisionEvent } from "./reviewState.ts";
+import type { Config, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, Review } from "./schema.ts";
+import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
 import type { Snapshot } from "./snapshot.ts";
 
@@ -48,7 +51,10 @@ export type ProjectPath = Brand.Branded<string, "ProjectPath">;
 /** An absolute path under <project>/plan-review/: where the program and the planning calls may write. */
 export type RecordPath = Brand.Branded<string, "RecordPath">;
 
-/** The files in <project>/plan-review/ and the comparison of the project state (today's State). */
+/**
+ * The records in <project>/plan-review/ and the comparison of the project state: one domain operation per
+ * artifact of src/artifacts.ts (finding 27, recommendation D). The path fields are read-only values for messages and tests.
+ */
 export interface StoreShape {
   readonly project: ProjectPath;
   readonly dir: RecordPath;
@@ -56,21 +62,35 @@ export interface StoreShape {
   readonly questions: RecordPath;
   readonly requirements: RecordPath;
   init(task: string): Effect.Effect<void, StoreError>;
-  subDir(name: string): Effect.Effect<string, StoreError>;
-  writeJson(file: string, value: unknown): Effect.Effect<void, StoreError>;
-  writeText(file: string, text: string): Effect.Effect<void, StoreError>;
-  loadLog(name?: string): Effect.Effect<readonly LogEntry[], StoreError>;
-  saveLog(name: string, log: readonly LogEntry[]): Effect.Effect<void, StoreError>;
+  /** Codex's raw reply of a round (`review-<n>.json`). */
+  saveReview(subject: SubjectId, round: number, review: Review): Effect.Effect<void, StoreError>;
+  /** Claude Code's raw response of a round (`cc-<n>.json`). */
+  saveResponse(subject: SubjectId, round: number, response: PlannerResponse): Effect.Effect<void, StoreError>;
+  /** The program's validated record of a round (`round-<n>.json`, version 2). */
+  saveRound(subject: SubjectId, record: RoundRecord): Effect.Effect<void, StoreError>;
+  /** The output of the call that wrote or revised the plan (`planning-<k>/cc-0.json`). */
+  savePlanWrite(phase: number, result: PlanWriteResult): Effect.Effect<void, StoreError>;
+  /** The outcome of an execution phase (`execution-<k>/result.json`). */
+  saveExecution(phase: number, outcome: ExecOutcome): Effect.Effect<void, StoreError>;
+  /** The agreed question list as the program records it (`questions.json`, version 2). */
+  saveQuestions(task: string, questions: QuestionsFile["questions"]): Effect.Effect<void, StoreError>;
   loadQuestions(): Effect.Effect<QuestionsFile, StoreError>;
-  recordDecision(subject: string, decision: string): Effect.Effect<void, StoreError>;
-  recordFeedback(heading: string, round: number, text: string): Effect.Effect<void, StoreError>;
-  recordUsage(line: UsageLine): Effect.Effect<void, StoreError>;
-  usageSummary(): Effect.Effect<UsageSummary, StoreError>;
-  converse(markdown: string): Effect.Effect<void, StoreError>;
+  writeRequirements(text: string): Effect.Effect<void, StoreError>;
   planExists(): Effect.Effect<boolean, StoreError>;
-  fileHash(file: string): Effect.Effect<string, StoreError>;
+  loadLog(subject: SubjectId): Effect.Effect<readonly LogEntry[], StoreError>;
+  saveLog(subject: SubjectId, log: readonly LogEntry[]): Effect.Effect<void, StoreError>;
+  /** One decision of the user: the line in user-decisions.md and the transcript line derive from the one event. */
+  appendDecision(event: DecisionEvent): Effect.Effect<void, StoreError>;
+  recordFeedback(subject: SubjectId, round: number, text: string): Effect.Effect<void, StoreError>;
+  converse(markdown: string): Effect.Effect<void, StoreError>;
+  recordUsage(line: UsageLine): Effect.Effect<void, StoreError>;
+  usageLines(): Effect.Effect<readonly UsageLine[], StoreError>;
+  /** The content hash of a subject's reviewed file; "" when it does not exist. */
+  fileHash(subject: SubjectId): Effect.Effect<string, StoreError>;
   saveInvalidReply(agent: "claude" | "codex", content: string): Effect.Effect<string, StoreError>;
   projectSnapshot(): Effect.Effect<Snapshot, StoreError>;
+  /** Replaces plan-review/checkpoint.json atomically with the last committed transition (Q6). */
+  checkpoint(point: CheckpointPoint): Effect.Effect<void, StoreError>;
 }
 export class Store extends Context.Service<Store, StoreShape>()("plan-review/Store") {}
 

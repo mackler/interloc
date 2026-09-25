@@ -4,16 +4,21 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after } from "node:test";
-import { Cause, Effect, Exit, Layer, Option } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Option, PlatformError } from "effect";
+import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
+import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
+import * as NodePath from "@effect/platform-node/NodePath";
 import type { Schema } from "effect";
 import type { RunError } from "../src/errors.ts";
 import { describe, UserStopped } from "../src/errors.ts";
 import { parseAskLine, parseMessage } from "../src/input.ts";
 import type { Wiring } from "../src/program.ts";
+import type { SubjectId } from "../src/artifacts.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
 import { Planner, type PlannerShape, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Ui, type UiShape } from "../src/services.ts";
-import { makeStore, platformLayer, storeLayer } from "../src/store.ts";
+import { type Platform, platformLayer } from "../src/platform.ts";
+import { makeStore, storeLayer } from "../src/store.ts";
 import { FakeSdk } from "./fakeSdk.ts";
 
 type Config = typeof S.Config.Type;
@@ -203,13 +208,32 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
-export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; config?: Partial<Config> };
+export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; config?: Partial<Config>; platform?: Layer.Layer<Platform> };
+
+/**
+ * The live platform with a file system whose writes and renames can fail: `shouldFail(method, count)` is asked
+ * before the count-th write or rename (1-based), and a true answer fails it with a PlatformError (step 5.4).
+ */
+export const faultyPlatform = (shouldFail: (method: "writeFile" | "rename", count: number) => boolean): Layer.Layer<Platform> => {
+  let count = 0;
+  const injected = (method: string) => new PlatformError.PlatformError(new PlatformError.SystemError({ _tag: "Unknown", module: "FileSystem", method, description: "injected write failure" }));
+  const faulty = Layer.effect(
+    FileSystem.FileSystem,
+    Effect.gen(function* () {
+      const live = yield* FileSystem.FileSystem;
+      const gate = <A>(method: "writeFile" | "rename", effect: Effect.Effect<A, PlatformError.PlatformError>): Effect.Effect<A, PlatformError.PlatformError> =>
+        Effect.suspend(() => (shouldFail(method, ++count) ? Effect.fail(injected(method)) : effect));
+      return FileSystem.make({ ...live, writeFile: (p, data, options) => gate("writeFile", live.writeFile(p, data, options)), rename: (from, to) => gate("rename", live.rename(from, to)) });
+    }),
+  ).pipe(Layer.provide(NodeFileSystem.layer));
+  return Layer.provideMerge(NodeChildProcessSpawner.layer, Layer.mergeAll(faulty, NodePath.layer));
+};
 /** What a test inspects after a run: the scripted implementations, the paths, and a reader of the logs on disk. */
 export type Probe = {
   dir: string;
   plan: string;
   requirements: string;
-  loadLog: (name?: string) => Promise<readonly LogEntry[]>;
+  loadLog: (subject?: SubjectId) => Promise<readonly LogEntry[]>;
   ui: ScriptedUi;
   planner: ScriptedPlanner;
   reviewer: ScriptedReviewer;
@@ -223,11 +247,11 @@ export function testLayer(repo: string, options: TestOptions = {}): { layer: Lay
   const ui = new ScriptedUi(options.answers ?? []);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? []);
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
-  const store = Layer.provide(storeLayer(repo, config.ignorePaths), platformLayer);
+  const store = Layer.provide(storeLayer(repo, config.ignorePaths), options.platform ?? platformLayer);
   const layer = Layer.mergeAll(store, Layer.succeed(Ui, ui), Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer), Layer.succeed(RunConfig, config));
   const dir = path.join(paths.project, "plan-review");
-  const loadLog = (name?: string): Promise<readonly LogEntry[]> =>
-    Effect.runPromise(makeStore(repo, config.ignorePaths).pipe(Effect.flatMap((s) => s.loadLog(name)), Effect.provide(platformLayer)));
+  const loadLog = (subject: SubjectId = { plan: 1 }): Promise<readonly LogEntry[]> =>
+    Effect.runPromise(makeStore(repo, config.ignorePaths).pipe(Effect.flatMap((s) => s.loadLog(subject)), Effect.provide(platformLayer)));
   return { layer, probe: { dir, plan: paths.plan, requirements: path.join(dir, "requirements.md"), loadLog, ui, planner, reviewer, config } };
 }
 

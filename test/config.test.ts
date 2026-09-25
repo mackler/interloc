@@ -7,7 +7,8 @@ import { Cause, Effect, Exit, Option, Result } from "effect";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
 import { defaultConfig } from "../src/schema.ts";
-import { decodeConfigText, loadConfig, platformLayer } from "../src/store.ts";
+import { decodeConfigText, loadConfig } from "../src/config.ts";
+import { platformLayer } from "../src/platform.ts";
 import { tempRepo } from "./helpers.ts";
 
 /** A project with a plan-review/ directory and a shared config file outside it. Neither file exists yet. */

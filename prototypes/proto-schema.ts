@@ -13,6 +13,7 @@
 import { query } from "@anthropic-ai/claude-agent-sdk";
 import { Codex } from "@openai/codex-sdk";
 import { Exit, Schema } from "effect";
+import { type Classification, classify, counted } from "./classify.ts";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -93,13 +94,14 @@ const say = (line: string): void => void process.stdout.write(line + "\n");
 
 const prompt = (name: string): string =>
   `This is a test of structured output. Do not read or change any file. Return a minimal valid instance of the required output schema (${name}); use empty arrays where allowed.`;
-const decodes = (s: Schema.Top, value: unknown): string =>
-  Exit.isSuccess(Schema.decodeUnknownExit(s as any, { onExcessProperty: "error" })(value)) ? "decodes" : "DOES NOT DECODE";
+const decodes = (s: Schema.Top, value: unknown): boolean => Exit.isSuccess(Schema.decodeUnknownExit(s as any, { onExcessProperty: "error" })(value));
+const decodeText = (decoded: boolean): string => (decoded ? "decodes" : "DOES NOT DECODE");
 const oneLine = (e: unknown): string => (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 300);
 const timedOut = (e: unknown): boolean => e instanceof Error && (e.name === "TimeoutError" || /abort|timeout/i.test(e.message));
+// A call counts as accepted only when the transport accepted the schema and the reply decoded (finding 32; prototypes/classify.ts).
 const counts = { accepted: 0, other: 0 };
-const report = (line: string, started: number): void => {
-  counts[line.includes(": accepted") ? "accepted" : "other"]++;
+const report = (line: string, started: number, classification: Classification): void => {
+  counts[counted(classification) ? "accepted" : "other"]++;
   say(`${line} (${Math.round((Date.now() - started) / 1000)} s)`);
 };
 
@@ -115,9 +117,11 @@ for (const variant of ["raw", "strict"] as const) {
       const started = Date.now();
       try {
         const turn = await thread.run(prompt(name), { outputSchema: json, signal: AbortSignal.timeout(TIMEOUT_MS) });
-        report(`codex  ${name} ${variant}: accepted, ${decodes(s, JSON.parse(turn.finalResponse))}`, started);
+        const decoded = decodes(s, JSON.parse(turn.finalResponse));
+        report(`codex  ${name} ${variant}: accepted, ${decodeText(decoded)}`, started, classify("accepted", decoded));
       } catch (e) {
-        report(`codex  ${name} ${variant}: ${timedOut(e) ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : `REJECTED: ${oneLine(e)}`}`, started);
+        const timeout = timedOut(e);
+        report(`codex  ${name} ${variant}: ${timeout ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : `REJECTED: ${oneLine(e)}`}`, started, classify(timeout ? "timeout" : "rejected", false));
       }
     }
 
@@ -128,15 +132,20 @@ for (const variant of ["raw", "strict"] as const) {
       const timer = setTimeout(() => abort.abort(new Error("timeout")), TIMEOUT_MS);
       try {
         let result = "no result message";
+        let classification: Classification = "rejected";
         for await (const m of query({
           prompt: prompt(name),
           options: { cwd: projectDir, permissionMode: "default", maxTurns: 3, outputFormat: { type: "json_schema", schema: json }, abortController: abort, canUseTool: async () => ({ behavior: "deny", message: "not permitted in this test" }) },
         })) {
-          if (m.type === "result") result = m.subtype === "success" ? `accepted, ${decodes(s, m.structured_output)}` : `REJECTED: ${m.subtype}`;
+          if (m.type === "result") {
+            const decoded = m.subtype === "success" && decodes(s, m.structured_output);
+            classification = classify(m.subtype === "success" ? "accepted" : "rejected", decoded);
+            result = m.subtype === "success" ? `accepted, ${decodeText(decoded)}` : `REJECTED: ${m.subtype}`;
+          }
         }
-        report(`claude ${name} ${variant}: ${abort.signal.aborted ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : result}`, started);
+        report(`claude ${name} ${variant}: ${abort.signal.aborted ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : result}`, started, abort.signal.aborted ? "timeout" : classification);
       } catch (e) {
-        report(`claude ${name} ${variant}: ${abort.signal.aborted ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : `REJECTED: ${oneLine(e)}`}`, started);
+        report(`claude ${name} ${variant}: ${abort.signal.aborted ? `TIMEOUT after ${TIMEOUT_MS / 1000} s` : `REJECTED: ${oneLine(e)}`}`, started, abort.signal.aborted ? "timeout" : "rejected");
       } finally {
         clearTimeout(timer);
       }

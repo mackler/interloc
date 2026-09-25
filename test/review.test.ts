@@ -8,7 +8,8 @@ import { Planner } from "../src/services.ts";
 import { pathsOf, ScriptedPlanner } from "./helpers.ts";
 import * as S from "../src/schema.ts";
 import { Store, type StoreShape } from "../src/services.ts";
-import { makeStore, platformLayer } from "../src/store.ts";
+import { platformLayer } from "../src/platform.ts";
+import { makeStore } from "../src/store.ts";
 import { tempRepo } from "./helpers.ts";
 
 const store = async (): Promise<StoreShape> => {

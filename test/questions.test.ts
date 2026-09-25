@@ -47,7 +47,7 @@ test("question list is amended in review, the interview runs, the summary is con
   assert.equal(questions.task, "task");
   assert.deepEqual(questions.questions.map((x: QuestionEntry) => x.id), ["Q1", "Q2"]);
   assert.match(read(probe.dir, "requirements.md"), /Q2: B because of X/);
-  assert.equal((await probe.loadLog("questions-log.json"))[0].action, "accepted");
+  assert.equal((await probe.loadLog("questions"))[0].action, "accepted");
   assert.equal(probe.reviewer.phases, 3); // question review, requirements review, plan review
   assert.ok(probe.planner.prompts.some((p) => p.includes("User: B, because of X")));
   assert.match(probe.planner.prompts.at(-1) ?? "", /requirements\.md contains the user's confirmed answers/);
@@ -122,7 +122,7 @@ test("a gap that Claude Code accepts produces a second interview and a revised r
   await runTask(layer);
   assert.equal(read(probe.dir, "requirements.md"), "Q1: A\nRetries: 3\n");
   assert.match(read(probe.dir, "conversation.md"), /## Second interview/);
-  assert.equal((await probe.loadLog("requirements-log.json"))[0].id, "G-R1-1");
+  assert.equal((await probe.loadLog("requirements"))[0].id, "G-R1-1");
 });
 
 test("/done ends the interview early", async () => {

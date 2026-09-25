@@ -5,17 +5,19 @@ import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { Cause, Effect, Exit, Layer, Option, Result, Stream } from "effect";
+import { Cause, Clock, Effect, Exit, Layer, Option, Result, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
 import type { StoreShape } from "../src/services.ts";
 import { compareSnapshots, type Snapshot } from "../src/snapshot.ts";
 import * as S from "../src/schema.ts";
+import type { IssueId } from "../src/schema.ts";
 import { decodeRecord, parseJson } from "../src/state.ts";
-import { makeStore, platformLayer } from "../src/store.ts";
-import { renderUsage } from "../src/usage.ts";
-import { tempRepo } from "./helpers.ts";
+import { platformLayer } from "../src/platform.ts";
+import { makeStore } from "../src/store.ts";
+import { renderUsage, summarizeUsage } from "../src/usage.ts";
+import { faultyPlatform, tempRepo } from "./helpers.ts";
 
 /** The store of a repository, built on the live platform services. */
 const store = (repo: string, ignorePaths: readonly string[] = []): Promise<StoreShape> => Effect.runPromise(makeStore(repo, ignorePaths).pipe(Effect.provide(platformLayer)));
@@ -39,7 +41,7 @@ const fails = async (effect: Effect.Effect<unknown, RunError>, tag: RunError["_t
 test("an unreadable issue log fails with StateFileInvalid naming the file", async () => {
   const s = await initialised();
   fs.writeFileSync(path.join(s.dir, "issue-log.json"), "{");
-  await fails(s.loadLog(), "StateFileInvalid", /issue-log\.json/);
+  await fails(s.loadLog({ plan: 1 }), "StateFileInvalid", /issue-log\.json/);
 });
 
 test("git failure in the snapshot fails with GitError", async () => {
@@ -53,7 +55,7 @@ test("an unwritable plan-review directory fails with FileSystemError", async (t)
   const s = await initialised();
   fs.chmodSync(s.dir, 0o500);
   try {
-    await fails(s.writeText(path.join(s.dir, "new.md"), "x"), "FileSystemError", /new\.md/);
+    await fails(s.writeRequirements("x"), "FileSystemError", /requirements\.md/);
   } finally {
     fs.chmodSync(s.dir, 0o700);
   }
@@ -63,7 +65,7 @@ test("an issue log entry with an unknown action source fails with StateFileInval
   const s = await initialised();
   const entry = { id: "A", phase: 1, round: 1, source: "robot", problem: "p", action: "accepted", rationale: "r" };
   fs.writeFileSync(path.join(s.dir, "issue-log.json"), JSON.stringify([entry]));
-  await fails(s.loadLog(), "StateFileInvalid", /issue-log\.json/, /source/);
+  await fails(s.loadLog({ plan: 1 }), "StateFileInvalid", /issue-log\.json/, /source/);
 });
 
 test("questions.json without questions fails with StateFileInvalid", async () => {
@@ -82,7 +84,7 @@ test("loadQuestions returns the agreed list", async () => {
 test("a usage.jsonl line that is not an object fails with StateFileInvalid", async () => {
   const s = await initialised();
   fs.writeFileSync(path.join(s.dir, "usage.jsonl"), '{"time":"t","agent":"claude","total_cost_usd":1}\n42\n');
-  await fails(s.usageSummary(), "StateFileInvalid", /usage\.jsonl/);
+  await fails(s.usageLines(), "StateFileInvalid", /usage\.jsonl/);
 });
 
 test("init archives an earlier run and keeps config.json; the records are written", async () => {
@@ -93,35 +95,41 @@ test("init archives an earlier run and keeps config.json; the records are writte
   assert.equal(names.filter((n) => n.startsWith("archive-")).length, 1);
   assert.ok(names.includes("config.json"));
   assert.match(fs.readFileSync(path.join(s.dir, "conversation.md"), "utf8"), /Task: second/);
-  assert.deepEqual(await Effect.runPromise(s.loadLog()), []);
+  assert.deepEqual(await Effect.runPromise(s.loadLog({ plan: 1 })), []);
 });
 
 test("the records: decisions, feedback, usage and the invalid-reply files", async () => {
   const s = await initialised();
-  await Effect.runPromise(s.recordDecision("issue A", "keep it"));
-  await Effect.runPromise(s.recordFeedback("Planning phase 1", 2, "too strict"));
+  await Effect.runPromise(s.appendDecision({ subject: "issue A", id: null, decision: "keep it", phase: 1, round: 1 }));
+  await Effect.runPromise(s.recordFeedback({ plan: 1 }, 2, "too strict"));
   await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s", turns: 1, totalCostUsd: 1.5 }));
   await Effect.runPromise(s.recordUsage({ agent: "codex", thread: "t", inputTokens: 10, outputTokens: 5 }));
   assert.match(fs.readFileSync(path.join(s.dir, "user-decisions.md"), "utf8"), /Subject: issue A\nDecision: keep it/);
   assert.match(fs.readFileSync(path.join(s.dir, "conversation.md"), "utf8"), /\*\*User decision\*\* on issue A: keep it/);
   assert.match(fs.readFileSync(path.join(s.dir, "reviewer-feedback.md"), "utf8"), /## Planning phase 1, round 2\ntoo strict/);
-  assert.match(renderUsage(await Effect.runPromise(s.usageSummary())), /Claude Code: 1 calls in 1 sessions, total_cost_usd = 1\.50 .* Codex: 1 turns, 10 input tokens, 5 output tokens/);
+  assert.match(renderUsage(summarizeUsage(await Effect.runPromise(s.usageLines()))), /Claude Code: 1 calls in 1 sessions, total_cost_usd = 1\.50 .* Codex: 1 turns, 10 input tokens, 5 output tokens/);
   assert.equal(await Effect.runPromise(s.saveInvalidReply("codex", "x")), path.join("plan-review", "invalid-replies", "codex-1.json"));
   assert.equal(await Effect.runPromise(s.saveInvalidReply("codex", "y")), path.join("plan-review", "invalid-replies", "codex-2.json"));
   assert.equal(fs.readFileSync(path.join(s.dir, "invalid-replies", "codex-2.json"), "utf8"), "y");
 });
 
-test("planExists, fileHash and subDir", async () => {
+test("planExists and fileHash by subject; the save operations create their directories", async () => {
   const s = await initialised();
   assert.equal(await Effect.runPromise(s.planExists()), false);
-  await Effect.runPromise(s.writeText(s.plan, ""));
+  fs.writeFileSync(s.plan, "");
   assert.equal(await Effect.runPromise(s.planExists()), false);
-  await Effect.runPromise(s.writeText(s.plan, "v1"));
+  fs.writeFileSync(s.plan, "v1");
   assert.equal(await Effect.runPromise(s.planExists()), true);
-  assert.equal(await Effect.runPromise(s.fileHash(path.join(s.dir, "absent"))), "");
-  assert.notEqual(await Effect.runPromise(s.fileHash(s.plan)), "");
-  const dir = await Effect.runPromise(s.subDir("planning-1"));
-  assert.ok(fs.statSync(dir).isDirectory());
+  assert.equal(await Effect.runPromise(s.fileHash("requirements")), "", "an absent reviewed file hashes to the empty string");
+  assert.notEqual(await Effect.runPromise(s.fileHash({ plan: 1 })), "");
+  await Effect.runPromise(s.saveReview({ plan: 2 }, 1, { issues: [] }));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(s.dir, "planning-2", "review-1.json"), "utf8")), { issues: [] });
+  await Effect.runPromise(s.saveExecution(3, { status: "finished", summary: "s", question: "", remainingWork: "", userInput: null }));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, "execution-3", "result.json"), "utf8")).status, "finished");
+  await Effect.runPromise(s.savePlanWrite(4, { questions_for_user: ["q?"] }));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(s.dir, "planning-4", "cc-0.json"), "utf8")), { questions_for_user: ["q?"] });
+  await Effect.runPromise(s.writeRequirements("# R\n"));
+  assert.equal(fs.readFileSync(s.requirements, "utf8"), "# R\n");
 });
 
 const git = (repo: string, ...args: string[]): void => void execFileSync("git", ["-C", repo, ...args]);
@@ -268,7 +276,7 @@ test("usageSummary reports the running total of each Claude Code session, not th
   await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s-1", turns: 6, totalCostUsd: 0.5 }));
   await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s-1", turns: 4, totalCostUsd: 1.25 }));
   await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s-2", turns: 2, totalCostUsd: 0.25 }));
-  assert.match(renderUsage(await Effect.runPromise(s.usageSummary())), /Claude Code: 3 calls in 2 sessions, total_cost_usd = 1\.50 \(the sessions' last reported running totals, an estimate by the client\)/);
+  assert.match(renderUsage(summarizeUsage(await Effect.runPromise(s.usageLines()))), /Claude Code: 3 calls in 2 sessions, total_cost_usd = 1\.50 \(the sessions' last reported running totals, an estimate by the client\)/);
 });
 
 // Finding 22 of docs/functional-design-review.md: the time was read and the JSON serialized when the
@@ -285,11 +293,11 @@ test("recordUsage reads the time when it runs, and the store owns the time", asy
   assert.notEqual(lines[2].time, "1999", "the entry's own time overrode the store's");
 });
 
-test("writeJson of a value that cannot be serialized fails with FileSystemError (serialize), not a defect", async () => {
+test("a record value that cannot be serialized fails with FileSystemError (serialize), not a defect", async () => {
   const s = await initialised();
   const cyclic: Record<string, unknown> = {};
   cyclic.self = cyclic;
-  await fails(s.writeJson(path.join(s.dir, "x.json"), cyclic), "FileSystemError", /serialize/, /x\.json/);
+  await fails(s.saveExecution(1, cyclic as unknown as Parameters<typeof s.saveExecution>[1]), "FileSystemError", /serialize/, /result\.json/);
 });
 
 // Finding 2 of docs/functional-design-review.md: plan-review/ and ignorePaths under one exclusion predicate,
@@ -340,10 +348,10 @@ test("saveLog writes a version-2 log file, and loadLog reads a version-1 array a
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(s.dir, "issue-log.json"), "utf8")), { version: 2, entries: [] });
   const v1 = { id: "A", phase: 1, round: 1, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r" };
   fs.writeFileSync(path.join(s.dir, "issue-log.json"), JSON.stringify([v1]));
-  const loaded = await Effect.runPromise(s.loadLog());
+  const loaded = await Effect.runPromise(s.loadLog({ plan: 1 }));
   assert.equal(loaded.length, 1);
   assert.equal(loaded[0].superseded, false);
-  await Effect.runPromise(s.saveLog("issue-log.json", loaded));
+  await Effect.runPromise(s.saveLog({ plan: 1 }, loaded));
   assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, "issue-log.json"), "utf8")).version, 2);
 });
 
@@ -354,4 +362,61 @@ test("recordUsage writes version-2 lines per agent", async () => {
   const lines = fs.readFileSync(path.join(s.dir, "usage.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   assert.deepEqual(lines[0], { version: 2, agent: "claude", time: lines[0].time, session: "s", num_turns: 1, total_cost_usd: 1.5 });
   assert.deepEqual(lines[1], { version: 2, agent: "codex", time: lines[1].time, thread: "t", input_tokens: 10, output_tokens: 5 });
+});
+
+// Finding 22 / 23 (step 5.3): the store reads the Clock service; names that could collide are made distinct or created exclusively.
+const fixedClock = (ms: number): Clock.Clock => ({
+  currentTimeMillisUnsafe: () => ms,
+  currentTimeMillis: Effect.succeed(ms),
+  currentTimeNanosUnsafe: () => BigInt(ms) * 1_000_000n,
+  currentTimeNanos: Effect.succeed(BigInt(ms) * 1_000_000n),
+  monotonicTimeNanosUnsafe: () => 0n,
+  monotonicTimeNanos: Effect.succeed(0n),
+  sleep: () => Effect.succeed(undefined),
+});
+const NOON = Date.UTC(2026, 8, 25, 12, 0, 0);
+const atNoon = <A, E>(effect: Effect.Effect<A, E>): Promise<A> => Effect.runPromise(effect.pipe(Effect.provideService(Clock.Clock, fixedClock(NOON))));
+
+test("two init calls at the same clock time archive the earlier run under distinct names", async () => {
+  const s = await store(tempRepo());
+  await atNoon(s.init("first"));
+  await atNoon(s.init("second"));
+  await atNoon(s.init("third"));
+  const archives = fs.readdirSync(s.dir).filter((n) => n.startsWith("archive-")).sort();
+  assert.deepEqual(archives, ["archive-2026-09-25T12-00-00-000Z", "archive-2026-09-25T12-00-00-000Z-2"]);
+  assert.match(fs.readFileSync(path.join(s.dir, "archive-2026-09-25T12-00-00-000Z-2", "conversation.md"), "utf8"), /Task: second/);
+});
+
+test("recordUsage takes its time from the Clock service", async () => {
+  const s = await initialised();
+  await atNoon(s.recordUsage({ agent: "codex", thread: "t", inputTokens: 1, outputTokens: 1 }));
+  const line = JSON.parse(fs.readFileSync(path.join(s.dir, "usage.jsonl"), "utf8").trim());
+  assert.equal(line.time, "2026-09-25T12:00:00.000Z");
+});
+
+test("a gap in the invalid-reply sequence never overwrites an existing file", async () => {
+  const s = await initialised();
+  const dir = path.join(s.dir, "invalid-replies");
+  fs.mkdirSync(dir);
+  fs.writeFileSync(path.join(dir, "codex-1.json"), "one");
+  fs.writeFileSync(path.join(dir, "codex-3.json"), "three");
+  const saved = await Effect.runPromise(s.saveInvalidReply("codex", "new"));
+  assert.equal(fs.readFileSync(path.join(dir, "codex-3.json"), "utf8"), "three", "an existing invalid-reply file was overwritten");
+  assert.equal(fs.readFileSync(path.join(s.project, saved), "utf8"), "new");
+  assert.notEqual(saved, path.join("plan-review", "invalid-replies", "codex-3.json"));
+});
+
+// Finding 16 / Q6: JSON records are written to a temporary name and renamed into place.
+test("a record is replaced atomically: a failure between the temporary file and the rename leaves the previous file intact, and the readers ignore the temporary file", async () => {
+  let armed = false;
+  const s = await Effect.runPromise(makeStore(tempRepo(), []).pipe(Effect.provide(faultyPlatform((method) => method === "rename" && armed))));
+  await Effect.runPromise(s.init("task"));
+  const a = { id: "A" as IssueId, phase: 1, round: 1, source: "review" as const, severity: "major" as const, location: "l", problem: "p", evidence: "e", action: "accepted" as const, rationale: "r", duplicate_of: null, reverses: null, superseded: false };
+  await Effect.runPromise(s.saveLog({ plan: 1 }, [a]));
+  armed = true;
+  await fails(s.saveLog({ plan: 1 }, [a, { ...a, id: "B" as IssueId }]), "FileSystemError", /injected/);
+  armed = false;
+  assert.deepEqual(await Effect.runPromise(s.loadLog({ plan: 1 })), [a]);
+  assert.ok(fs.readdirSync(s.dir).some((n) => n.includes(".tmp-")), "the temporary file of the failed write was expected to remain");
+  assert.equal((await Effect.runPromise(s.usageLines())).length, 0);
 });

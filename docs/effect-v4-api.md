@@ -117,6 +117,18 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Deferred.await` | 147 (`_await`, exported as `await` at 183) | `(self) => Effect<A, E>`: fails with the kept error. The typed channel for a callback failure in `src/claude.ts` (finding 10) |
 | `Effect.as` / `Effect.andThen` | Effect.d.ts:3726 / 2780 | `as(value)` replaces the success value; `andThen(effect)` sequences |
 
+## Clock (`effect/dist/Clock.d.ts`; verified 25 Sep, review stage 5.3)
+
+| Name | Line | Notes |
+|---|---|---|
+| `Clock.Clock` | 186 | `Context.Reference<Clock>`: a service with a default, so `Clock.currentTimeMillis` has no requirement; a test overrides it with `Effect.provideService(Clock.Clock, impl)` (Effect.d.ts:11537, data-last `provideService(key)(impl)(self)`) |
+| `Clock.currentTimeMillis` | 260 | `Effect<number>`; the store's `now` (init's archive name, usage times, the checkpoint) |
+| `Clock` interface | 49 | `currentTimeMillisUnsafe()`, `currentTimeMillis`, `currentTimeNanosUnsafe()`, `currentTimeNanos`, `monotonicTimeNanosUnsafe()`, `monotonicTimeNanos`, `sleep(duration)`; a fixed clock in test/state.test.ts implements all seven |
+| `TestClock` | effect/dist/testing/TestClock.d.ts:241 (`layer`), 340 (`setTime`) | present in rc.117; not used (a fixed `Clock` value is enough) |
+| `FileSystem.OpenFlag` | FileSystem.d.ts:321 | includes `"wx"` (create exclusively); `PlatformError.reason._tag === "AlreadyExists"` (PlatformError.d.ts:73) when the file exists |
+| `PlatformError` / `PlatformError.SystemError` | PlatformError.d.ts:141 / 95 | `new PlatformError(reason)`, `new SystemError({ _tag, module, method, description })`: the injected failures of test/helpers.ts `faultyPlatform` |
+| `FileSystem.make` | FileSystem.d.ts:385 | builds a `FileSystem` from an implementation (`exists`, `readFileString`, `writeFileString`, `stream`, `sink` derived); `rename(oldPath, newPath)` at 221 |
+
 ## Semaphore (`effect/dist/Semaphore.d.ts`; verified 25 Sep, review stage 4.3)
 
 | Name | Line | Notes |

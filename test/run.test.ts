@@ -284,3 +284,27 @@ test("at the round limit, an integer beyond the safe range is an invalid answer 
   assert.equal(await runTask(three.layer), 1);
   assert.ok(three.probe.ui.said.some((line) => /round 2 \(limit 4\)/.test(line)), three.probe.ui.said.join("\n"));
 });
+
+// Finding 16 / decision Q6: checkpoint.json names the last committed transition (no resume).
+test("the checkpoint names the last committed transition: the execution phase after a run, round 1 logged after a halt in round 2", async () => {
+  const point = (dir: string) => {
+    const { version, subject, phase, round, stage, time } = JSON.parse(fs.readFileSync(path.join(dir, "checkpoint.json"), "utf8"));
+    assert.equal(version, 2);
+    assert.equal(typeof time, "string");
+    return { subject, phase, round, stage };
+  };
+  const finishedRun = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+  });
+  await runTask(finishedRun.layer);
+  assert.deepEqual(point(finishedRun.probe.dir), { subject: "execution", phase: 1, round: 0, stage: "executed" });
+
+  const halted = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("A")] }, { issues: [issue("B"), issue("B")] }],
+  });
+  await runFails(halted.layer, "RoundInvalid", /B/);
+  assert.deepEqual(point(halted.probe.dir), { subject: "planning-1", phase: 1, round: 1, stage: "logged" });
+});

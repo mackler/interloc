@@ -6,7 +6,8 @@ import { test } from "node:test";
 import { Effect } from "effect";
 import fc from "fast-check";
 import { compareSnapshots, decodeStatusV2, excluded, type Snapshot, type SnapshotEntry, type StatusRecord, type WorkingTreeEntry } from "../src/snapshot.ts";
-import { makeStore, platformLayer } from "../src/store.ts";
+import { platformLayer } from "../src/platform.ts";
+import { makeStore } from "../src/store.ts";
 import { tempRepo } from "./helpers.ts";
 
 // Row 4 of the table in recommendation E of docs/functional-design-review.md.

@@ -6,8 +6,9 @@
 import { AcceptedWithoutChange, RoundLimitStop, type RunError } from "./errors.ts";
 import { parseExtraRounds } from "./input.ts";
 import * as log from "./issueLog.ts";
+import { renderRound } from "./render.ts";
 import { type IssueId, validateReview, validateRound, type ValidatedReview, type ValidatedRound } from "./round.ts";
-import type { RoundRecord } from "./records.ts";
+import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { Config, LogEntry, PlannerResponse, Review } from "./schema.ts";
 import { Result } from "effect";
 
@@ -26,6 +27,7 @@ export type ReviewCommand =
   | Readonly<{ kind: "SaveResponse"; round: number; response: PlannerResponse }>
   | Readonly<{ kind: "SaveLog"; log: readonly LogEntry[] }>
   | Readonly<{ kind: "SaveRound"; record: RoundRecord }>
+  | Readonly<{ kind: "Checkpoint"; point: CheckpointPoint }>
   | Readonly<{ kind: "AskLimit"; limit: number }>
   | Readonly<{ kind: "AskDecision"; subject: string; id: IssueId | null }>
   | Readonly<{ kind: "CallReviewer"; round: number }>
@@ -131,25 +133,16 @@ const say = (text: string): ReviewCommand => ({ kind: "Say", text });
 const show = (value: unknown): string => JSON.stringify(value, null, 2);
 const describeObservation = (o: Observation): string => (o.stage === "decision" ? `round ${o.round} (after the user's decision)` : `round ${o.round}`);
 
-export function renderRound(heading: string, round: number, review: Review, response: PlannerResponse): string {
-  const issues = review.issues.map((i) => `- **[${i.id}]** (${i.severity}, ${i.location}) ${i.problem}\n  Evidence: ${i.evidence}`);
-  const answers = response.dispositions.map((d) => {
-    const dup = d.duplicate_of !== "" ? ` (duplicate of ${d.duplicate_of})` : "";
-    const rev = d.reverses !== "" ? ` (reverses ${d.reverses})` : "";
-    return `- **[${d.id}]** ${d.action}${dup}${rev}: ${d.rationale}`;
-  });
-  const self = response.self_corrections.map((s) => `- **Self-correction** (${s.new_action}, issue "${s.id}"): ${s.explanation}`);
-  const feedback = response.reviewer_feedback !== "" ? [`- **Feedback to the reviewer:** ${response.reviewer_feedback}`] : [];
-  return `## ${heading}, round ${round}\n\n### Codex\n\n${issues.join("\n")}\n\n### Claude Code\n\n${[...answers, ...self, ...feedback].join("\n")}\n\n`;
-}
-
 // ---- transitions --------------------------------------------------------------------------------
 
 const done = (state: ReviewState, command: ReviewCommand, before: readonly ReviewCommand[] = []): Transition => ({ state: { ...state, step: { name: "finished" } }, commands: [...before, command] });
 const halt = (state: ReviewState, error: RunError): Transition => done(state, { kind: "Halt", error });
 const noop = (state: ReviewState): Transition => ({ state, commands: [] });
 const decisionOf = (s: ReviewState, ask: Ask, text: string): DecisionEvent => ({ subject: ask.subject, id: ask.id, decision: text, phase: s.setup.phase, round: s.round });
-const record = (d: DecisionEvent): ReviewCommand => ({ kind: "RecordDecision", decision: d });
+/** The checkpoint of the transition just committed (Q6): after the last record of its batch. */
+const checkpoint = (s: ReviewState, stage: CheckpointPoint["stage"]): ReviewCommand => ({ kind: "Checkpoint", point: { subject: s.setup.dirName, phase: s.setup.phase, round: s.round, stage } });
+/** A decision is recorded and is a committed transition of its own. */
+const record = (s: ReviewState, d: DecisionEvent): readonly ReviewCommand[] => [{ kind: "RecordDecision", decision: d }, checkpoint(s, "decided")];
 const ask = (s: ReviewState, step: Step, asking: Ask, before: readonly ReviewCommand[] = []): Transition => ({
   state: { ...s, step },
   commands: [...before, ...asking.say.map(say), { kind: "AskDecision", subject: asking.subject, id: asking.id }],
@@ -205,14 +198,14 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
     say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`),
   ];
   if (counted === 0) {
-    return done(state, { kind: "Finish", result: "converged" }, [...before, { kind: "Converse", markdown: `## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n` }]);
+    return done(state, { kind: "Finish", result: "converged" }, [...before, { kind: "Converse", markdown: `## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n` }, checkpoint(state, "reviewed")]);
   }
   const reraised: Ask[] = log.reraisedIds(s.log, review).map((id) => ({
     say: [`\nCodex has raised again an issue that Claude Code did not accept in full:`, show(s.log.filter((e) => e.id === id)), show(review.issues.find((i) => i.id === id))],
     subject: `issue ${id}, raised again after Claude Code did not accept it in full`,
     id: id as IssueId,
   }));
-  return askEach(state, reraised, (asking, queue) => ({ name: "askingReraised", asking, queue }), toResponse, before);
+  return askEach(state, reraised, (asking, queue) => ({ name: "askingReraised", asking, queue }), toResponse, [...before, checkpoint(state, "reviewed")]);
 };
 
 const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText: string, costUsd: number | null): Transition => {
@@ -245,6 +238,7 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
       return { kind: "Converse", markdown: `**Reference dropped:** ${note.field} = ${note.named} of issue ${note.id} ${why}; treated as no reference.\n\n` };
     }),
     ...(response.reviewer_feedback !== "" ? [{ kind: "RecordFeedback", round: n, text: response.reviewer_feedback } as ReviewCommand] : []),
+    checkpoint(state, "responded"),
   ];
   const history = s.log;
   const entries = (id: string) => show(history.filter((e) => e.id === id));
@@ -286,7 +280,7 @@ const logStep = (s: ReviewState, before: readonly ReviewCommand[] = []): Transit
   const { phase } = s.setup;
   const appended = log.appendRound(s.log, s.current.round!);
   const updated = s.current.decisions.reduce((acc, d) => (d.id === null ? acc : log.appendUserDecision(acc, d.id, d.decision, phase, s.round)), appended);
-  return { state: { ...s, log: updated, step: { name: "observingResponse" } }, commands: [...before, { kind: "SaveLog", log: updated }, { kind: "ObserveFile", stage: "response" }] };
+  return { state: { ...s, log: updated, step: { name: "observingResponse" } }, commands: [...before, { kind: "SaveLog", log: updated }, checkpoint(s, "logged"), { kind: "ObserveFile", stage: "response" }] };
 };
 
 const lastHash = (s: ReviewState): string => s.observations[s.observations.length - 1]?.hash ?? "";
@@ -359,24 +353,24 @@ const onDecisionGiven = (s: ReviewState, text: string): Transition => {
     case "askingReraised": {
       const decision = decisionOf(s, step.asking, text);
       const state: ReviewState = given ? { ...s, current: { ...s.current, decisions: [...s.current.decisions, decision] } } : s;
-      return askEach(state, step.queue, (asking, queue) => ({ name: "askingReraised", asking, queue }), toResponse, given ? [record(decision)] : []);
+      return askEach(state, step.queue, (asking, queue) => ({ name: "askingReraised", asking, queue }), toResponse, given ? record(s, decision) : []);
     }
     case "askingPauses": {
       const decision = decisionOf(s, step.asking, text);
       const state: ReviewState = given ? { ...s, current: { ...s.current, decided: true, decisions: step.asking.id === null ? s.current.decisions : [...s.current.decisions, decision] } } : s;
-      return askEach(state, step.queue, (asking, queue) => ({ name: "askingPauses", asking, queue }), afterPauses, given ? [record(decision)] : []);
+      return askEach(state, step.queue, (asking, queue) => ({ name: "askingPauses", asking, queue }), afterPauses, given ? record(s, decision) : []);
     }
     case "askingUnexplained":
       return given
-        ? { state: { ...s, step: { name: "applyingUnexplained" } }, commands: [record(decisionOf(s, step.asking, text)), { kind: "ApplyDecisions" }] }
+        ? { state: { ...s, step: { name: "applyingUnexplained" } }, commands: [...record(s, decisionOf(s, step.asking, text)), { kind: "ApplyDecisions" }] }
         : identicalCheck(s, step.hash, "response");
     case "askingIdentical":
       return given
-        ? { state: { ...s, step: { name: "applyingIdentical" } }, commands: [record(decisionOf(s, step.asking, text)), { kind: "ApplyDecisions" }] }
+        ? { state: { ...s, step: { name: "applyingIdentical" } }, commands: [...record(s, decisionOf(s, step.asking, text)), { kind: "ApplyDecisions" }] }
         : finishRound(s, step.hash, step.stage);
     case "askingIdle":
       return given
-        ? { state: { ...s, step: { name: "applyingIdle" } }, commands: [record(decisionOf(s, step.asking, text)), { kind: "ApplyDecisions" }] }
+        ? { state: { ...s, step: { name: "applyingIdle" } }, commands: [...record(s, decisionOf(s, step.asking, text)), { kind: "ApplyDecisions" }] }
         : startRound({ ...s, idle: 0 });
     default:
       return noop(s);

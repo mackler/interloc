@@ -3,10 +3,9 @@
 // The procedure is applied to three subjects: the question list, the requirements, and the plan.
 
 import { Effect, Ref, Schema } from "effect";
-import * as path from "node:path";
+import { phaseOf, type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import { repairReplyPrompt } from "./prompts.ts";
-import { VERSION } from "./records.ts";
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
@@ -21,41 +20,35 @@ export type Operation<T> = Readonly<{
   prompt: (round: number) => string;
   schema: Schema.Decoder<T>;
   /** Runs after every such call, for output that the program writes to the file; null when there is nothing to do. */
-  after: ((output: T) => Effect.Effect<void, RunError>) | null;
+  after: ((output: T) => Effect.Effect<void, RunError, Store>) | null;
 }>;
 
 /** What the review procedure is applied to. `R` is the response to a review, `D` the output of applying decisions (finding 12). */
 export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = Readonly<{
+  /** The subject's identity: its files, phase and directory come from src/artifacts.ts. */
+  id: SubjectId;
   /** Heading in conversation.md and in terminal output, for example "Planning phase 2". */
   heading: string;
   /** Name of the reviewed file as used in messages, for example "plan.md". */
   fileLabel: string;
-  /** Absolute path of the reviewed file. */
-  file: string;
-  /** File name of the issue log of this subject. */
-  logName: string;
-  /** Subdirectory of plan-review/ for the JSON files of the rounds. */
-  dirName: string;
-  /** Number recorded in the phase field of log entries. */
-  phase: number;
   reviewPrompt: (round: number) => string;
   /** Claude Code's response to a review. */
   respond: Operation<R>;
   /** The call that applies the user's decisions; its prompt does not depend on the round. */
-  applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError>) | null }>;
+  applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError, Store>) | null }>;
   /** After the response of a round, an amendment that requires the user (the requirements); null otherwise. */
   amend: ((review: Review, response: R, round: number) => Effect.Effect<void, RunError, Services>) | null;
   /** Text of the "p" choice at the round limit. */
   proceedLabel: string;
 }>;
 
-/** Reads one decision. An empty answer records nothing and returns "". */
-export const askDecision = (subject: string): Effect.Effect<string, RunError, Ui | Store> =>
+/** Reads one decision outside a review loop (a question of the plan writer). An empty answer records nothing and returns "". */
+export const askDecision = (subject: string, phase: number, round: number): Effect.Effect<string, RunError, Ui | Store> =>
   Effect.gen(function* () {
     const ui = yield* Ui;
     const store = yield* Store;
     const decision = yield* ui.ask(`Decision on: ${subject} (Enter = none, q = quit) > `);
-    if (decision !== "") yield* store.recordDecision(subject, decision);
+    if (decision !== "") yield* store.appendDecision({ subject, id: null, decision, phase, round });
     return decision;
   });
 
@@ -146,8 +139,8 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
     const ui = yield* Ui;
     const config = yield* RunConfig;
     const reviewer = yield* Reviewer;
-    const { heading, fileLabel, file, logName, phase } = subject;
-    const dir = yield* store.subDir(subject.dirName);
+    const { id, heading, fileLabel } = subject;
+    const phase = phaseOf(id);
     // One thread per review loop (behaviour 5): the session is held by this loop, not by the adapter.
     const session = yield* reviewer.startPhase;
 
@@ -156,10 +149,10 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
     const reviewCall = (text: string) =>
       Effect.gen(function* () {
         const projectBefore = yield* store.projectSnapshot();
-        const fileBefore = yield* store.fileHash(file);
+        const fileBefore = yield* store.fileHash(id);
         const reply = yield* session.review(text);
         const changes = compareSnapshots(projectBefore, yield* store.projectSnapshot());
-        const fileChanged = (yield* store.fileHash(file)) !== fileBefore;
+        const fileChanged = (yield* store.fileHash(id)) !== fileBefore;
         if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes: [...changes, { kind: "content_changed", path: fileLabel }] }));
         if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "review", fileLabel, changes }));
         return reply;
@@ -177,23 +170,26 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             yield* store.converse(command.markdown);
             return null;
           case "RecordDecision":
-            yield* store.recordDecision(command.decision.subject, command.decision.decision);
+            yield* store.appendDecision(command.decision);
             return null;
           case "RecordFeedback":
-            yield* store.recordFeedback(heading, command.round, command.text);
+            yield* store.recordFeedback(id, command.round, command.text);
             return null;
           case "SaveReview":
-            yield* store.writeJson(path.join(dir, `review-${command.round}.json`), command.review);
+            yield* store.saveReview(id, command.round, command.review);
             return null;
           case "SaveResponse":
-            yield* store.writeJson(path.join(dir, `cc-${command.round}.json`), command.response);
+            yield* store.saveResponse(id, command.round, command.response);
             if (subject.respond.after !== null) yield* subject.respond.after(command.response as R);
             return null;
           case "SaveLog":
-            yield* store.saveLog(logName, command.log);
+            yield* store.saveLog(id, command.log);
             return null;
           case "SaveRound":
-            yield* store.writeJson(path.join(dir, `round-${command.record.round}.json`), { version: VERSION, ...command.record });
+            yield* store.saveRound(id, command.record);
+            return null;
+          case "Checkpoint":
+            yield* store.checkpoint(command.point);
             return null;
           case "Halt":
             return yield* Effect.fail(command.error);
@@ -218,7 +214,7 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             if (subject.amend !== null) yield* subject.amend(state.current.review!, state.current.response as R, command.round);
             return { kind: "Amended" };
           case "ObserveFile":
-            return { kind: "FileObserved", hash: yield* store.fileHash(file) };
+            return { kind: "FileObserved", hash: yield* store.fileHash(id) };
         }
       });
 
@@ -233,6 +229,6 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
         return yield* Effect.die(new Error("the review loop ended a batch without an event"));
       });
 
-    const setup: ReviewSetup = { heading, fileLabel, dirName: subject.dirName, phase, proceedLabel: subject.proceedLabel, hasAmend: subject.amend !== null, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
-    return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: yield* store.fileHash(file), log: yield* store.loadLog(logName) }));
+    const setup: ReviewSetup = { heading, fileLabel, dirName: subjectDir(id), phase, proceedLabel: subject.proceedLabel, hasAmend: subject.amend !== null, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
+    return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: yield* store.fileHash(id), log: yield* store.loadLog(id) }));
   });

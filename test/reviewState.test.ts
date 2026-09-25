@@ -39,7 +39,7 @@ test("Begin: round 1 starts with the Codex review and the initial observation is
 
 test("a review with no counted issue converges; with countMinor off, minor issues do not count", () => {
   const t = run(start(), { kind: "ReviewDecoded", review: { issues: [] } });
-  assert.deepEqual(kinds(t).slice(-2), ["Converse", "Finish"]);
+  assert.deepEqual(kinds(t).slice(-3), ["Converse", "Checkpoint", "Finish"]);
   assert.deepEqual(last(t), { kind: "Finish", result: "converged" });
   assert.deepEqual(t.state.counts, [0]);
   const minor = run(start({ countMinor: false }), { kind: "ReviewDecoded", review: { issues: [{ ...issue("A"), severity: "minor" }] } });
@@ -72,7 +72,7 @@ test("an invalid response halts; a valid one is saved, rendered, and the round g
   const invalid = run(afterReview(), response([["A", "accepted"], ["A", "rejected"]]));
   assert.equal(halt(invalid)._tag, "RoundInvalid");
   const valid = run(afterReview(), response([["A", "accepted"]]));
-  assert.deepEqual(kinds(valid).filter((k) => k !== "Say"), ["SaveResponse", "SaveRound", "Converse", "SaveLog", "ObserveFile"]);
+  assert.deepEqual(kinds(valid).filter((k) => k !== "Say"), ["SaveResponse", "SaveRound", "Converse", "Checkpoint", "SaveLog", "Checkpoint", "ObserveFile"]);
   assert.deepEqual(last(valid), { kind: "ObserveFile", stage: "response" });
   assert.equal(valid.state.log.length, 1);
   assert.equal(valid.state.log[0].action, "accepted");
@@ -108,7 +108,7 @@ test("the pauses ask in the decided order and a decision leads to ApplyDecisions
   assert.deepEqual(subjects.map((s) => s.split(",")[0].split(" against")[0]), ["issue A", "the accepted correction for C", "issue B", "issue N", "question from Claude Code: Which?"]);
   assert.deepEqual(last(step), { kind: "ApplyDecisions" });
   const applied = advance(step.state, { kind: "DecisionsApplied" });
-  assert.deepEqual(kinds(applied), ["SaveLog", "ObserveFile"]);
+  assert.deepEqual(kinds(applied), ["SaveLog", "Checkpoint", "ObserveFile"]);
   assert.equal(applied.state.log.filter((e) => e.action === "decided_by_user").length, 1);
 });
 
@@ -167,7 +167,7 @@ test("amend runs between the pauses and the log when the subject has one", () =>
   const t = run(withAmend, { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]));
   assert.deepEqual(last(t), { kind: "Amend", round: 1 });
   const amended = advance(t.state, { kind: "Amended" });
-  assert.deepEqual(kinds(amended), ["SaveLog", "ObserveFile"]);
+  assert.deepEqual(kinds(amended), ["SaveLog", "Checkpoint", "ObserveFile"]);
 });
 
 test("every batch has at most one event-producing command, and it is the last", () => {
@@ -201,4 +201,21 @@ test("the round record is saved as no_response after the review and as validated
   assert.deepEqual(validated.response.dispositions.map((d) => [d.id, d.action]), [["A", "accepted"]]);
   assert.deepEqual(validated.review.issues.map((i) => i.id), ["A"]);
   assert.equal(validated.reconstructed, false);
+});
+
+// Q6: a checkpoint follows the records of each transition, after the last record of the batch.
+test("a checkpoint follows the records of each transition: reviewed, responded, logged, decided", () => {
+  const points = (t: Transition) => t.commands.flatMap((c) => (c.kind === "Checkpoint" ? [c.point] : []));
+  const reviewed = afterReview();
+  assert.deepEqual(points(reviewed), [{ subject: "planning-1", phase: 1, round: 1, stage: "reviewed" }]);
+  assert.ok(kinds(reviewed).indexOf("Checkpoint") > kinds(reviewed).indexOf("SaveRound"));
+  const converged = run(start(), { kind: "ReviewDecoded", review: { issues: [] } });
+  assert.deepEqual(kinds(converged).filter((k) => k !== "Say"), ["SaveReview", "SaveRound", "Converse", "Checkpoint", "Finish"]);
+  const responded = run(reviewed, response([["A", "accepted"]]));
+  assert.deepEqual(kinds(responded).filter((k) => k !== "Say"), ["SaveResponse", "SaveRound", "Converse", "Checkpoint", "SaveLog", "Checkpoint", "ObserveFile"]);
+  assert.deepEqual(points(responded).map((p) => p.stage), ["responded", "logged"]);
+  const asked = afterReview([entry("A", "rejected")]);
+  const decided = advance(asked.state, { kind: "DecisionGiven", text: "keep it" });
+  assert.deepEqual(kinds(decided).slice(0, 2), ["RecordDecision", "Checkpoint"]);
+  assert.deepEqual(points(decided), [{ subject: "planning-1", phase: 1, round: 1, stage: "decided" }]);
 });

@@ -10,7 +10,8 @@ import { FileSystemError, type RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
 import { type PlannerShape, RunConfig, Sdk, Store, type StoreShape, Ui } from "../src/services.ts";
-import { makeStore, platformLayer } from "../src/store.ts";
+import { platformLayer } from "../src/platform.ts";
+import { makeStore } from "../src/store.ts";
 import { assistantText, assistantTool, failure, FakeSdk, init, messages, success, type Script } from "./fakeSdk.ts";
 import { ScriptedUi, tempRepo } from "./helpers.ts";
 

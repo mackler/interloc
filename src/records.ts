@@ -4,6 +4,7 @@
 // are in src/schema.ts; this module holds the file shapes, the version-1 shapes, and the readers.
 
 import { Effect, FileSystem, Path, type PlatformError, Result, Schema } from "effect";
+import { type Artifact, LOG_SUBJECTS, pathOf, phaseOf, type SubjectId, subjectOf } from "./artifacts.ts";
 import { FileSystemError, type RoundInvalid, StateFileInvalid } from "./errors.ts";
 import { historyBefore, validateReview, validateRound } from "./round.ts";
 import * as S from "./schema.ts";
@@ -160,15 +161,6 @@ export const readQuestions = (file: string, text: string): Result.Result<Questio
 export type RecordsError = StateFileInvalid | FileSystemError;
 type Fs = FileSystem.FileSystem | Path.Path;
 
-const SUBJECT_DIR = /^(question-review|requirements-review|planning-([1-9][0-9]*))$/;
-/** The phase and the log file of a subject directory, or null for a directory that is not one. */
-export const subjectOf = (name: string): { phase: number; logName: string } | null => {
-  const match = SUBJECT_DIR.exec(name);
-  if (match === null) return null;
-  if (match[2] !== undefined) return { phase: Number(match[2]), logName: "issue-log.json" };
-  return { phase: 0, logName: name === "question-review" ? "questions-log.json" : "requirements-log.json" };
-};
-
 const problemsOf = (e: RoundInvalid): typeof ProblemsRecord.Type => ({
   duplicateIssues: e.duplicateIssues,
   missing: e.missing,
@@ -213,24 +205,78 @@ export const readRound = (runDir: string, subject: string, round: number): Effec
   Effect.gen(function* () {
     const { path, readJson, readIfExists, readText } = yield* files;
     const dir = path.join(runDir, subject);
-    const written = yield* readIfExists(path.join(dir, `round-${round}.json`), (file) => readJson(file, RoundFile));
+    const id = subjectOf(subject);
+    if (id === null) return yield* Effect.fail(new StateFileInvalid({ file: dir, message: "not a subject directory of a run (question-review, requirements-review or planning-<k>)" }));
+    const written = yield* readIfExists(path.join(runDir, pathOf({ kind: "round", subject: id, round })), (file) => readJson(file, RoundFile));
     if (written !== null) {
       const { version: _version, ...record } = written;
       return record as RoundRecord;
     }
-    const meta = subjectOf(subject);
-    if (meta === null) return yield* Effect.fail(new StateFileInvalid({ file: dir, message: "not a subject directory of a run (question-review, requirements-review or planning-<k>)" }));
     const lenient = { onExcessProperty: "ignore" as const };
-    const review = yield* readJson(path.join(dir, `review-${round}.json`), S.Review, lenient);
-    const response = yield* readIfExists(path.join(dir, `cc-${round}.json`), (file) => readJson(file, S.PlannerResponse, lenient));
-    const logFile = path.join(runDir, meta.logName);
+    const review = yield* readJson(path.join(runDir, pathOf({ kind: "review", subject: id, round })), S.Review, lenient);
+    const response = yield* readIfExists(path.join(runDir, pathOf({ kind: "response", subject: id, round })), (file) => readJson(file, S.PlannerResponse, lenient));
+    const logFile = path.join(runDir, pathOf({ kind: "log", subject: id }));
     const log = (yield* readIfExists(logFile, (file) => readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(readLog(file, text)))))) ?? [];
-    return reconstructRound(subject, meta.phase, round, review, response, historyBefore(log, meta.phase, round));
+    const phase = phaseOf(id);
+    return reconstructRound(subject, phase, round, review, response, historyBefore(log, phase, round));
+  });
+
+// ---- checkpoint (finding 16; Q6) --------------------------------------------------------------------
+
+/** The stage of the last committed transition; `started` is written by `init`. */
+export const CheckpointStage = Schema.Literals(["started", "reviewed", "responded", "logged", "decided", "executed"]);
+export const Checkpoint = Schema.Struct({ version: V2, subject: Schema.String, phase: S.NonNegativeInt, round: S.NonNegativeInt, stage: CheckpointStage, time: Schema.String });
+export type Checkpoint = typeof Checkpoint.Type;
+/** What the procedure reports as committed; the store adds the version and the time. */
+export type CheckpointPoint = Readonly<{ subject: string; phase: number; round: number; stage: Checkpoint["stage"] }>;
+
+/**
+ * The checkpoint of a run directory, verified: the records the named transition implies exist and decode
+ * (review and round record from `reviewed` on, the response from `responded` on, the log for `logged`, the
+ * execution result for `executed`); null when there is no checkpoint file.
+ */
+export const readCheckpoint = (runDir: string): Effect.Effect<Checkpoint | null, RecordsError, Fs> =>
+  Effect.gen(function* () {
+    const { path, exists, readJson, readIfExists, readText } = yield* files;
+    const file = path.join(runDir, pathOf({ kind: "checkpoint" }));
+    const checkpoint = yield* readIfExists(file, (f) => readJson(f, Checkpoint));
+    if (checkpoint === null) return null;
+    const invalid = (what: string) => Effect.fail(new StateFileInvalid({ file, message: `the checkpoint names ${what}` }));
+    const lenient = { onExcessProperty: "ignore" as const };
+    const required = <Out extends Schema.ConstraintDecoder<unknown>>(artifact: Artifact, schema: Out, options?: typeof lenient): Effect.Effect<Out["Type"], RecordsError> => {
+      const target = path.join(runDir, pathOf(artifact));
+      return exists(target).pipe(Effect.flatMap((present) => (present ? readJson(target, schema, options) : invalid(`a missing record: ${pathOf(artifact)}`))));
+    };
+    const logDecodes = (subject: SubjectId) => {
+      const log = path.join(runDir, pathOf({ kind: "log", subject }));
+      return exists(log).pipe(Effect.flatMap((present) => (present ? readText(log).pipe(Effect.flatMap((text) => Effect.fromResult(readLog(log, text)))) : invalid(`a missing log: ${pathOf({ kind: "log", subject })}`))));
+    };
+    switch (checkpoint.stage) {
+      case "started":
+        for (const subject of LOG_SUBJECTS) yield* logDecodes(subject);
+        break;
+      case "executed":
+        yield* required({ kind: "execution", phase: checkpoint.phase }, S.ExecOutcome);
+        break;
+      default: {
+        const subject = subjectOf(checkpoint.subject);
+        if (subject === null) return yield* invalid(`an unknown subject directory: ${checkpoint.subject}`);
+        const { round, stage } = checkpoint;
+        yield* required({ kind: "review", subject, round }, S.Review, lenient);
+        const record = yield* required({ kind: "round", subject, round }, RoundFile);
+        if (stage === "responded" || stage === "logged") {
+          yield* required({ kind: "response", subject, round }, S.PlannerResponse, lenient);
+          if (record.kind !== "validated") return yield* invalid(`a ${stage} round whose record is ${record.kind}`);
+        }
+        if (stage === "logged" || stage === "decided") yield* logDecodes(subject);
+      }
+    }
+    return checkpoint;
   });
 
 /** What the converter changed: the files it wrote, relative to the run directory. */
 export type Conversion = Readonly<{ written: readonly string[] }>;
-const LOG_FILES = ["issue-log.json", "questions-log.json", "requirements-log.json"];
+const LOG_FILES = LOG_SUBJECTS.map((subject) => pathOf({ kind: "log", subject }));
 const REVIEW_FILE = /^review-([1-9][0-9]*)\.json$/;
 const render = (value: unknown): string => JSON.stringify(value, null, 2) + "\n";
 
@@ -260,8 +306,8 @@ export const convertPlanReviewDir = (runDir: string): Effect.Effect<Conversion, 
       });
 
     for (const name of LOG_FILES) yield* convertText(name, readLog, (entries) => render(logFile(entries)));
-    yield* convertText("usage.jsonl", readUsage, (records) => records.map((r) => JSON.stringify(r)).join("\n") + "\n");
-    yield* convertText("questions.json", readQuestions, render);
+    yield* convertText(pathOf({ kind: "usage" }), readUsage, (records) => records.map((r) => JSON.stringify(r)).join("\n") + "\n");
+    yield* convertText(pathOf({ kind: "questions" }), readQuestions, render);
 
     const names = yield* io("list", runDir, fs.readDirectory(runDir));
     for (const name of names.filter((n) => subjectOf(n) !== null).sort()) {
@@ -270,7 +316,7 @@ export const convertPlanReviewDir = (runDir: string): Effect.Effect<Conversion, 
       if (info.type !== "Directory") continue;
       const rounds = (yield* io("list", dir, fs.readDirectory(dir))).flatMap((f) => (REVIEW_FILE.test(f) ? [Number(REVIEW_FILE.exec(f)![1])] : [])).sort((a, b) => a - b);
       for (const n of rounds) {
-        const file = path.join(dir, `round-${n}.json`);
+        const file = path.join(runDir, pathOf({ kind: "round", subject: subjectOf(name)!, round: n }));
         if (yield* exists(file)) continue;
         const record = yield* readRound(runDir, name, n);
         yield* writeIfChanged(file, render({ version: VERSION, ...record }));
