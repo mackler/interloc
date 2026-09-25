@@ -6,10 +6,10 @@ import { test } from "node:test";
 import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Fiber, Layer } from "effect";
 import { makeClaudePlanner } from "../src/claude.ts";
-import type { RunError } from "../src/errors.ts";
+import { FileSystemError, type RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
-import { type PlannerShape, RunConfig, Sdk, Store, Ui } from "../src/services.ts";
+import { type PlannerShape, RunConfig, Sdk, Store, type StoreShape, Ui } from "../src/services.ts";
 import { makeStore, platformLayer } from "../src/store.ts";
 import { assistantText, assistantTool, failure, FakeSdk, init, messages, success, type Script } from "./fakeSdk.ts";
 import { ScriptedUi, tempRepo } from "./helpers.ts";
@@ -17,12 +17,12 @@ import { ScriptedUi, tempRepo } from "./helpers.ts";
 const run = Effect.runPromise;
 
 /** A Claude Code planner over a fake SDK, a scripted Ui and a store on a temporary repository. */
-const planner = async (scripts: Script[], answers: string[] = [], config: Partial<typeof S.Config.Type> = {}): Promise<{ planner: PlannerShape; sdk: FakeSdk; ui: ScriptedUi; dir: string; project: string }> => {
+const planner = async (scripts: Script[], answers: string[] = [], config: Partial<typeof S.Config.Type> = {}, storeOverride: Partial<StoreShape> = {}): Promise<{ planner: PlannerShape; sdk: FakeSdk; ui: ScriptedUi; dir: string; project: string }> => {
   const store = await run(makeStore(tempRepo(), []).pipe(Effect.provide(platformLayer)));
   await run(store.init("task"));
   const ui = new ScriptedUi(answers);
   const sdk = new FakeSdk(scripts);
-  const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Ui, ui), Layer.succeed(Sdk, sdk), Layer.succeed(RunConfig, { ...S.defaultConfig, ...config }));
+  const deps = Layer.mergeAll(Layer.succeed(Store, { ...store, ...storeOverride }), Layer.succeed(Ui, ui), Layer.succeed(Sdk, sdk), Layer.succeed(RunConfig, { ...S.defaultConfig, ...config }));
   return { planner: await run(makeClaudePlanner.pipe(Effect.provide(deps))), sdk, ui, dir: store.dir, project: store.project };
 };
 
@@ -250,4 +250,24 @@ test("a UserStopped inside canUseTool ends the call with UserStopped", async () 
   })();
   const fake = await planner([script], ["q"]);
   await assert.rejects(run(fake.planner.executing("implement the plan")), (e: unknown) => tag(e) === "UserStopped");
+});
+
+test("a failure while recording usage aborts the SDK call, closes its stream, and fails the call with that error", async () => {
+  // Found by a Codex review: a typed failure inside the message loop left the iterator open and
+  // the call un-aborted, so the Claude Code process could outlive the HALTED message.
+  let closed = false;
+  const script: Script = (call) => (async function* () {
+    try {
+      yield init();
+      yield success({});
+      await aborted(call.options);
+    } finally {
+      closed = true;
+    }
+  })();
+  const failing: Partial<StoreShape> = { recordUsage: () => Effect.fail(new FileSystemError({ operation: "append to", path: "usage.jsonl", message: "disk full" })) };
+  const fake = await planner([script], [], {}, failing);
+  await assert.rejects(run(fake.planner.planning("write the plan", schema)), (e: unknown) => tag(e) === "FileSystemError");
+  assert.equal(closed, true, "the SDK stream was not closed");
+  assert.equal(fake.sdk.calls[0].options.abortController?.signal.aborted, true, "the SDK call was not aborted");
 });

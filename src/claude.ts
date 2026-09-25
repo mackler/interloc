@@ -1,7 +1,7 @@
 // Claude Code through the Claude Agent SDK, as the Planner service.
 
 import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHookInput, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Layer, Ref, Schema } from "effect";
+import { Effect, Exit, Layer, Ref, Schema } from "effect";
 import * as path from "node:path";
 import { ClaudeCallFailed, isRunError, type UserStopped } from "./errors.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
@@ -191,7 +191,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           }
         }
       });
-      yield* consume.pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())));
+      // On every early exit — an interruption, or a typed failure such as a record that could not be
+      // written — abort the call and close the stream, as the `for await` loop of the Promise version
+      // did through the iterator's return(); otherwise the Claude Code process could outlive the halt.
+      const close = Effect.promise(async () => {
+        controller.abort();
+        await iterator.return?.().catch(() => undefined);
+      });
+      yield* consume.pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.succeed(undefined) : close)));
       if (callbackFailure !== null) return yield* Effect.fail(callbackFailure);
       return out;
     });
