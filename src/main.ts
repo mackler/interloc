@@ -1,49 +1,29 @@
 // Usage: node /opt/plan-review/src/main.ts "task description" [project directory]
 // The project directory defaults to the current directory.
+// Untested code U2 (plan step 6.2): the platform runner applied to the program with the live wiring.
 
 import { Effect, Layer } from "effect";
-import { makeClaudePlanner } from "./claude.ts";
+import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import { fileURLToPath } from "node:url";
+import { claudePlannerLayer } from "./claude.ts";
 import { codexReviewerLayer } from "./codex.ts";
-import { haltMessage } from "./errors.ts";
-import { run } from "./run.ts";
+import { exitCodeOf, program, type Wiring } from "./program.ts";
 import { liveSdk } from "./sdkLive.ts";
-import { Planner, type PlannerShape, RunConfig, Sdk, Ui } from "./services.ts";
-import { State } from "./state.ts";
-import { platformLayer, storeLayer } from "./store.ts";
+import { platformLayer } from "./store.ts";
 import { terminalUi } from "./ui.ts";
 
-const task = process.argv[2];
-if (!task) {
-  console.error('usage: node main.ts "task description" [project directory]');
-  process.exit(2);
-}
+const live: Wiring = {
+  ui: terminalUi(process.stdin, process.stdout),
+  platform: platformLayer,
+  sdk: liveSdk,
+  agents: Layer.mergeAll(claudePlannerLayer, codexReviewerLayer),
+  sharedConfig: fileURLToPath(new URL("../config.json", import.meta.url)),
+  cwd: process.cwd(),
+  usage: (text) => Effect.sync(() => void process.stderr.write(text + "\n")),
+};
 
-const state = new State(process.argv[3] ?? process.cwd());
-const say = (text: string): void => void process.stdout.write(text + "\n");
-// Undefined until the configuration is valid: an invalid config.json halts before any agent exists.
-let planner: PlannerShape | undefined;
-
-try {
-  const config = state.loadConfig();
-  // The terminal Ui is a scoped resource; the scope closes when the run ends or is interrupted.
-  const program = Effect.gen(function* () {
-    const ui = yield* terminalUi(process.stdin, process.stdout);
-    const base = Layer.mergeAll(Layer.provide(storeLayer(state.project, config.ignorePaths), platformLayer), Layer.succeed(Ui, ui), Layer.succeed(RunConfig, config), Layer.succeed(Sdk, liveSdk));
-    // The planner is built here, not as a layer, so that the session id is available after the run.
-    planner = yield* makeClaudePlanner.pipe(Effect.provide(base));
-    const live = Layer.mergeAll(base, Layer.succeed(Planner, planner), Layer.provide(codexReviewerLayer, base));
-    return yield* run(task).pipe(Effect.provide(live));
-  });
-  // A typed failure rejects with the error object itself, which haltMessage recognises.
-  const phases = await Effect.runPromise(Effect.scoped(program));
-  say(`\nClaude Code reports that the task is finished after ${phases} execution phase(s).`);
-  say(`Plan: ${state.plan}\nConversation record: ${state.dir}/conversation.md`);
-} catch (e) {
-  const message = haltMessage(e);
-  if (message === null) throw e;
-  say(`\n${message}\nState is preserved in ${state.dir}.`);
-  process.exitCode = 1;
-} finally {
-  say(`Claude Code session id: ${(planner === undefined ? null : Effect.runSync(planner.sessionId)) ?? "none"}`);
-  say(`Usage: ${state.usageSummary()}`);
-}
+// On SIGINT the runner interrupts the fiber, so the finalizers run (the INTERRUPTED lines, the
+// readline interface, the SDK aborts); the teardown then exits with the program's code.
+NodeRuntime.runMain(Effect.scoped(program(process.argv.slice(2), live)), {
+  teardown: (exit, onExit) => onExit(exitCodeOf(exit)),
+});

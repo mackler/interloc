@@ -94,5 +94,11 @@ export const program = (args: readonly string[], wiring: Wiring): Effect.Effect<
     return yield* halted(describe(error.value), yield* sessionId, records);
   });
 
-/** The exit code for the program's exit: its own code, 130 when it was interrupted, 1 for a defect. */
-export const exitCodeOf = (exit: Exit.Exit<number, never>): number => (Exit.isSuccess(exit) ? exit.value : Cause.hasInterruptsOnly(exit.cause) ? 130 : 1);
+/**
+ * The exit code for the program's exit: its own code, 130 when it was interrupted, 1 for a defect or
+ * any other failure. Typed loosely, because the runner's Teardown is generic over the exit.
+ */
+export const exitCodeOf = (exit: Exit.Exit<unknown, unknown>): number => {
+  if (Exit.isSuccess(exit)) return typeof exit.value === "number" ? exit.value : 0;
+  return Cause.hasInterruptsOnly(exit.cause) ? 130 : 1;
+};
