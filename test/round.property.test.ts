@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { Result } from "effect";
 import fc from "fast-check";
 import * as log from "../src/issueLog.ts";
-import { validateReview, validateRound } from "../src/round.ts";
+import { historyBefore, type IssueId, validateReview, validateRound } from "../src/round.ts";
 import type { Action, LogEntry, PlannerResponse, Review } from "../src/schema.ts";
 
 // Properties of round validation, the log transitions, detection and counting: rows 1 and 2 of the table in
@@ -19,9 +19,12 @@ const NEW_ACTIONS = ["accepted", "rejected", "plan_error"] as const;
 const arbId = fc.stringMatching(/^[A-Z][A-Z0-9-]{0,7}$/);
 const arbIssue = (id: string) => record({ id: fc.constant(id), severity: fc.constantFrom("blocking", "major", "minor"), location: fc.string(), problem: fc.string(), evidence: fc.string() });
 const arbReview: fc.Arbitrary<Review> = fc.uniqueArray(arbId, { minLength: 0, maxLength: 5 }).chain((ids) => fc.tuple(...ids.map(arbIssue)).map((issues) => ({ issues })));
-const arbLog: fc.Arbitrary<LogEntry[]> = fc.uniqueArray(arbId, { maxLength: 4 }).chain((ids) =>
-  fc.tuple(...ids.map((id) => record({ id: fc.constant(id), phase: fc.constant(0), round: fc.constant(0), source: fc.constant("review" as const), problem: fc.string(), action: fc.constantFrom(...ACTIONS, "decided_by_user"), rationale: fc.string() }))),
-);
+const arbEntry = (id: string): fc.Arbitrary<LogEntry> =>
+  fc.oneof(
+    record({ id: fc.constant(id as IssueId), phase: fc.constant(0), round: fc.constant(0), source: fc.constant("review" as const), severity: fc.constantFrom("blocking", "major", "minor"), location: fc.string(), problem: fc.string(), evidence: fc.string(), action: fc.constantFrom(...ACTIONS), rationale: fc.string(), duplicate_of: fc.constant(null), reverses: fc.constant(null), superseded: fc.constant(false) }),
+    record({ id: fc.constant(id as IssueId), phase: fc.constant(0), round: fc.constant(0), source: fc.constant("user" as const), problem: fc.string(), action: fc.constant("decided_by_user" as const), rationale: fc.string(), superseded: fc.constant(false) }),
+  );
+const arbLog: fc.Arbitrary<LogEntry[]> = fc.uniqueArray(arbId, { maxLength: 4 }).chain((ids) => fc.tuple(...ids.map(arbEntry)));
 /** A complete, valid response to a review: one disposition per issue, references from the log or unknown. */
 const arbResponse = (review: Review, history: LogEntry[]): fc.Arbitrary<PlannerResponse> => {
   const known = history.map((e) => e.id);
@@ -94,7 +97,7 @@ test("property: a user decision supersedes earlier entries of its id, and the on
         const result = validateRound(validated.success, round.response, history, phase, 1);
         if (!Result.isSuccess(result)) return; // a generated id may collide with the growing history; that is a valid RoundInvalid
         history = log.appendRound(history, result.success);
-        if (decision !== null) history = log.appendUserDecision(history, decision[0], decision[1], phase, 1);
+        if (decision !== null) history = log.appendUserDecision(history, decision[0] as IssueId, decision[1], phase, 1);
         phase++;
       }
       const currentIds = history.filter((e) => e.superseded !== true).map((e) => e.id);
@@ -118,9 +121,9 @@ test("property: detection and counting laws", () => {
       const result = validate(round);
       assert.ok(Result.isSuccess(result));
       const current = round.history.filter((e) => e.superseded !== true);
-      const notAccepted = new Set(current.filter((e) => ["rejected", "partially_accepted", "no_change_needed"].includes(e.action)).map((e) => e.id));
+      const notAccepted = new Set<string>(current.filter((e) => ["rejected", "partially_accepted", "no_change_needed"].includes(e.action)).map((e) => e.id));
       assert.deepEqual(log.reraisedIds(round.history, round.review), round.review.issues.map((i) => i.id).filter((id) => notAccepted.has(id)));
-      const asked = new Set(round.history.filter((e) => e.action === "clarification_requested").map((e) => e.id));
+      const asked = new Set<string>(round.history.filter((e) => e.action === "clarification_requested").map((e) => e.id));
       for (const id of log.secondClarifications(round.history, result.success)) assert.ok(asked.has(id));
       const all = log.countedIssues(round.review, true);
       assert.equal(all, round.review.issues.length);
@@ -136,7 +139,7 @@ test("property: a bijective renaming of ids commutes with the detections", () =>
     fc.property(arbRound, (round) => {
       const rename = (id: string): string => (id === "" ? "" : `R_${id}`);
       const renamedReview: Review = { issues: round.review.issues.map((i) => ({ ...i, id: rename(i.id) })) };
-      const renamedHistory = round.history.map((e) => ({ ...e, id: rename(e.id) }));
+      const renamedHistory: LogEntry[] = round.history.map((e) => ({ ...e, id: rename(e.id) as IssueId }));
       const renamedResponse: PlannerResponse = {
         ...round.response,
         dispositions: round.response.dispositions.map((d) => ({ ...d, id: rename(d.id), duplicate_of: rename(d.duplicate_of), reverses: rename(d.reverses) })),
@@ -145,11 +148,33 @@ test("property: a bijective renaming of ids commutes with the detections", () =>
       const a = validate(round);
       const b = validate({ review: renamedReview, history: renamedHistory, response: renamedResponse });
       assert.ok(Result.isSuccess(a) && Result.isSuccess(b));
-      assert.deepEqual(log.reraisedIds(renamedHistory, renamedReview), log.reraisedIds(round.history, round.review).map(rename));
+      assert.deepEqual(log.reraisedIds(renamedHistory, renamedReview), log.reraisedIds(round.history, round.review).map((id) => rename(id)));
       assert.deepEqual(log.repeatedUnderNewId(renamedHistory, b.success), log.repeatedUnderNewId(round.history, a.success).map(([x, y]) => [rename(x), rename(y)]));
       assert.deepEqual(log.reversals(b.success), log.reversals(a.success).map(([x, y]) => [rename(x), rename(y)]));
-      assert.deepEqual(log.secondClarifications(renamedHistory, b.success), log.secondClarifications(round.history, a.success).map(rename));
+      assert.deepEqual(log.secondClarifications(renamedHistory, b.success), log.secondClarifications(round.history, a.success).map((id) => rename(id)));
       assert.equal(log.acceptedCount(b.success), log.acceptedCount(a.success));
+    }),
+    RUNS,
+  );
+});
+
+test("property: for a log built by a sequence of valid rounds and decisions, historyBefore(log, p, n) is the log as it was before round (p, n)", () => {
+  fc.assert(
+    fc.property(fc.array(fc.tuple(arbRound, fc.option(fc.tuple(arbId, fc.string()), { nil: null })), { maxLength: 4 }), (steps) => {
+      let history: readonly LogEntry[] = [];
+      const before: (readonly LogEntry[])[] = [];
+      let phase = 1;
+      for (const [round, decision] of steps) {
+        const validated = validateReview(round.review);
+        if (!Result.isSuccess(validated)) return;
+        const result = validateRound(validated.success, round.response, history, phase, 1);
+        if (!Result.isSuccess(result)) return;
+        before.push(history);
+        history = log.appendRound(history, result.success);
+        if (decision !== null) history = log.appendUserDecision(history, decision[0] as IssueId, decision[1], phase, 1);
+        phase++;
+      }
+      before.forEach((expected, i) => assert.deepEqual(historyBefore(history, i + 1, 1), expected));
     }),
     RUNS,
   );

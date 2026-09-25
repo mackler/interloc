@@ -1,7 +1,7 @@
 // Pure functions on the issue log. No file access, no agent calls, no Effect. The log transitions take a
 // validated round (src/round.ts), so a missing disposition is unrepresentable here (finding 4).
 
-import type { ValidatedRound } from "./round.ts";
+import type { IssueId, ValidatedRound } from "./round.ts";
 import type { LogEntry, Review } from "./schema.ts";
 
 const NOT_ACCEPTED_IN_FULL = new Set(["rejected", "partially_accepted", "no_change_needed"]);
@@ -12,7 +12,7 @@ function current(log: readonly LogEntry[]): LogEntry[] {
 
 /** Ids in the review that Claude Code did not accept in full earlier and that Codex has raised again. */
 export function reraisedIds(log: readonly LogEntry[], review: Review): string[] {
-  const open = new Set(current(log).filter((e) => NOT_ACCEPTED_IN_FULL.has(e.action)).map((e) => e.id));
+  const open = new Set<string>(current(log).filter((e) => NOT_ACCEPTED_IN_FULL.has(e.action)).map((e) => e.id));
   return review.issues.map((i) => i.id).filter((id) => open.has(id));
 }
 
@@ -61,8 +61,9 @@ export function appendRound(log: readonly LogEntry[], round: ValidatedRound): re
       evidence: issue.evidence,
       action: d.action,
       rationale: d.rationale,
-      ...(d.duplicateOf !== null ? { duplicate_of: d.duplicateOf } : {}),
-      ...(d.reverses !== null ? { reverses: d.reverses } : {}),
+      duplicate_of: d.duplicateOf,
+      reverses: d.reverses,
+      superseded: false,
     };
   });
   const fromSelf: LogEntry[] = round.selfCorrections.map((sc) => {
@@ -75,6 +76,7 @@ export function appendRound(log: readonly LogEntry[], round: ValidatedRound): re
       problem: earlier?.problem ?? "error found by the planner",
       action: sc.newAction === "rejected" ? "correction_disputed" : sc.newAction,
       rationale: sc.explanation,
+      superseded: false,
     };
   });
   const reviewIds = new Set(fromReview.map((e) => e.id));
@@ -85,9 +87,9 @@ export function appendRound(log: readonly LogEntry[], round: ValidatedRound): re
 }
 
 /** The log with a decision of the user on one issue appended; earlier entries of that id are superseded. */
-export function appendUserDecision(log: readonly LogEntry[], id: string, decision: string, phase: number, round: number): readonly LogEntry[] {
+export function appendUserDecision(log: readonly LogEntry[], id: IssueId, decision: string, phase: number, round: number): readonly LogEntry[] {
   const earlier = log.filter((e) => e.id === id).at(-1);
-  const entry: LogEntry = { id, phase, round, source: "user", problem: earlier?.problem ?? "", action: "decided_by_user", rationale: decision };
+  const entry: LogEntry = { id, phase, round, source: "user", problem: earlier?.problem ?? "", action: "decided_by_user", rationale: decision, superseded: false };
   return [...supersede(log, new Set([id])), entry];
 }
 

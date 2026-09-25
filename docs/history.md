@@ -259,6 +259,26 @@ thread's context growing with every round). Resume is not implemented, so the re
   summary. Properties: bounded generated event traces through `advance` against a model in the test, and
   the usage fold's laws. Small helpers: `planningCall` reports `repaired` (a `Ref` instead of a mutable
   binding), `askNonEmpty`, the interview's message variants and the line-protocol fold in `src/input.ts`.
+- Stage 4: a subject's two planning operations are typed by their schemas (`Subject<R, D>`, finding 12);
+  the reviewer returns a `ReviewSession` bound to its thread (`startPhase`; no nullable `Ref`, finding 11);
+  the planner's decoding and reduction are pure (`src/claudeEvents.ts`: `AskUserQuestion` input decoded,
+  partial output explicit, the stop per execution call, the terminal dialogue serialized with a
+  `Semaphore`; findings 17, 19, 20); the decoders return `Result` and `lift` is gone, the callback
+  failure travels through a typed `Deferred`, and `haltMessage` validates the payload of a tag
+  (`decodeRunError`; finding 10 — `isRunError` was not split into a trusted variant, because after the
+  `Deferred` no value crosses a Promise boundary inside the program). Records (Q5): log entries are a
+  union tagged by `source` with `superseded` required and `null` references, the three logs are
+  `{ version: 2, entries }`, usage lines are per-agent records, `questions.json` carries the version, and
+  every round gets `round-<n>.json` (`no_response` after the review, `validated` after the response);
+  `src/records.ts` reads both versions, reconstructs a version-1 round against its pre-round history
+  (`historyBefore`; the archive case with a generated self-correction id is the fixture
+  `test/fixtures/run-v1/`) and converts a run directory idempotently. Interview turns, execution reports
+  and the question list become variants after decoding (`src/schemaNormalize.ts`; finding 8, Q4; duplicate
+  question ids halt with `QuestionListInvalid`). The planning hook resolves edit targets through symlinks
+  (finding 21; race policy: the check is at hook time, the snapshot comparison after the call is the
+  second check). The strict JSON Schema fallback is total (`Result<Json, UnsupportedSchema>`, finding 24).
+  Readonly views for the exchanged records (finding 26). Properties: `historyBefore` against the log as
+  it was, the question-list normalisation, and the strict transform on generated acyclic schema graphs.
 
 ## Rejected or deferred
 

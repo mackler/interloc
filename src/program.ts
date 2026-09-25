@@ -11,7 +11,7 @@ import { loadConfig, makeStore, type Platform } from "./store.ts";
 import { renderUsage } from "./usage.ts";
 
 /** What the program is wired to: the terminal, the platform, the SDKs and the agents. */
-export type Wiring = {
+export type Wiring = Readonly<{
   /** The Ui of the run; a scoped resource (live: the terminal on the process streams). */
   ui: Effect.Effect<UiShape, never, Scope.Scope>;
   /** The platform services (live: platformLayer). */
@@ -26,7 +26,7 @@ export type Wiring = {
   cwd: string;
   /** Where the usage text goes when there is no task (live: stderr). */
   usage: (text: string) => Effect.Effect<void>;
-};
+}>;
 
 export const USAGE = 'usage: node main.ts "task description" [project directory]';
 

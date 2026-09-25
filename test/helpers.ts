@@ -12,7 +12,7 @@ import { parseAskLine, parseMessage } from "../src/input.ts";
 import type { Wiring } from "../src/program.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
-import { Planner, type PlannerShape, Reviewer, type ReviewerShape, RunConfig, type Services, Ui, type UiShape } from "../src/services.ts";
+import { Planner, type PlannerShape, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Ui, type UiShape } from "../src/services.ts";
 import { makeStore, platformLayer, storeLayer } from "../src/store.ts";
 import { FakeSdk } from "./fakeSdk.ts";
 
@@ -173,18 +173,22 @@ export class ScriptedReviewer implements ReviewerShape {
     this.state = state;
     this.reviews = [...reviews];
   }
-  readonly newPhase = Effect.sync(() => void this.phases++);
-  /** Returns the reply text as Codex would: the caller decodes it. */
-  review(prompt: string): Effect.Effect<string> {
-    return Effect.sync(() => {
-      this.prompts.push(prompt);
-      this.callPhases.push(this.phases);
-      const step = this.reviews.shift();
-      if (!step) throw new Error("no scripted review");
-      if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
-      return step.raw ?? JSON.stringify({ issues: step.issues });
-    });
-  }
+  /** Each start is a new "thread": the session remembers its phase number so that a test can see which calls shared one. */
+  readonly startPhase: Effect.Effect<ReviewSession> = Effect.sync(() => {
+    const phase = ++this.phases;
+    return {
+      /** Returns the reply text as Codex would: the caller decodes it. */
+      review: (prompt: string): Effect.Effect<string> =>
+        Effect.sync(() => {
+          this.prompts.push(prompt);
+          this.callPhases.push(phase);
+          const step = this.reviews.shift();
+          if (!step) throw new Error("no scripted review");
+          if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
+          return step.raw ?? JSON.stringify({ issues: step.issues });
+        }),
+    };
+  });
 }
 
 export const issue = (id: string, problem = "p"): Review["issues"][number] => ({ id, severity: "major", location: "s", problem, evidence: "e" });
@@ -205,7 +209,7 @@ export type Probe = {
   dir: string;
   plan: string;
   requirements: string;
-  loadLog: (name?: string) => Promise<LogEntry[]>;
+  loadLog: (name?: string) => Promise<readonly LogEntry[]>;
   ui: ScriptedUi;
   planner: ScriptedPlanner;
   reviewer: ScriptedReviewer;
@@ -222,7 +226,7 @@ export function testLayer(repo: string, options: TestOptions = {}): { layer: Lay
   const store = Layer.provide(storeLayer(repo, config.ignorePaths), platformLayer);
   const layer = Layer.mergeAll(store, Layer.succeed(Ui, ui), Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer), Layer.succeed(RunConfig, config));
   const dir = path.join(paths.project, "plan-review");
-  const loadLog = (name?: string): Promise<LogEntry[]> =>
+  const loadLog = (name?: string): Promise<readonly LogEntry[]> =>
     Effect.runPromise(makeStore(repo, config.ignorePaths).pipe(Effect.flatMap((s) => s.loadLog(name)), Effect.provide(platformLayer)));
   return { layer, probe: { dir, plan: paths.plan, requirements: path.join(dir, "requirements.md"), loadLog, ui, planner, reviewer, config } };
 }

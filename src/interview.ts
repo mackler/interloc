@@ -7,6 +7,7 @@ import * as prompts from "./prompts.ts";
 import { planningCall, reviewLoop } from "./review.ts";
 import * as S from "./schema.ts";
 import type { QuestionList } from "./schema.ts";
+import { normalizeTurn } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
 import { questionSubject, requirementsSubject, writeQuestions } from "./subjects.ts";
 import { askNonEmpty } from "./ui.ts";
@@ -23,11 +24,11 @@ export const interview = (opening: string, heading: string): Effect.Effect<void,
     yield* store.converse(`## ${heading}\n\n`);
     let prompt = opening;
     for (;;) {
-      const turn = (yield* planningCall(prompt, S.InterviewTurn, true)).output;
-      yield* ui.say(`\n${turn.message_to_user}\n`);
-      yield* store.converse(`**Claude Code:** ${turn.message_to_user}\n\n`);
+      const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, true)).output);
+      yield* ui.say(`\n${turn.message}\n`);
+      yield* store.converse(`**Claude Code:** ${turn.message}\n\n`);
 
-      if (turn.complete && turn.summary.trim() !== "") {
+      if (turn.kind === "summary_proposed") {
         yield* ui.say(`Summary proposed by Claude Code:\n\n${turn.summary}\n`);
         const reply = parseInterviewMessage(yield* ui.askMessage("Enter = confirm the summary; any other text continues the conversation > "));
         if (reply.kind !== "text") {
@@ -80,7 +81,9 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
     yield* reviewLoop(requirementsSubject(store));
   });
 
-function renderQuestions(list: QuestionList): string {
+/** The list as the agents exchange it or as the program records it (a recorded default may be null). */
+type RenderableQuestions = Readonly<{ questions: readonly Readonly<{ id: string; question: string; reason: string; proposed_answers: QuestionList["questions"][number]["proposed_answers"]; default_answer: string | null }>[] }>;
+function renderQuestions(list: RenderableQuestions): string {
   if (list.questions.length === 0) return "The list is empty.\n";
   return list.questions
     .map((q) => {

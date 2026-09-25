@@ -28,9 +28,9 @@ const reviewer = async (turns: TurnAnswer[], config: Partial<typeof S.Config.Typ
 
 const tag = (e: unknown): string => (e as RunError)._tag;
 
-test("newPhase starts a thread with danger-full-access, approval never, the project as working directory", async () => {
+test("startPhase starts a thread with danger-full-access, approval never, the project as working directory", async () => {
   const fake = await reviewer([]);
-  await run(fake.reviewer.newPhase);
+  await run(fake.reviewer.startPhase);
   assert.equal(fake.sdk.threads.length, 1);
   assert.deepEqual(fake.sdk.threads[0].options, {
     workingDirectory: fake.project,
@@ -41,50 +41,54 @@ test("newPhase starts a thread with danger-full-access, approval never, the proj
 
 test("the configured model is passed, and no model key is set when codexModel is null", async () => {
   const withModel = await reviewer([], { codexModel: "gpt-x" });
-  await run(withModel.reviewer.newPhase);
+  await run(withModel.reviewer.startPhase);
   assert.equal(withModel.sdk.threads[0].options?.model, "gpt-x");
 
   const without = await reviewer([]);
-  await run(without.reviewer.newPhase);
+  await run(without.reviewer.startPhase);
   assert.ok(!("model" in (without.sdk.threads[0].options ?? {})), "model must be absent when codexModel is null");
 });
 
 test("review passes agentJsonSchema(Review) as outputSchema and records usage", async () => {
   const fake = await reviewer([turn(JSON.stringify({ issues: [{ id: "A", severity: "major", location: "l", problem: "p", evidence: "e" }] }))]);
-  await run(fake.reviewer.newPhase);
-  const text = await run(fake.reviewer.review("review the plan"));
+  const session = await run(fake.reviewer.startPhase);
+  const text = await run(session.review("review the plan"));
 
   assert.deepEqual(JSON.parse(text).issues.map((i: { id: string }) => i.id), ["A"]);
   assert.deepEqual(fake.sdk.threads[0].calls[0].turnOptions?.outputSchema, agentJsonSchema(S.Review));
   assert.equal(fake.sdk.threads[0].calls[0].input, "review the plan");
   const usage = JSON.parse(fs.readFileSync(path.join(fake.dir, "usage.jsonl"), "utf8").trim());
   assert.equal(usage.agent, "codex");
-  assert.equal(usage.thread_id, "thread-1");
-  assert.deepEqual(usage.usage, { input_tokens: 10, output_tokens: 5 });
+  assert.equal(usage.version, 2);
+  assert.equal(usage.thread, "thread-1");
+  assert.deepEqual([usage.input_tokens, usage.output_tokens], [10, 5]);
 });
 
 test("a failed turn fails with CodexCallFailed", async () => {
   const fake = await reviewer([new Error("the model is overloaded")]);
-  await run(fake.reviewer.newPhase);
-  await assert.rejects(run(fake.reviewer.review("review the plan")), (e: unknown) => tag(e) === "CodexCallFailed");
+  const session = await run(fake.reviewer.startPhase);
+  await assert.rejects(run(session.review("review the plan")), (e: unknown) => tag(e) === "CodexCallFailed");
 });
 
 test("the reviewer returns a reply without an issues array unchanged to the caller", async () => {
   const fake = await reviewer([turn(JSON.stringify({ findings: [] }))]);
-  await run(fake.reviewer.newPhase);
-  assert.equal(await run(fake.reviewer.review("review the plan")), JSON.stringify({ findings: [] }));
+  const session = await run(fake.reviewer.startPhase);
+  assert.equal(await run(session.review("review the plan")), JSON.stringify({ findings: [] }));
 });
 
-test("each newPhase starts a new thread", async () => {
+// Finding 11 / recommendation C: the session is a value bound to its thread, not a nullable Ref in the adapter.
+test("each startPhase returns a session bound to its own thread, and calls do not cross", async () => {
   const empty = JSON.stringify({ issues: [] });
-  const fake = await reviewer([turn(empty), turn(empty)]);
-  await run(fake.reviewer.newPhase);
-  await run(fake.reviewer.review("first phase"));
-  await run(fake.reviewer.newPhase);
-  await run(fake.reviewer.review("second phase"));
+  const fake = await reviewer([turn(empty), turn(empty), turn(empty)]);
+  const first = await run(fake.reviewer.startPhase);
+  const second = await run(fake.reviewer.startPhase);
+  await run(second.review("second phase"));
+  await run(first.review("first phase"));
+  await run(first.review("first phase again"));
 
   assert.equal(fake.sdk.threads.length, 2);
-  assert.deepEqual(fake.sdk.threads.map((t) => t.calls.length), [1, 1]);
+  assert.deepEqual(fake.sdk.threads[0].calls.map((c) => c.input), ["first phase", "first phase again"]);
+  assert.deepEqual(fake.sdk.threads[1].calls.map((c) => c.input), ["second phase"]);
 });
 
 // Finding 11 of docs/functional-design-review.md: startup failures were defects, not typed errors.
@@ -96,20 +100,13 @@ const typedFailure = async (effect: Effect.Effect<unknown, RunError>): Promise<R
   return error.value;
 };
 
-test("review before newPhase fails with CodexCallFailed, not a defect", async () => {
-  const fake = await reviewer([]);
-  const error = await typedFailure(fake.reviewer.review("review the plan"));
-  assert.equal(error._tag, "CodexCallFailed");
-  assert.match(describe(error), /no review thread/);
-});
-
-test("a startThread that throws makes newPhase fail with CodexCallFailed, not a defect", async () => {
+test("a startThread that throws makes startPhase fail with CodexCallFailed, not a defect", async () => {
   const store = await run(makeStore(tempRepo(), []).pipe(Effect.provide(platformLayer)));
   const fake = new FakeSdk();
   const sdk: AgentSdk = { query: (params) => fake.query(params), startThread: () => { throw new Error("spawn codex ENOENT"); } };
   const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Sdk, sdk), Layer.succeed(RunConfig, S.defaultConfig));
   const codex = await run(makeCodexReviewer.pipe(Effect.provide(deps)));
-  const error = await typedFailure(codex.newPhase);
+  const error = await typedFailure(codex.startPhase);
   assert.equal(error._tag, "CodexCallFailed");
   assert.match(describe(error), /spawn codex ENOENT/);
 });
@@ -126,9 +123,9 @@ test("interrupting a review aborts the Codex turn", async () => {
       });
     });
   const fake = await reviewer([waitForAbort]);
-  await run(fake.reviewer.newPhase);
+  const session = await run(fake.reviewer.startPhase);
   const reached = fake.sdk.nextCall();
-  const fiber = Effect.runFork(fake.reviewer.review("review the plan"));
+  const fiber = Effect.runFork(session.review("review the plan"));
   await reached;
   await sleep(10);
   await run(Fiber.interrupt(fiber));

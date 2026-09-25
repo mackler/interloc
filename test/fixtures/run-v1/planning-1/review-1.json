@@ -1,0 +1,32 @@
+{
+  "issues": [
+    {
+      "id": "P1-R1-1",
+      "severity": "major",
+      "location": "1.1–1.3",
+      "problem": "The schema implementation precedes the acceptance gate, contrary to Q7.",
+      "evidence": "Requirements Q7 explicitly says Stage 1 starts only after the developer reports that a schema variant is accepted by both agents. Steps 1.1 and 1.2 implement the production schemas and transformer before the prototype and waiting point in 1.3. Move the proof and necessary prototype preparation ahead of production Schema implementation."
+    },
+    {
+      "id": "P1-R1-2",
+      "severity": "major",
+      "location": "0.3",
+      "problem": "The smoke-test sequence explicitly permits a failure that the confirmed test-first requirement forbids.",
+      "evidence": "The requirements prohibit using a missing import as the intended failing test, without exception. Step 0.3 instead requires observing “Cannot find package 'effect'” before installation. Also, package.json runs tsc before tests, so unresolved imports prevent the runtime smoke test from running. Arrange dependency verification and installation so the smoke test uses verified APIs and fails for an allowed reason."
+    },
+    {
+      "id": "P1-R1-3",
+      "severity": "major",
+      "location": "4.1",
+      "problem": "Deleting the old schema and type modules leaves the Stage 1 compatibility tests without their reference definitions.",
+      "evidence": "Step 1.1 requires type comparisons against src/types.ts, and 1.2 requires equality comparisons against objects from src/schemas.ts. Step 4.1 deletes both files without preserving those baselines or specifying replacement assertions. Keeping the imports breaks tsc; redirecting the comparisons to the new definitions makes them self-comparisons. Preserve independent test fixtures before deleting the modules."
+    },
+    {
+      "id": "P1-R1-4",
+      "severity": "major",
+      "location": "2.1",
+      "problem": "The planned round-limit test expects an error that the specified UI behavior prevents.",
+      "evidence": "The test expects q at the round limit to produce RoundLimitStop, but this same step explicitly makes ScriptedUi throw UserStopped for q. TerminalUi.ask likewise handles q before reviewLoop receives an answer. In src/review.ts, the round-limit-specific halt is reached with 0 or another returned invalid answer. Test RoundLimitStop with 0 and retain UserStopped for q, preserving the existing behavior and halt texts."
+    }
+  ]
+}

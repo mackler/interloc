@@ -43,6 +43,7 @@ test("question list is amended in review, the interview runs, the summary is con
   await runTask(layer);
 
   const questions = JSON.parse(read(probe.dir, "questions.json"));
+  assert.equal(questions.version, 2);
   assert.equal(questions.task, "task");
   assert.deepEqual(questions.questions.map((x: QuestionEntry) => x.id), ["Q1", "Q2"]);
   assert.match(read(probe.dir, "requirements.md"), /Q2: B because of X/);

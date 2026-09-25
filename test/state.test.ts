@@ -5,12 +5,14 @@ import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { Cause, Effect, Exit, Layer, Option, Stream } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Result, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
 import type { StoreShape } from "../src/services.ts";
 import { compareSnapshots, type Snapshot } from "../src/snapshot.ts";
+import * as S from "../src/schema.ts";
+import { decodeRecord, parseJson } from "../src/state.ts";
 import { makeStore, platformLayer } from "../src/store.ts";
 import { renderUsage } from "../src/usage.ts";
 import { tempRepo } from "./helpers.ts";
@@ -306,4 +308,50 @@ test("names with tabs and quotes are the real names: matched against ignorePaths
   const s = await Effect.runPromise(makeStore(repo, ["tab\there.txt"]).pipe(Effect.provide(Layer.mergeAll(platformLayer, layer))));
   const snapshot = await Effect.runPromise(s.projectSnapshot());
   assert.deepEqual([...snapshot.entries.keys()], ['q"uote.txt']);
+});
+
+// Finding 10: the decoders of the program's own records return a Result instead of throwing.
+test("parseJson and decodeRecord return a Result whose failure is StateFileInvalid naming the file", () => {
+  const bad = parseJson("f.json", "{nope");
+  assert.ok(Result.isFailure(bad));
+  assert.equal(bad.failure._tag, "StateFileInvalid");
+  assert.equal(bad.failure.file, "f.json");
+  const good = parseJson("f.json", '{"a":1}');
+  assert.ok(Result.isSuccess(good));
+  assert.deepEqual(good.success, { a: 1 });
+
+  const mismatch = decodeRecord("q.json", S.QuestionList, { questions: "x" });
+  assert.ok(Result.isFailure(mismatch));
+  assert.match(describe(mismatch.failure), /q\.json could not be read: .*questions/);
+  const decoded = decodeRecord("q.json", S.QuestionList, { questions: [] });
+  assert.ok(Result.isSuccess(decoded));
+  assert.deepEqual(decoded.success, { questions: [] });
+});
+
+test("lift, the throw-based bridge into Effect, is gone (compile-time)", () => {
+  // @ts-expect-error services.ts exports no `lift`: decoders return Result, and Effect.fromResult lifts them
+  type Lift = (typeof import("../src/services.ts"))["lift"];
+  void (null as Lift | null);
+});
+
+// Q5: the files the store writes are version 2; a version-1 file of an earlier run is still read.
+test("saveLog writes a version-2 log file, and loadLog reads a version-1 array as well", async () => {
+  const s = await initialised();
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(s.dir, "issue-log.json"), "utf8")), { version: 2, entries: [] });
+  const v1 = { id: "A", phase: 1, round: 1, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r" };
+  fs.writeFileSync(path.join(s.dir, "issue-log.json"), JSON.stringify([v1]));
+  const loaded = await Effect.runPromise(s.loadLog());
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].superseded, false);
+  await Effect.runPromise(s.saveLog("issue-log.json", loaded));
+  assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, "issue-log.json"), "utf8")).version, 2);
+});
+
+test("recordUsage writes version-2 lines per agent", async () => {
+  const s = await initialised();
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s", turns: 1, totalCostUsd: 1.5 }));
+  await Effect.runPromise(s.recordUsage({ agent: "codex", thread: "t", inputTokens: 10, outputTokens: 5 }));
+  const lines = fs.readFileSync(path.join(s.dir, "usage.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.deepEqual(lines[0], { version: 2, agent: "claude", time: lines[0].time, session: "s", num_turns: 1, total_cost_usd: 1.5 });
+  assert.deepEqual(lines[1], { version: 2, agent: "codex", time: lines[1].time, thread: "t", input_tokens: 10, output_tokens: 5 });
 });

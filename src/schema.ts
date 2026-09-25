@@ -101,21 +101,29 @@ export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0),
 /** A finite number ≥ 0: costs. */
 export const NonNegativeFinite = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 
-export const LogEntry = Schema.Struct({
-  id: Schema.NonEmptyString,
-  phase: NonNegativeInt,
-  round: NonNegativeInt,
-  source: Schema.Literals(["review", "self_correction", "user"]),
-  severity: Schema.optionalKey(Severity),
-  location: Schema.optionalKey(Schema.String),
-  problem: Schema.String,
-  evidence: Schema.optionalKey(Schema.String),
-  action: Schema.String,
-  rationale: Schema.String,
-  duplicate_of: Schema.optionalKey(Schema.String),
-  reverses: Schema.optionalKey(Schema.String),
-  superseded: Schema.optionalKey(Schema.Boolean),
+/** An issue id: a non-empty identifier, never prose (recommendation B). */
+export const IssueId = Schema.NonEmptyString.pipe(Schema.brand("IssueId"));
+export type IssueId = typeof IssueId.Type;
+
+/** The fields every entry of an issue log has. `superseded` is required (Q5): true when a later entry has the same id. */
+const logEntryBase = { id: IssueId, phase: NonNegativeInt, round: NonNegativeInt, problem: Schema.String, rationale: Schema.String, superseded: Schema.Boolean };
+/** An issue Codex raised, with Claude Code's disposition; a reference names an earlier issue or is null. */
+export const ReviewEntry = Schema.Struct({
+  ...logEntryBase,
+  source: Schema.Literal("review"),
+  severity: Severity,
+  location: Schema.String,
+  evidence: Schema.String,
+  action: Action,
+  duplicate_of: Schema.NullOr(IssueId),
+  reverses: Schema.NullOr(IssueId),
 });
+/** A correction Claude Code made to its own earlier work. */
+export const SelfCorrectionEntry = Schema.Struct({ ...logEntryBase, source: Schema.Literal("self_correction"), action: Schema.Literals(["accepted", "plan_error", "correction_disputed"]) });
+/** A decision of the user on one issue. */
+export const UserEntry = Schema.Struct({ ...logEntryBase, source: Schema.Literal("user"), action: Schema.Literal("decided_by_user") });
+/** One entry of an issue log, tagged by `source` (finding 6; Q5). */
+export const LogEntry = Schema.Union([ReviewEntry, SelfCorrectionEntry, UserEntry]);
 
 export const Config = Schema.Struct({
   questionPhase: Schema.Boolean,
@@ -134,26 +142,30 @@ export const PartialConfig = Config.mapFields(Struct.map(Schema.optionalKey));
 
 /** plan-review/questions.json: the task and the agreed list. Unlike the agent schema, an entry's id must not be empty. */
 export const QuestionsFile = Schema.Struct({
+  version: Schema.Literal(2),
   task: Schema.String,
-  questions: Schema.Array(Schema.Struct({ ...QuestionEntry.fields, id: Schema.NonEmptyString })),
+  /** A default that named none of the proposed answers is null (step 4.6). */
+  questions: Schema.Array(Schema.Struct({ ...QuestionEntry.fields, id: Schema.NonEmptyString, default_answer: Schema.NullOr(Schema.String) })),
 });
 
-/**
- * One line of plan-review/usage.jsonl. The reported fields differ per agent and may grow with the
- * SDKs, so a line is decoded with excess properties ignored, and only the summed fields are named.
- */
-export const UsageEntry = Schema.Struct({
+/** One line of plan-review/usage.jsonl, version 2: the fields the program reads, per agent (finding 9; Q5). */
+export const ClaudeUsage = Schema.Struct({
+  version: Schema.Literal(2),
+  agent: Schema.Literal("claude"),
   time: Schema.String,
-  /** A closed set (finding 9): a line of another agent is invalid, not silently dropped. */
-  agent: Schema.Literals(["claude", "codex"]),
-  session_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  thread_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  num_turns: Schema.optionalKey(NonNegativeInt),
-  total_cost_usd: Schema.optionalKey(Schema.NullOr(NonNegativeFinite)),
-  usage: Schema.optionalKey(
-    Schema.NullOr(Schema.Struct({ input_tokens: Schema.optionalKey(NonNegativeInt), output_tokens: Schema.optionalKey(NonNegativeInt) })),
-  ),
+  session: Schema.NullOr(Schema.String),
+  num_turns: Schema.NullOr(NonNegativeInt),
+  total_cost_usd: Schema.NullOr(NonNegativeFinite),
 });
+export const CodexUsage = Schema.Struct({
+  version: Schema.Literal(2),
+  agent: Schema.Literal("codex"),
+  time: Schema.String,
+  thread: Schema.NullOr(Schema.String),
+  input_tokens: NonNegativeInt,
+  output_tokens: NonNegativeInt,
+});
+export const UsageRecord = Schema.Union([ClaudeUsage, CodexUsage]);
 
 // The types, under the names the program used before the schemas existed.
 export type Severity = typeof Severity.Type;
@@ -171,9 +183,10 @@ export type InterviewTurn = typeof InterviewTurn.Type;
 export type ExecReport = typeof ExecReport.Type;
 export type ExecOutcome = typeof ExecOutcome.Type;
 export type LogEntry = typeof LogEntry.Type;
+export type ReviewEntry = typeof ReviewEntry.Type;
 export type Config = typeof Config.Type;
 export type QuestionsFile = typeof QuestionsFile.Type;
-export type UsageEntry = typeof UsageEntry.Type;
+export type UsageRecord = typeof UsageRecord.Type;
 
 /** The first problem of a failed decode: the field path (`a.b[0]`, or "" at the root) and the message. */
 export const firstIssue = (error: Schema.SchemaError): { path: string; message: string } => {

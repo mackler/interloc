@@ -104,6 +104,25 @@ new name. Material online describes v3 in most cases and is not a source.
 |---|---|---|
 | `Result.succeed` / `Result.fail` | 262 / 288 | `Result<A, E> = Success<A, E> \| Failure<A, E>` (line 57); the value is `.success`, the error `.failure` |
 | `Result.isSuccess` / `Result.isFailure` | 668 / 637 | type guards. A `Result` is not yieldable in `Effect.gen`: a failure is lifted with `Effect.fail(result.failure)` |
+| `Effect.fromResult` | Effect.d.ts:2355 | `(result: Result<A, E>) => Effect<A, E>`: lifts a decoder's `Result` (src/store.ts, review stage 4.4; replaces the throw-based `lift`) |
+| `Effect.result` | Effect.d.ts:3422 | `(self: Effect<A, E, R>) => Effect<Result<A, E>, never, R>`: the typed failure as a value (used in `src/claude.ts` for the synchronous start of a call; review stage 4.3) |
+
+## Deferred (`effect/dist/Deferred.d.ts`; verified 25 Sep, review stage 4.4)
+
+| Name | Line | Notes |
+|---|---|---|
+| `Deferred.make` | 146 | `<A, E = never>() => Effect<Deferred<A, E>>`; `export * as Deferred` in index.d.ts:116 |
+| `Deferred.fail` | 551 | dual: `(self, error: E) => Effect<boolean>` (false when already completed: the first failure wins) |
+| `Deferred.isDone` | 1285 | `(self) => Effect<boolean>` |
+| `Deferred.await` | 147 (`_await`, exported as `await` at 183) | `(self) => Effect<A, E>`: fails with the kept error. The typed channel for a callback failure in `src/claude.ts` (finding 10) |
+| `Effect.as` / `Effect.andThen` | Effect.d.ts:3726 / 2780 | `as(value)` replaces the success value; `andThen(effect)` sequences |
+
+## Semaphore (`effect/dist/Semaphore.d.ts`; verified 25 Sep, review stage 4.3)
+
+| Name | Line | Notes |
+|---|---|---|
+| `Semaphore.make` | 224 | `(permits: number) => Effect<Semaphore>`; `export * as Semaphore` in index.d.ts:464 |
+| `Semaphore#withPermits` | 76 | `(permits) => <A, E, R>(self: Effect<A, E, R>) => Effect<A, E, R>`: acquires before, releases when the effect completes (also on failure or interruption). `withPermits(1)` serializes the terminal dialogue in `src/ui.ts` (finding 20) |
 
 ## Schema (`effect/dist/Schema.d.ts`)
 
@@ -117,6 +136,8 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Schema.NullOr` / `Union` | — / 3921 | `Union(members, options?)` |
 | `Schema.Int` / `Schema.NonEmptyString` (verified 25 Sep, review stage 1) | 5812 / 6335 | integers (no NaN/Infinity); non-empty strings. Used for the program's own records only |
 | `.check(...checks)` on a schema (verified 25 Sep) | 141 | `check(...checks: [Check<Type>, ...]) => Rebuild`; the filters are `Schema.isGreaterThanOrEqualTo(min)` (5694), `isLessThanOrEqualTo(max)` (5732), `isBetween` (5754), `isGreaterThan` (5675), `isFinite` (5573); they correspond to JSON Schema `minimum`/`maximum`. There is no `greaterThanOrEqualTo` without the `is` prefix in v4. |
+| `Schema.brand` | 4151 | `brand(identifier)(schema)`: `NonEmptyString.pipe(Schema.brand("IssueId"))` gives `Type = string & Brand<"IssueId">` (no runtime check beyond the schema's); `IssueId` in src/schema.ts (review stage 4.5) |
+| `Brand.Branded<A, Key>` | Brand.d.ts:171 | `A & Brand<Key>`; `export * as Brand` in index.d.ts:48. Used for `ProjectPath` / `RecordPath` (review stage 4.7) |
 | `Schema.optionalKey` | 1888 | `optionalKey(schema)`: the key may be absent (the `?:` of `LogEntry`) |
 | `Schema.declare` | 399 | `declare(is: (u) => u is T, annotations?)`, used for the stage 1 scaffolding |
 | `Schema.fromJsonString` | 6729 | `fromJsonString(schema, options?)`: a string decoded as JSON, then as `schema`. Used for Codex's `finalResponse` and for JSON files. |
@@ -171,7 +192,8 @@ service class is `ChildProcessSpawner.ChildProcessSpawner`); the Node layers fro
 | Name | File:line | Notes |
 |---|---|---|
 | `FileSystem.FileSystem` | effect/dist/FileSystem.d.ts:363 | service; methods `exists`, `makeDirectory`, `readDirectory`, `readFileString`, `writeFileString(path, data, { flag?: "a" … })`, `rename`, `stat`, `remove`, `chmod`; errors are `PlatformError` |
-| `Path.Path` | effect/dist/Path.d.ts:250 | service; `join`, `resolve`, `sep` |
+| `Path.Path` | effect/dist/Path.d.ts:250 | service; `join`, `resolve`, `sep`, `relative(from, to)` (line 93; the converter's report, review stage 4.5) |
+| `FileSystem.realPath` | FileSystem.d.ts:204 | `(path) => Effect<string, PlatformError>`; the planning hook uses Node's `fs.promises.realpath` directly (review stage 4.7), since the hook is a Promise callback of the SDK without the service |
 | `NodeFileSystem.layer` | @effect/platform-node/dist/NodeFileSystem.d.ts:9 | `Layer<FileSystem>` |
 | `NodePath.layer` | @effect/platform-node/dist/NodePath.d.ts:10 | `Layer<Path>` |
 | `NodeServices.layer` | @effect/platform-node/dist/NodeServices.d.ts:33 | all Node services |

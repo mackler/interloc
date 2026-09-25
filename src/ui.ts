@@ -3,7 +3,7 @@
 // a single line is sent with Enter, and for several lines the user types """ on a line by itself,
 // then the text, then """ again; the message "/quit" ends the run.
 
-import { Effect, Layer, type Scope } from "effect";
+import { Effect, Layer, type Scope, Semaphore } from "effect";
 import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
 import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
@@ -14,6 +14,7 @@ import { Ui as UiService, type UiShape } from "./services.ts";
  * run, closed when the scope closes (the end of the run or an interruption). Lines arrive as events,
  * several at once when text is pasted, and are queued until a call asks for the next one, so no
  * pasted line is lost between two calls. The end of the input ends a waiting call with UserStopped.
+ * The dialogue is serialized: a second concurrent ask waits for the first to be answered (finding 20).
  */
 export const terminalUi = (
   input: NodeJS.ReadableStream,
@@ -27,6 +28,7 @@ export const terminalUi = (
       (rl) => Effect.sync(() => rl.close()),
     );
     rl.on("SIGINT", onInterrupt);
+    const dialogue = yield* Semaphore.make(1);
     const lines: string[] = [];
     let waiting: ((line: string | null) => void) | null = null;
     let ended = false;
@@ -67,7 +69,7 @@ export const terminalUi = (
           const parsed = parseAskLine(yield* nextLine(prompt));
           if (parsed.kind === "quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
           return parsed.text;
-        }),
+        }).pipe(dialogue.withPermits(1)),
       askMessage: (prompt) =>
         Effect.gen(function* () {
           yield* showPrompt(prompt);
@@ -76,7 +78,7 @@ export const terminalUi = (
           const parsed = parseMessage(fold.lines.join("\n"));
           if (parsed.kind === "quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
           return parsed.text;
-        }),
+        }).pipe(dialogue.withPermits(1)),
     };
   });
 

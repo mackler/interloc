@@ -22,17 +22,18 @@ const arbConfig = record<S.Config>({
   claudeModel: fc.option(fc.string(), { nil: null }),
   codexModel: fc.option(fc.string(), { nil: null }),
 });
-const arbLogEntry = record<S.LogEntry>({
-  id: nonEmpty,
-  phase: nonNegativeInt,
-  round: nonNegativeInt,
-  source: fc.constantFrom("review", "self_correction", "user"),
-  problem: fc.string(),
-  action: fc.string(),
-  rationale: fc.string(),
-});
-const arbUsage = record<S.UsageEntry>({ time: fc.string(), agent: fc.constantFrom("claude", "codex"), num_turns: nonNegativeInt, total_cost_usd: cost, usage: record({ input_tokens: nonNegativeInt, output_tokens: nonNegativeInt }) });
+const arbIssueId = nonEmpty.map((s) => s as S.IssueId);
+const entryBase = { id: arbIssueId, phase: nonNegativeInt, round: nonNegativeInt, problem: fc.string(), rationale: fc.string(), superseded: fc.boolean() };
+const arbLogEntry: fc.Arbitrary<S.LogEntry> = fc.oneof(
+  record({ ...entryBase, source: fc.constant("review" as const), severity: fc.constantFrom("blocking", "major", "minor"), location: fc.string(), evidence: fc.string(), action: fc.constantFrom("accepted", "partially_accepted", "rejected", "no_change_needed", "clarification_requested"), duplicate_of: fc.option(arbIssueId, { nil: null }), reverses: fc.option(arbIssueId, { nil: null }) }),
+  record({ ...entryBase, source: fc.constant("self_correction" as const), action: fc.constantFrom("accepted", "plan_error", "correction_disputed") }),
+  record({ ...entryBase, source: fc.constant("user" as const), action: fc.constant("decided_by_user" as const) }),
+);
+const arbClaudeUsage = record({ version: fc.constant(2 as const), agent: fc.constant("claude" as const), time: fc.string(), session: fc.option(fc.string(), { nil: null }), num_turns: fc.option(nonNegativeInt, { nil: null }), total_cost_usd: fc.option(cost, { nil: null }) });
+const arbCodexUsage = record({ version: fc.constant(2 as const), agent: fc.constant("codex" as const), time: fc.string(), thread: fc.option(fc.string(), { nil: null }), input_tokens: nonNegativeInt, output_tokens: nonNegativeInt });
+const arbUsage: fc.Arbitrary<S.UsageRecord> = fc.oneof(arbClaudeUsage, arbCodexUsage);
 const arbQuestions = record<S.QuestionsFile>({
+  version: fc.constant(2),
   task: fc.string(),
   questions: fc.array(record({ id: nonEmpty, question: fc.string(), reason: fc.string(), proposed_answers: fc.array(record({ label: fc.string(), description: fc.string() })), default_answer: fc.string() })),
 });
@@ -46,7 +47,7 @@ const rejected = (schema: Schema.Top & Schema.ConstraintDecoder<unknown>, value:
 test("property: encode/decode round trips for the record schemas", () => {
   fc.assert(fc.property(arbConfig, (c) => roundTrips(S.Config, c)), RUNS);
   fc.assert(fc.property(arbLogEntry, (e) => roundTrips(S.LogEntry, e)), RUNS);
-  fc.assert(fc.property(arbUsage, (u) => roundTrips(S.UsageEntry, u)), RUNS);
+  fc.assert(fc.property(arbUsage, (u) => roundTrips(S.UsageRecord, u)), RUNS);
   fc.assert(fc.property(arbQuestions, (q) => roundTrips(S.QuestionsFile, q)), RUNS);
 });
 
@@ -69,10 +70,10 @@ test("property: negative, fractional and unsafe counts fail; empty required iden
     RUNS,
   );
   fc.assert(
-    fc.property(arbUsage, badNonNegative, fc.double({ max: -0.0001, noNaN: true, noDefaultInfinity: true }), (u, bad, negativeCost) => {
-      rejected(S.UsageEntry, { ...u, num_turns: bad }, `num_turns ${bad}`);
-      rejected(S.UsageEntry, { ...u, total_cost_usd: negativeCost }, `cost ${negativeCost}`);
-      rejected(S.UsageEntry, { ...u, usage: { input_tokens: bad, output_tokens: 0 } }, `input_tokens ${bad}`);
+    fc.property(arbClaudeUsage, arbCodexUsage, badNonNegative, fc.double({ max: -0.0001, noNaN: true, noDefaultInfinity: true }), (c, x, bad, negativeCost) => {
+      rejected(S.UsageRecord, { ...c, num_turns: bad }, `num_turns ${bad}`);
+      rejected(S.UsageRecord, { ...c, total_cost_usd: negativeCost }, `cost ${negativeCost}`);
+      rejected(S.UsageRecord, { ...x, input_tokens: bad }, `input_tokens ${bad}`);
     }),
     RUNS,
   );

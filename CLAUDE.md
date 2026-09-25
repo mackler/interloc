@@ -32,28 +32,32 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/main.ts` | Entry point: the live wiring and the platform runner (`NodeRuntime.runMain`) applied to the program; the only untested code besides `src/sdkLive.ts` |
 | `src/program.ts` | `program(args, wiring)`: arguments, configuration, the services from the wiring, the run, and what is printed at the end; `exitCodeOf` |
 | `src/run.ts` | Question phase, then alternation of planning phase K and execution phase K |
-| `src/review.ts` | `reviewLoop` as the interpreter of `src/reviewState.ts` (it executes the commands against the services and feeds the events back); `planningCall`; `decodeWithRepair`; generic over a `Subject` |
+| `src/review.ts` | `reviewLoop` as the interpreter of `src/reviewState.ts` (it executes the commands against the services and feeds the events back); `planningCall`; `decodeWithRepair`; generic over a `Subject<R, D>` whose two planning operations are typed by their schemas |
 | `src/reviewState.ts` | The review loop as a pure state machine: `advance(state, event)` returns the next state and the commands; every pause condition of behaviour 7, in its order, the log update and the progress checks live here. No I/O, no Effect |
 | `src/usage.ts` | The usage summary as a pure fold over the lines of `usage.jsonl` (per-agent lines, each identified session's last running total, unidentified calls counted separately) and its rendering |
 | `src/subjects.ts` | The three subjects: question list, requirements, plan |
 | `src/interview.ts` | Question phase and the interview in the terminal |
 | `src/issueLog.ts` | Pure functions on the issue log (no I/O, no Effect). Detection of repeated issues, supersession, user decisions |
-| `src/services.ts` | The five services (`Ui`, `Planner`, `Reviewer`, `Store`, `RunConfig`) and the `Sdk` service, with their error unions |
-| `src/errors.ts` | The typed errors (one per cause that ends a run, and per I/O or parse failure), `describe`, `haltMessage` |
+| `src/services.ts` | The five services (`Ui`, `Planner`, `Reviewer`, `Store`, `RunConfig`) and the `Sdk` service, with their error unions; `ReviewSession` (one thread per review loop, returned by `startPhase`); the path brands `ProjectPath` / `RecordPath` |
+| `src/errors.ts` | The typed errors (one per cause that ends a run, and per I/O or parse failure), `describe` over their data, `decodeRunError` (a schema per tag) and `haltMessage` |
 | `src/schema.ts` | One Effect Schema per kind of data: it gives the type, the JSON Schema for the agents, and the validation. `defaultConfig` |
-| `src/jsonSchema.ts` | The JSON Schema the agents receive, generated from `src/schema.ts` (raw variant; strict transform as the fallback) |
-| `src/claude.ts` | Claude Code through `@anthropic-ai/claude-agent-sdk`, as the `Planner` layer |
+| `src/jsonSchema.ts` | The JSON Schema the agents receive, generated from `src/schema.ts` (raw variant; the strict transform as the fallback, total: `Result<Json, UnsupportedSchema>`) |
+| `src/claude.ts` | Claude Code through `@anthropic-ai/claude-agent-sdk`, as the `Planner` layer: stream consumption, cancellation, persistence, the hooks (edit targets resolved through symlinks) and the permission callbacks; the stop of an execution call is per call |
+| `src/claudeEvents.ts` | Pure decoding of what the SDK hands the planner (`AskUserQuestion` input, edit targets), the reduction of a call's messages into its outcome (partial output explicit), and the execution outcome |
+| `src/schemaNormalize.ts` | Variants after decoding (pure): interview turns, execution reports, and the question list (a default that names no proposed answer becomes null; duplicate or empty ids are `QuestionListInvalid`) |
+| `src/records.ts` | The program's records on disk: the version-2 file shapes (`{ version: 2, entries }` logs, per-agent usage lines, `round-<n>.json`), the version-1 shapes, readers that accept both versions, `readRound` (a version-1 pair reconstructed against its pre-round history) and `convertPlanReviewDir` |
 | `src/codex.ts` | Codex through `@openai/codex-sdk`, as the `Reviewer` layer |
 | `src/sdk.ts`, `src/sdkLive.ts` | The `AgentSdk` interface the adapters use, and its binding to the real SDKs (untested) |
-| `src/round.ts` | The validated round (pure): unique non-empty ids, one disposition per issue, references normalised, generated self-correction ids; `RoundInvalid` otherwise |
+| `src/round.ts` | The validated round (pure): unique non-empty ids, one disposition per issue, references normalised, generated self-correction ids; `RoundInvalid` otherwise; `historyBefore` |
 | `src/snapshot.ts` | The project snapshot (pure): git's porcelain v2 records decoded, the working-tree entry per path, `compareSnapshots`, the exclusion predicate |
 | `src/prompts.ts` | Every prompt text. Prompts are not written anywhere else |
 | `src/input.ts` | Pure interpretation of what the user types: the option a reply chooses, the extra rounds at the round limit, the `q` and `/quit` commands (shared by the terminal and the scripted Ui), the interview's `/done`, and the fold of the `"""` line protocol |
 | `src/store.ts` | The `Store` layer on Effect's FileSystem, Path and child-process services: files in `<project>/plan-review/`, the project snapshot, `loadConfig`; `platformLayer` |
-| `src/state.ts` | The decoders of the program's own JSON records |
-| `src/ui.ts` | The `Ui` layer: one readline interface as a scoped resource |
+| `src/state.ts` | The decoders of the program's own JSON records, returning `Result` |
+| `src/ui.ts` | The `Ui` layer: one readline interface as a scoped resource; the dialogue is serialized (a second concurrent `ask` waits) |
 | `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer` (the services, scripted), `testLayer`, `testWiring`, temporary git repository |
 | `test/fakeSdk.ts` | A fake of the two SDKs for the adapter tests |
+| `test/fixtures/run-v1/` | A reduced copy of a real version-1 run directory (from this repository's archive) for the reader and converter tests |
 | `test/*.property.test.ts` | Property-based tests with `fast-check`, for the rows of the table in `docs/functional-design-review.md`, recommendation E |
 | `docs/effect-v4-api.md` | The API ledger: every Effect name used, with its declaration and the facts observed about it |
 | `prototypes/` | The SDK prototypes and the schema acceptance prototype used to verify the environment; not part of the program |
@@ -68,7 +72,7 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 5. Codex runs with `sandboxMode: "danger-full-access"` and `approvalPolicy: "never"`, because bubblewrap cannot start in the containers. The program halts if the project or the reviewed file changed during a Codex turn. Codex keeps one thread per review loop.
 6. Five dispositions (`accepted`, `partially_accepted`, `rejected`, `no_change_needed`, `clarification_requested`), self-corrections, and reviewer feedback. Every rationale is returned to Codex through the issue log.
 7. Pause conditions in `reviewLoop`: repeated issue that was not accepted in full (same id, or new id reported through `duplicate_of`); reversal of an accepted correction; disputed self-correction; second clarification request for one id; identical file content to an earlier round; unexplained change; `maxIdleRounds` rounds without an accepted issue; round limit (`maxRounds`).
-8. Records: `conversation.md` (readable, in order), JSON files per round, `usage.jsonl`, and `invalid-replies/` for agent replies that did not match their schema. A new run moves the previous run to `plan-review/archive-<time>/`.
+8. Records: `conversation.md` (readable, in order), JSON files per round (`review-<n>.json` and `cc-<n>.json` are the agents' raw replies; `round-<n>.json` is the program's validated record of the round, `no_response` after the review and `validated` after the response), the three issue logs as `{ version: 2, entries }` with entries tagged by `source`, `usage.jsonl` with one per-agent record per line, `questions.json`, and `invalid-replies/` for agent replies that did not match their schema. Record files carry `version: 2`; the readers also accept the version-1 files of earlier runs (decision Q5). A new run moves the previous run to `plan-review/archive-<time>/`.
 9. Configuration precedence: defaults in `src/schema.ts`, then `config.json` in this repository (all projects), then `<project>/plan-review/config.json`. Invalid JSON, a wrong type or an unknown key in either file stops the program before any agent call and before the records are initialised (decision Q4 of the Effect rewrite).
 10. Validation of agent replies (decision Q5): a structured reply of a planning, interview or review call that does not match its schema is kept in `invalid-replies/`, and the agent gets one repair turn in the same session or thread; a second mismatch stops the run. Execution reports get no repair turn: a recorded `AskUserQuestion` stop takes precedence, and an invalid report without a stop is treated like a missing one (status `aborted`).
 11. Interruption (decision Q3): Ctrl+C aborts both SDK calls, closes the terminal interface, prints `INTERRUPTED by the user. State is preserved in …`, appends `**Interrupted by the user.**` to `conversation.md`, prints the Claude Code session id and the usage summary, and exits with code 130. A halt exits with 1, a missing task with 2.

@@ -2,18 +2,19 @@
 // comparison of the project state (decoded and compared by src/snapshot.ts).
 // API names: docs/effect-v4-api.md.
 
-import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, type PlatformError, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, type PlatformError, Result, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { createHash } from "node:crypto";
-import { ConfigInvalid, FileSystemError, GitError, type StateFileInvalid } from "./errors.ts";
+import { ConfigInvalid, FileSystemError, GitError } from "./errors.ts";
 import * as S from "./schema.ts";
-import type { Config, LogEntry } from "./schema.ts";
-import { lift, Store, type StoreError, type StoreShape } from "./services.ts";
+import type { Config, LogEntry, UsageRecord } from "./schema.ts";
+import { readLog, readQuestions, readUsage, VERSION } from "./records.ts";
+import { decodeText } from "./state.ts";
+import { type ProjectPath, type RecordPath, Store, type StoreError, type StoreShape } from "./services.ts";
 import { decodeStatusV2, excluded, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
-import { decodeRecord, parseJson } from "./state.ts";
 import { summarizeUsage, type UsageLine, type UsageSummary } from "./usage.ts";
 
 /** The platform services the store needs. */
@@ -23,22 +24,18 @@ export type Platform = FileSystem.FileSystem | Path.Path | ChildProcessSpawner.C
 export const platformLayer: Layer.Layer<Platform> = Layer.provideMerge(NodeChildProcessSpawner.layer, Layer.mergeAll(NodeFileSystem.layer, NodePath.layer));
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-const decodeConfigFile = Schema.decodeUnknownSync(S.PartialConfig, { onExcessProperty: "error" });
+const decodeConfigFile = Schema.decodeUnknownResult(S.PartialConfig, { onExcessProperty: "error" });
 
 /** The content of one config file. Invalid JSON, a wrong type and an unknown key are ConfigInvalid. */
-const decodeConfigText = (file: string, text: string): Partial<Config> => {
+export const decodeConfigText = (file: string, text: string): Result.Result<Partial<Config>, ConfigInvalid> => {
   let json: unknown;
   try {
     json = JSON.parse(text);
   } catch (e) {
-    throw new ConfigInvalid({ file, path: "", message: message(e) });
+    return Result.fail(new ConfigInvalid({ file, path: "", message: message(e) }));
   }
-  try {
-    return decodeConfigFile(json);
-  } catch (e) {
-    if (Schema.isSchemaError(e)) throw new ConfigInvalid({ file, ...S.firstIssue(e) });
-    throw e;
-  }
+  const decoded = decodeConfigFile(json);
+  return Result.isSuccess(decoded) ? Result.succeed(decoded.success) : Result.fail(new ConfigInvalid({ file, ...S.firstIssue(decoded.failure) }));
 };
 
 /**
@@ -55,14 +52,13 @@ export const loadConfig = (project: string, sharedFile: string): Effect.Effect<C
       Effect.gen(function* () {
         if (!(yield* io(file, fs.exists(file)))) return {};
         const text = yield* io(file, fs.readFileString(file));
-        return yield* lift<Partial<Config>, ConfigInvalid>(() => decodeConfigText(file, text));
+        return yield* Effect.fromResult(decodeConfigText(file, text));
       });
     const shared = yield* read(sharedFile);
     const own = yield* read(path.join(path.resolve(project), "plan-review", "config.json"));
     return { ...S.defaultConfig, ...shared, ...own };
   });
 
-const LogFile = Schema.Array(S.LogEntry);
 const LOG_FILES = ["issue-log.json", "questions-log.json", "requirements-log.json"];
 
 /** The store of one project. `ignorePaths` are the paths the change detection ignores (config). */
@@ -72,11 +68,11 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
-    const project = path.resolve(projectDir);
-    const dir = path.join(project, "plan-review");
-    const plan = path.join(dir, "plan.md");
-    const questions = path.join(dir, "questions.json");
-    const requirements = path.join(dir, "requirements.md");
+    const project = path.resolve(projectDir) as ProjectPath;
+    const dir = path.join(project, "plan-review") as RecordPath;
+    const plan = path.join(dir, "plan.md") as RecordPath;
+    const questions = path.join(dir, "questions.json") as RecordPath;
+    const requirements = path.join(dir, "requirements.md") as RecordPath;
     const decisionsFile = path.join(dir, "user-decisions.md");
     const feedbackFile = path.join(dir, "reviewer-feedback.md");
     const conversationFile = path.join(dir, "conversation.md");
@@ -100,8 +96,8 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
     const writeJson = (file: string, value: unknown) => serialize(file, value, 2).pipe(Effect.flatMap((text) => writeText(file, text + "\n")));
     /** Reads, parses and decodes a JSON file of the program's own records. */
     const readJson = <Out extends Schema.ConstraintDecoder<unknown>>(file: string, schema: Out): Effect.Effect<Out["Type"], StoreError> =>
-      readText(file).pipe(Effect.flatMap((text) => lift<Out["Type"], StateFileInvalid>(() => decodeRecord(file, schema, parseJson(file, text)))));
-    const saveLog = (name: string, log: readonly LogEntry[]) => writeJson(path.join(dir, name), log);
+      readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(decodeText(file, schema, text))));
+    const saveLog = (name: string, log: readonly LogEntry[]) => writeJson(path.join(dir, name), { version: VERSION, entries: log });
     const converse = (markdown: string) => append(conversationFile, markdown);
     const subDir = (name: string) =>
       Effect.gen(function* () {
@@ -168,37 +164,38 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       subDir,
       writeJson,
       writeText,
-      loadLog: (name = "issue-log.json") => readJson(path.join(dir, name), LogFile).pipe(Effect.map((log) => [...log])),
+      // The readers accept the version-1 files of earlier runs as well (Q5's follow-up).
+      loadLog: (name = "issue-log.json") => {
+        const file = path.join(dir, name);
+        return readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(readLog(file, text))));
+      },
       saveLog,
-      loadQuestions: () => readJson(questions, S.QuestionsFile),
+      loadQuestions: () => readText(questions).pipe(Effect.flatMap((text) => Effect.fromResult(readQuestions(questions, text)))),
       recordDecision: (subject, decision) =>
         append(decisionsFile, `Subject: ${subject}\nDecision: ${decision}\n\n`).pipe(Effect.andThen(converse(`**User decision** on ${subject}: ${decision}\n\n`))),
       recordFeedback: (heading, round, text) => append(feedbackFile, `## ${heading}, round ${round}\n${text}\n\n`),
       /**
-       * Appends one line to usage.jsonl: the usage an agent reported for one call, in the on-disk shape
-       * (session_id, thread_id, usage). The time is read when the effect runs, and it is the store's.
+       * Appends one line to usage.jsonl: the usage an agent reported for one call, as a version-2 record
+       * (Q5). The time is read when the effect runs, and it is the store's.
        */
       recordUsage: (line) =>
         Effect.suspend(() => {
-          const fields =
+          const time = new Date().toISOString();
+          const record: UsageRecord =
             line.agent === "claude"
-              ? { agent: "claude", session_id: line.session, num_turns: line.turns ?? undefined, total_cost_usd: line.totalCostUsd }
-              : { agent: "codex", thread_id: line.thread, usage: { input_tokens: line.inputTokens, output_tokens: line.outputTokens } };
-          return serialize(usageFile, { ...fields, time: new Date().toISOString() });
+              ? { version: VERSION, agent: "claude", time, session: line.session, num_turns: line.turns, total_cost_usd: line.totalCostUsd }
+              : { version: VERSION, agent: "codex", time, thread: line.thread, input_tokens: line.inputTokens, output_tokens: line.outputTokens };
+          return serialize(usageFile, record);
         }).pipe(Effect.flatMap((text) => append(usageFile, text + "\n"))),
-      /** The usage lines, read into their per-agent shape and folded by src/usage.ts; no file gives the empty summary. */
+      /** The usage lines of either version, read into their per-agent shape and folded by src/usage.ts; no file gives the empty summary. */
       usageSummary: (): Effect.Effect<UsageSummary, StoreError> =>
         Effect.gen(function* () {
           if (!(yield* exists(usageFile))) return summarizeUsage([]);
-          const texts = (yield* readText(usageFile)).split("\n").filter((l) => l !== "");
-          // Excess properties are ignored: the SDKs decide which usage fields they report.
-          const entries = yield* lift<(typeof S.UsageEntry.Type)[], StateFileInvalid>(() =>
-            texts.map((text) => decodeRecord(usageFile, S.UsageEntry, parseJson(usageFile, text), { onExcessProperty: "ignore" })),
-          );
-          const lines: UsageLine[] = entries.map((e) =>
-            e.agent === "claude"
-              ? { agent: "claude", session: e.session_id ?? null, turns: e.num_turns ?? null, totalCostUsd: e.total_cost_usd ?? null }
-              : { agent: "codex", thread: e.thread_id ?? null, inputTokens: e.usage?.input_tokens ?? 0, outputTokens: e.usage?.output_tokens ?? 0 },
+          const records = yield* Effect.fromResult(readUsage(usageFile, yield* readText(usageFile)));
+          const lines: UsageLine[] = records.map((r) =>
+            r.agent === "claude"
+              ? { agent: "claude", session: r.session, turns: r.num_turns, totalCostUsd: r.total_cost_usd }
+              : { agent: "codex", thread: r.thread, inputTokens: r.input_tokens, outputTokens: r.output_tokens },
           );
           return summarizeUsage(lines);
         }),

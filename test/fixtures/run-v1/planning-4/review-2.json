@@ -1,0 +1,11 @@
+{
+  "issues": [
+    {
+      "id": "P4-R2-1",
+      "severity": "major",
+      "location": "4.2",
+      "problem": "Moving only loadConfig inside the existing try cannot preserve valid initialization and error reporting.",
+      "evidence": "In src/main.ts, config is consumed by the ClaudePlanner and Context constructors before the try, and finally unconditionally calls planner.sessionId(). Moving config initialization into try therefore also requires restructuring those consumers. If configuration fails before planner construction, finally must handle the absent planner without masking ConfigInvalid. Specify that initialization and cleanup change, with a failing entry-point test asserting the config diagnostic and exit code 1; the pure haltMessage test does not exercise this failure path."
+    }
+  ]
+}

@@ -10,7 +10,7 @@ import { issue, respond } from "./helpers.ts";
 // state machine. The scenario tests of test/run.test.ts remain the behavioural specification; these
 // examples pin each transition.
 
-const setup: ReviewSetup = { heading: "Planning phase 1", fileLabel: "plan.md", phase: 1, proceedLabel: "proceed to execution with the plan as it is", hasAmend: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceedLabel: "proceed to execution with the plan as it is", hasAmend: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
 const start = (config: Partial<{ maxRounds: number; maxIdleRounds: number; countMinor: boolean }> = {}, log: LogEntry[] = []): Transition =>
   advance(initialState(setup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", log });
 const kinds = (t: Transition): string[] => t.commands.map((c) => c.kind);
@@ -24,7 +24,8 @@ const halt = (t: Transition): RunError => {
 /** Applies the events in order, returning the last transition. */
 const run = (first: Transition, ...events: ReviewEvent[]): Transition => events.reduce((t, e) => advance(t.state, e), first);
 const noQuestions = { questions_for_user: [] };
-const entry = (id: string, action: string, round = 1): LogEntry => ({ id, phase: 1, round, source: "review", problem: "p", action, rationale: "r" });
+const entry = (id: string, action: string, round = 1): LogEntry =>
+  ({ id, phase: 1, round, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action, rationale: "r", duplicate_of: null, reverses: null, superseded: false }) as LogEntry;
 const response = (dispositions: [string, "accepted" | "rejected" | "partially_accepted" | "no_change_needed" | "clarification_requested"][], extra = {}): ReviewEvent => ({ kind: "ResponseDecoded", response: respond(dispositions, extra), resultText: "", costUsd: 0.1 });
 void noQuestions;
 
@@ -71,7 +72,7 @@ test("an invalid response halts; a valid one is saved, rendered, and the round g
   const invalid = run(afterReview(), response([["A", "accepted"], ["A", "rejected"]]));
   assert.equal(halt(invalid)._tag, "RoundInvalid");
   const valid = run(afterReview(), response([["A", "accepted"]]));
-  assert.deepEqual(kinds(valid).filter((k) => k !== "Say"), ["SaveResponse", "Converse", "SaveLog", "ObserveFile"]);
+  assert.deepEqual(kinds(valid).filter((k) => k !== "Say"), ["SaveResponse", "SaveRound", "Converse", "SaveLog", "ObserveFile"]);
   assert.deepEqual(last(valid), { kind: "ObserveFile", stage: "response" });
   assert.equal(valid.state.log.length, 1);
   assert.equal(valid.state.log[0].action, "accepted");
@@ -183,4 +184,21 @@ test("every batch has at most one event-producing command, and it is the last", 
   }
   const state: ReviewState = t.state;
   assert.equal(state.round, 2);
+});
+
+// Q5: the round record is written from the validated values: no_response with the review, validated with the response.
+test("the round record is saved as no_response after the review and as validated after the response", () => {
+  const rounds = (t: Transition) => t.commands.flatMap((c) => (c.kind === "SaveRound" ? [c.record] : []));
+  const afterReviewT = afterReview();
+  const [noResponse] = rounds(afterReviewT);
+  assert.equal(noResponse?.kind, "no_response");
+  assert.deepEqual([noResponse?.subject, noResponse?.phase, noResponse?.round, noResponse?.reconstructed], ["planning-1", 1, 1, false]);
+  const converged = run(start(), { kind: "ReviewDecoded", review: { issues: [] } });
+  assert.equal(rounds(converged)[0]?.kind, "no_response");
+  const [validated] = rounds(run(afterReviewT, response([["A", "accepted"]])));
+  assert.equal(validated?.kind, "validated");
+  if (validated?.kind !== "validated") return;
+  assert.deepEqual(validated.response.dispositions.map((d) => [d.id, d.action]), [["A", "accepted"]]);
+  assert.deepEqual(validated.review.issues.map((i) => i.id), ["A"]);
+  assert.equal(validated.reconstructed, false);
 });

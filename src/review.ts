@@ -6,6 +6,7 @@ import { Effect, Ref, Schema } from "effect";
 import * as path from "node:path";
 import { AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import { repairReplyPrompt } from "./prompts.ts";
+import { VERSION } from "./records.ts";
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
@@ -15,8 +16,16 @@ import { compareSnapshots } from "./snapshot.ts";
 /** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
 const ReviewText = Schema.fromJsonString(S.Review);
 
-/** What the review procedure is applied to. */
-export type Subject<R extends PlannerResponse = PlannerResponse> = {
+/** One planning call of a subject: its prompt, the schema of its output, and what is done with the output. */
+export type Operation<T> = Readonly<{
+  prompt: (round: number) => string;
+  schema: Schema.Decoder<T>;
+  /** Runs after every such call, for output that the program writes to the file; null when there is nothing to do. */
+  after: ((output: T) => Effect.Effect<void, RunError>) | null;
+}>;
+
+/** What the review procedure is applied to. `R` is the response to a review, `D` the output of applying decisions (finding 12). */
+export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = Readonly<{
   /** Heading in conversation.md and in terminal output, for example "Planning phase 2". */
   heading: string;
   /** Name of the reviewed file as used in messages, for example "plan.md". */
@@ -29,20 +38,16 @@ export type Subject<R extends PlannerResponse = PlannerResponse> = {
   dirName: string;
   /** Number recorded in the phase field of log entries. */
   phase: number;
-  reviewPrompt(round: number): string;
-  respondPrompt(round: number): string;
-  /** Effect schema of Claude Code's response to a review. */
-  respondSchema: Schema.Decoder<R>;
-  applyDecisionsPrompt: string;
-  /** Effect schema of the output of the call that applies the user's decisions. */
-  applyDecisionsSchema: Schema.Decoder<unknown>;
-  /** Called after every Claude Code call of this subject, for output that the program writes to the file. */
-  afterPlannerCall?(output: unknown): Effect.Effect<void, StoreError>;
-  /** Called after the response of a round, for amendments that require the user (the requirements). */
-  amend?(review: Review, response: R, round: number): Effect.Effect<void, RunError, Services>;
+  reviewPrompt: (round: number) => string;
+  /** Claude Code's response to a review. */
+  respond: Operation<R>;
+  /** The call that applies the user's decisions; its prompt does not depend on the round. */
+  applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError>) | null }>;
+  /** After the response of a round, an amendment that requires the user (the requirements); null otherwise. */
+  amend: ((review: Review, response: R, round: number) => Effect.Effect<void, RunError, Services>) | null;
   /** Text of the "p" choice at the round limit. */
   proceedLabel: string;
-};
+}>;
 
 /** Reads one decision. An empty answer records nothing and returns "". */
 export const askDecision = (subject: string): Effect.Effect<string, RunError, Ui | Store> =>
@@ -124,10 +129,10 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
     return { output, resultText: used.resultText, costUsd: used.costUsd, repaired: second !== null };
   });
 
-export const applyDecisions = (subject: Subject<any>): Effect.Effect<void, RunError, Services> =>
+export const applyDecisions = <D>(subject: Subject<PlannerResponse, D>): Effect.Effect<void, RunError, Services> =>
   Effect.gen(function* () {
-    const call = yield* planningCall(subject.applyDecisionsPrompt, subject.applyDecisionsSchema);
-    if (subject.afterPlannerCall) yield* subject.afterPlannerCall(call.output);
+    const call = yield* planningCall(subject.applyDecisions.prompt, subject.applyDecisions.schema);
+    if (subject.applyDecisions.after !== null) yield* subject.applyDecisions.after(call.output);
   });
 
 /**
@@ -135,7 +140,7 @@ export const applyDecisions = (subject: Subject<any>): Effect.Effect<void, RunEr
  * against the services, and the command that yields an event (the last of its batch) drives the next
  * transition. The pauses, the log update and the progress checks are all in `advance`.
  */
-export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effect.Effect<"converged" | "proceed", RunError, Services> =>
+export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>): Effect.Effect<"converged" | "proceed", RunError, Services> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const ui = yield* Ui;
@@ -143,7 +148,8 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
     const reviewer = yield* Reviewer;
     const { heading, fileLabel, file, logName, phase } = subject;
     const dir = yield* store.subDir(subject.dirName);
-    yield* reviewer.newPhase;
+    // One thread per review loop (behaviour 5): the session is held by this loop, not by the adapter.
+    const session = yield* reviewer.startPhase;
 
     // Codex runs without a sandbox, so the project and the reviewed file are compared after every turn,
     // including a repair turn.
@@ -151,7 +157,7 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
       Effect.gen(function* () {
         const projectBefore = yield* store.projectSnapshot();
         const fileBefore = yield* store.fileHash(file);
-        const reply = yield* reviewer.review(text);
+        const reply = yield* session.review(text);
         const changes = compareSnapshots(projectBefore, yield* store.projectSnapshot());
         const fileChanged = (yield* store.fileHash(file)) !== fileBefore;
         if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes: [...changes, { kind: "content_changed", path: fileLabel }] }));
@@ -181,10 +187,13 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
             return null;
           case "SaveResponse":
             yield* store.writeJson(path.join(dir, `cc-${command.round}.json`), command.response);
-            if (subject.afterPlannerCall) yield* subject.afterPlannerCall(command.response);
+            if (subject.respond.after !== null) yield* subject.respond.after(command.response as R);
             return null;
           case "SaveLog":
             yield* store.saveLog(logName, command.log);
+            return null;
+          case "SaveRound":
+            yield* store.writeJson(path.join(dir, `round-${command.record.round}.json`), { version: VERSION, ...command.record });
             return null;
           case "Halt":
             return yield* Effect.fail(command.error);
@@ -199,14 +208,14 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
             return { kind: "ReviewDecoded", review };
           }
           case "CallPlanner": {
-            const call = yield* planningCall(subject.respondPrompt(command.round), subject.respondSchema);
+            const call = yield* planningCall(subject.respond.prompt(command.round), subject.respond.schema);
             return { kind: "ResponseDecoded", response: call.output, resultText: call.resultText, costUsd: call.costUsd };
           }
           case "ApplyDecisions":
-            yield* applyDecisions(subject);
+            yield* applyDecisions(subject as Subject<PlannerResponse, D>);
             return { kind: "DecisionsApplied" };
           case "Amend":
-            if (subject.amend) yield* subject.amend(state.current.review!, state.current.response as R, command.round);
+            if (subject.amend !== null) yield* subject.amend(state.current.review!, state.current.response as R, command.round);
             return { kind: "Amended" };
           case "ObserveFile":
             return { kind: "FileObserved", hash: yield* store.fileHash(file) };
@@ -224,6 +233,6 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
         return yield* Effect.die(new Error("the review loop ended a batch without an event"));
       });
 
-    const setup: ReviewSetup = { heading, fileLabel, phase, proceedLabel: subject.proceedLabel, hasAmend: subject.amend !== undefined, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
+    const setup: ReviewSetup = { heading, fileLabel, dirName: subject.dirName, phase, proceedLabel: subject.proceedLabel, hasAmend: subject.amend !== null, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
     return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: yield* store.fileHash(file), log: yield* store.loadLog(logName) }));
   });

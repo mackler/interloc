@@ -9,7 +9,7 @@ import { issue, respond } from "./helpers.ts";
 // through `advance`, checked against a small independent model kept in the test.
 
 const RUNS = { numRuns: 150, seed: 20260925 };
-const setup: ReviewSetup = { heading: "Planning phase 1", fileLabel: "plan.md", phase: 1, proceedLabel: "proceed", hasAmend: false, maxRounds: 3, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceedLabel: "proceed", hasAmend: false, maxRounds: 3, maxIdleRounds: 2, countMinor: true };
 const PRODUCING = new Set(["AskLimit", "AskDecision", "CallReviewer", "CallPlanner", "ApplyDecisions", "Amend", "ObserveFile", "Halt", "Finish"]);
 const ACTIONS: readonly Action[] = ["accepted", "partially_accepted", "rejected", "no_change_needed", "clarification_requested"];
 

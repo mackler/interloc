@@ -3,11 +3,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
-import { Cause, Effect, Exit, Option } from "effect";
+import { Cause, Effect, Exit, Option, Result } from "effect";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
 import { defaultConfig } from "../src/schema.ts";
-import { loadConfig, platformLayer } from "../src/store.ts";
+import { decodeConfigText, loadConfig, platformLayer } from "../src/store.ts";
 import { tempRepo } from "./helpers.ts";
 
 /** A project with a plan-review/ directory and a shared config file outside it. Neither file exists yet. */
@@ -77,4 +77,18 @@ test("a round limit of 0 is reported with its field path", async () => {
   const { project, shared, projectFile } = setup();
   fs.writeFileSync(projectFile, JSON.stringify({ maxRounds: 0 }));
   await failsWith(project, shared, "ConfigInvalid", /maxRounds/);
+});
+
+// Finding 10: the config decoder returns a Result instead of throwing ConfigInvalid.
+test("decodeConfigText returns a Result: ConfigInvalid for bad JSON or a wrong type, the partial config otherwise", () => {
+  const badJson = decodeConfigText("/p/config.json", "{nope");
+  assert.ok(Result.isFailure(badJson));
+  assert.equal(badJson.failure._tag, "ConfigInvalid");
+  assert.equal(badJson.failure.file, "/p/config.json");
+  const wrongType = decodeConfigText("/p/config.json", '{"maxRounds": "5"}');
+  assert.ok(Result.isFailure(wrongType));
+  assert.equal(wrongType.failure.path, "maxRounds");
+  const good = decodeConfigText("/p/config.json", '{"maxRounds": 3}');
+  assert.ok(Result.isSuccess(good));
+  assert.deepEqual(good.success, { maxRounds: 3 });
 });

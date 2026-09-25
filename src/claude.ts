@@ -1,22 +1,21 @@
-// Claude Code through the Claude Agent SDK, as the Planner service.
+// Claude Code through the Claude Agent SDK, as the Planner service. This file keeps stream consumption,
+// cancellation, persistence and the SDK's tool-name strings; decoding and reduction are in src/claudeEvents.ts.
 
 import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHookInput, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import { Effect, Exit, Layer, Ref, Schema } from "effect";
+import { Deferred, Effect, Exit, Layer, Ref, Result } from "effect";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { ClaudeCallFailed, isRunError, type UserStopped } from "./errors.ts";
+import { type CallOutcome, decodeQuestions, decodeToolTarget, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
+import { ClaudeCallFailed, type UserStopped } from "./errors.ts";
 import { chooseOption } from "./input.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as S from "./schema.ts";
-import type { ExecReport } from "./schema.ts";
 import { Planner, type PlannerShape, RunConfig, Sdk, Store, type StoreError, Ui } from "./services.ts";
 
 const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
-type Question = { question: string; options: { label: string; description: string }[] };
-type Stop = { question: string; input: string };
-type CallResult = { structured: unknown; resultText: string; costUsd: number | null; error: string | null };
-/** What a callback of the SDK can fail with: the user stopping, or a record that could not be written. */
-type CallbackError = UserStopped | StoreError;
+/** What a callback of the SDK can fail with: the user stopping, a record that could not be written, or malformed callback data. */
+type CallbackError = UserStopped | StoreError | ClaudeCallFailed;
 /** Runs an Effect inside a callback of the SDK; on failure the call is aborted and `fallback` is answered. */
 type InCallback = <A>(effect: Effect.Effect<A, CallbackError>, fallback: A) => Promise<A>;
 
@@ -37,16 +36,12 @@ export const toSdkAnswers = (questions: readonly { readonly question: string }[]
   return { answers: object, duplicates };
 };
 
-const decodeExecReport = Schema.decodeUnknownSync(S.ExecReport);
-/** The status report of an execution call, or null if there is none or it does not match its schema. */
-const execReport = (structured: unknown): ExecReport | null => {
-  try {
-    return decodeExecReport(structured);
-  } catch (e) {
-    if (Schema.isSchemaError(e)) return null;
-    throw e;
-  }
+/** The decoded questions of an AskUserQuestion input, or a typed failure of the call (finding 17). */
+const questionsOf = (input: unknown): Effect.Effect<readonly Question[], ClaudeCallFailed> => {
+  const decoded = decodeQuestions(input);
+  return Result.isSuccess(decoded) ? Effect.succeed(decoded.success) : Effect.fail(new ClaudeCallFailed({ message: `AskUserQuestion input not understood: ${decoded.failure}` }));
 };
+const deny = (message: string): PermissionResult => ({ behavior: "deny", message });
 
 /** The Planner service over the SDK, Ui, Store and RunConfig services. */
 export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | Store | RunConfig> = Effect.gen(function* () {
@@ -54,9 +49,31 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   const ui = yield* Ui;
   const store = yield* Store;
   const config = yield* RunConfig;
-  const allowedDir = store.dir + path.sep;
   const session = yield* Ref.make<string | null>(null);
-  const stop = yield* Ref.make<Stop | null>(null);
+
+  /**
+   * The real location of a path that may not exist yet: its nearest existing ancestor resolved through
+   * symlinks, plus the rest (finding 21). A path with no existing ancestor is returned as resolved.
+   */
+  const realLocation = async (target: string): Promise<string> => {
+    let existing = target;
+    const rest: string[] = [];
+    for (;;) {
+      try {
+        return path.join(await fsp.realpath(existing), ...rest);
+      } catch {
+        const parent = path.dirname(existing);
+        if (parent === existing) return target;
+        rest.unshift(path.basename(existing));
+        existing = parent;
+      }
+    }
+  };
+  /** True when the named target lies under plan-review/ on the file system, not only lexically. */
+  const underRecords = async (named: string): Promise<boolean> => {
+    const allowed = (await realLocation(store.dir)) + path.sep;
+    return (await realLocation(path.resolve(store.project, named))).startsWith(allowed);
+  };
 
   /** Asks the user each question; the answers are keyed by the question's index, so equal texts stay apart. */
   const relayQuestions = (questions: readonly Question[]): Effect.Effect<ReadonlyMap<number, string>, CallbackError> =>
@@ -83,12 +100,15 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     });
 
   // Planning: deny every file edit whose target is outside plan-review/. A hook runs before the
-  // permission evaluation, so the denial applies in every permission mode.
+  // permission evaluation, so the denial applies in every permission mode. An input without a
+  // readable target is denied like one outside. The target is resolved on the file system, so a
+  // symlink under plan-review/ that points outside is denied (finding 21). Race policy: the check
+  // is made at hook time; the project snapshot comparison after the call is the second check
+  // (behaviour 3), and the container is the boundary.
   const restrictEdits: HookCallback = async (input) => {
     const pre = input as PreToolUseHookInput;
-    const toolInput = pre.tool_input as Record<string, unknown>;
-    const target = path.resolve(store.project, String(toolInput?.file_path ?? toolInput?.notebook_path ?? ""));
-    if (target.startsWith(allowedDir)) return {};
+    const named = decodeToolTarget(pre.tool_input);
+    if (named !== null && (await underRecords(named))) return {};
     return {
       hookSpecificOutput: {
         hookEventName: pre.hook_event_name,
@@ -101,38 +121,47 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   // Execution: after Claude Code has asked the user a question, deny every further tool call, so
   // that the turn ends and the plan is revised and reviewed before work continues.
   // The StructuredOutput tool carries the final status report, so it stays permitted.
-  const denyAfterStop: HookCallback = async (input) => {
-    if ((await Effect.runPromise(Ref.get(stop))) === null) return {};
-    const pre = input as PreToolUseHookInput;
-    if (pre.tool_name === "StructuredOutput") return {};
-    return {
-      hookSpecificOutput: {
-        hookEventName: pre.hook_event_name,
-        permissionDecision: "deny",
-        permissionDecisionReason: "Execution is stopped. Make no tool call other than the final structured output, and end your turn with status 'needs_input'.",
-      },
+  // The stop belongs to one execution call (finding 20): the hook and the permission closure of a
+  // call share the Ref that `executing` created for it.
+  const denyAfterStop =
+    (stop: Ref.Ref<Stop | null>): HookCallback =>
+    async (input) => {
+      if ((await Effect.runPromise(Ref.get(stop))) === null) return {};
+      const pre = input as PreToolUseHookInput;
+      if (pre.tool_name === "StructuredOutput") return {};
+      return {
+        hookSpecificOutput: {
+          hookEventName: pre.hook_event_name,
+          permissionDecision: "deny",
+          permissionDecisionReason: "Execution is stopped. Make no tool call other than the final structured output, and end your turn with status 'needs_input'.",
+        },
+      };
     };
-  };
 
   const planningPermission =
     (inCallback: InCallback): CanUseTool =>
     async (toolName, input): Promise<PermissionResult> => {
       if (toolName === "AskUserQuestion") {
-        const questions = (input.questions ?? []) as Question[];
-        const answers = await inCallback(relayQuestions(questions).pipe(Effect.flatMap((a) => sdkAnswers(questions, a))), {});
-        return { behavior: "allow", updatedInput: { questions, answers } };
+        return inCallback(
+          Effect.gen(function* () {
+            const questions = yield* questionsOf(input);
+            const answers = yield* sdkAnswers(questions, yield* relayQuestions(questions));
+            return { behavior: "allow", updatedInput: { questions, answers } } as PermissionResult;
+          }),
+          deny("The question could not be relayed to the user."),
+        );
       }
       if (EDIT_TOOLS.includes(toolName)) return { behavior: "allow", updatedInput: input };
-      return { behavior: "deny", message: "During a planning phase, only reading and writing under plan-review/ are permitted." };
+      return deny("During a planning phase, only reading and writing under plan-review/ are permitted.");
     };
 
   const executionPermission =
-    (inCallback: InCallback): CanUseTool =>
+    (stop: Ref.Ref<Stop | null>, inCallback: InCallback): CanUseTool =>
     async (toolName, input): Promise<PermissionResult> => {
       if (toolName === "AskUserQuestion") {
-        const questions = (input.questions ?? []) as Question[];
         await inCallback(
           Effect.gen(function* () {
+            const questions = yield* questionsOf(input);
             yield* ui.say("\nClaude Code has stopped execution with a question.");
             const answers = yield* relayQuestions(questions);
             yield* Ref.set(stop, {
@@ -142,10 +171,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           }),
           undefined,
         );
-        return {
-          behavior: "deny",
-          message: "The user's answer is recorded in plan-review/user-decisions.md. Do not continue the implementation. Make no tool call other than the final structured output, and end your turn with status 'needs_input', a summary, and the remaining work. The plan will be revised and reviewed before work continues.",
-        };
+        return deny(
+          "The user's answer is recorded in plan-review/user-decisions.md. Do not continue the implementation. Make no tool call other than the final structured output, and end your turn with status 'needs_input', a summary, and the remaining work. The plan will be revised and reviewed before work continues.",
+        );
       }
       const allowed = await inCallback(
         Effect.gen(function* () {
@@ -156,50 +184,60 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         false,
       );
       if (allowed) return { behavior: "allow", updatedInput: input };
-      return { behavior: "deny", message: "The user denied this action." };
+      return deny("The user denied this action.");
     };
 
   /**
    * One SDK call. The messages are consumed inside the Effect, so an interruption aborts the call
    * through the SDK's AbortController. A callback runs its Effects through the runtime; if one fails,
-   * the failure is kept, the call is aborted, and the call fails with it.
+   * the first failure is kept in a typed Deferred (its exact `CallbackError` type, no cast at the
+   * Promise boundary; finding 10), the call is aborted, and the call fails with it. A defect in a
+   * callback still rejects the callback's Promise. The messages are shown and the usage recorded as
+   * they arrive; the outcome is the pure reduction of the list at the end.
    */
-  const call = (prompt: string, show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallResult, CallbackError> =>
+  const call = (prompt: string, show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallOutcome, CallbackError> =>
     Effect.gen(function* () {
       const controller = new AbortController();
-      let callbackFailure: CallbackError | null = null;
+      const callbackFailure = yield* Deferred.make<never, CallbackError>();
       const inCallback: InCallback = (effect, fallback) =>
-        Effect.runPromise(effect, { signal: controller.signal }).catch((e: unknown) => {
-          if (!isRunError(e)) throw e;
-          callbackFailure ??= e as CallbackError;
-          controller.abort();
-          return fallback;
-        });
+        Effect.runPromise(
+          effect.pipe(
+            Effect.catch((e: CallbackError) =>
+              Deferred.fail(callbackFailure, e).pipe(
+                Effect.andThen(Effect.sync(() => controller.abort())),
+                Effect.as(fallback),
+              ),
+            ),
+          ),
+          { signal: controller.signal },
+        );
       const full: Options = { ...options, cwd: store.project, abortController: controller, canUseTool: permission(inCallback) };
       const resumed = yield* Ref.get(session);
       if (resumed !== null) full.resume = resumed;
       if (config.claudeModel !== null) full.model = config.claudeModel;
 
-      const out: CallResult = { structured: null, resultText: "", costUsd: null, error: "the call produced no result message" };
       const failed = (e: unknown): string => (e instanceof Error ? e.message : String(e));
       // Starting the call can throw synchronously (for example when the SDK cannot start its CLI);
       // that is a call error like a failure of the stream, not a defect.
-      const started = yield* Effect.try({ try: () => sdk.query({ prompt, options: full })[Symbol.asyncIterator](), catch: failed }).pipe(Effect.catch((text) => Effect.sync(() => ((out.error = text), null))));
-      if (started === null) return out;
-      const iterator = started;
+      const started = yield* Effect.try({ try: () => sdk.query({ prompt, options: full })[Symbol.asyncIterator](), catch: failed }).pipe(Effect.result);
+      if (Result.isFailure(started)) return reduceMessages([], started.failure);
+      const iterator = started.success;
+      const seen: SDKMessage[] = [];
+      let streamError: string | null = null;
       /** The next message, or null at the end; a failure of the stream ends the call with its text. */
       const next = (): Effect.Effect<SDKMessage | null> =>
         Effect.tryPromise({ try: () => iterator.next(), catch: (e: unknown) => e }).pipe(
           Effect.map((step) => (step.done ? null : step.value)),
           Effect.catch((e) =>
             Effect.sync(() => {
-              out.error = failed(e);
+              streamError = failed(e);
               return null;
             }),
           ),
         );
       const consume = Effect.gen(function* () {
         for (let message = yield* next(); message !== null; message = yield* next()) {
+          seen.push(message);
           if (message.type === "system" && message.subtype === "init") {
             yield* Ref.set(session, message.session_id);
           } else if (message.type === "assistant" && show !== "none") {
@@ -211,15 +249,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
               }
             }
           } else if (message.type === "result") {
-            out.costUsd = message.total_cost_usd;
             yield* store.recordUsage({ agent: "claude", session: yield* Ref.get(session), turns: message.num_turns, totalCostUsd: message.total_cost_usd });
-            if (message.subtype === "success") {
-              out.structured = message.structured_output;
-              out.resultText = message.result;
-              out.error = null;
-            } else {
-              out.error = message.subtype;
-            }
           }
         }
       });
@@ -231,14 +261,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         await iterator.return?.().catch(() => undefined);
       });
       yield* consume.pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.succeed(undefined) : close)));
-      if (callbackFailure !== null) return yield* Effect.fail(callbackFailure);
-      return out;
+      if (yield* Deferred.isDone(callbackFailure)) return yield* Deferred.await(callbackFailure);
+      return reduceMessages(seen, streamError);
     });
 
   return {
     planning: (prompt, schema, progress = false) =>
       Effect.gen(function* () {
-        const result = yield* call(
+        const outcome = yield* call(
           prompt,
           progress ? "tools" : "none",
           {
@@ -248,34 +278,23 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           },
           planningPermission,
         );
-        if (result.error !== null) return yield* Effect.fail(new ClaudeCallFailed({ message: result.error }));
-        return { output: result.structured, resultText: result.resultText, costUsd: result.costUsd };
+        if (outcome.error !== null) return yield* Effect.fail(new ClaudeCallFailed({ message: outcome.error }));
+        return { output: outcome.structured, resultText: outcome.resultText, costUsd: outcome.costUsd };
       }),
     executing: (prompt) =>
       Effect.gen(function* () {
-        yield* Ref.set(stop, null);
-        const result = yield* call(
+        const stop = yield* Ref.make<Stop | null>(null);
+        const outcome = yield* call(
           prompt,
           "text",
           {
             permissionMode: config.execPermissionMode,
             outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
-            hooks: { PreToolUse: [{ hooks: [denyAfterStop] }] },
+            hooks: { PreToolUse: [{ hooks: [denyAfterStop(stop)] }] },
           },
-          executionPermission,
+          (inCallback) => executionPermission(stop, inCallback),
         );
-        // A recorded stop takes precedence over any report; an invalid report is treated as a missing one.
-        // Execution calls never get a repair turn (decision Q5).
-        const report = execReport(result.structured);
-        const stopped = yield* Ref.get(stop);
-        if (stopped !== null) {
-          return { status: "needs_input" as const, summary: report?.summary ?? "", question: stopped.question, remainingWork: report?.remaining_work ?? "", userInput: stopped.input };
-        }
-        if (result.error !== null || report === null) {
-          const reason = result.error ?? (result.structured === null || result.structured === undefined ? "no structured output" : "the status report does not match its schema");
-          return { status: "aborted" as const, summary: result.resultText, question: `The execution call ended without a status report: ${reason}`, remainingWork: "", userInput: null };
-        }
-        return { status: report.status, summary: report.summary, question: report.question, remainingWork: report.remaining_work, userInput: null };
+        return interpretExecution(outcome, yield* Ref.get(stop));
       }),
     sessionId: Ref.get(session),
   };

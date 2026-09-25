@@ -4,11 +4,12 @@ const SEVERITY = `Severity: blocking = the work cannot succeed with the file as 
 
 /** Rules for the use of an issue log. They are the same for every reviewed file. */
 function logRules(logFile: string, idPrefix: string, round: number): string {
-  return `plan-review/${logFile} lists every issue raised in earlier rounds with the planner's disposition and rationale.
-An entry with superseded = true has been replaced by a later entry with the same id; use the later entry.
-Entries with source 'self_correction' record corrections that the planner made to its own earlier work.
+  return `plan-review/${logFile} is a JSON object whose 'entries' list every issue raised in earlier rounds with the planner's disposition and rationale, in order.
+Every entry has id, phase, round, source, problem, action, rationale and superseded. An entry with superseded = true has been replaced by a later entry with the same id; use the later entry.
+An entry with source 'review' is an issue you raised: it also has severity, location, evidence, the planner's action ('accepted', 'partially_accepted', 'rejected', 'no_change_needed' or 'clarification_requested'), and duplicate_of and reverses, each the id of an earlier issue or null.
+An entry with source 'self_correction' records a correction that the planner made to its own earlier work (action 'accepted', 'plan_error' or 'correction_disputed').
+An entry with source 'user' (action 'decided_by_user') contains a decision of the user on that issue, which must be followed.
 The rationale of every entry is addressed to you; read it irrespective of the action.
-An entry with action 'decided_by_user' contains a decision of the user on that issue, which must be followed.
 plan-review/reviewer-feedback.md contains feedback from the planner that concerns no single issue; take it into account.
 For an entry with action 'clarification_requested', the rationale contains a question to you: if the issue is valid, raise it again under the same id and answer the question in the evidence field; if the question shows the issue to be mistaken, omit the issue.
 plan-review/user-decisions.md contains input and decisions by the user, which must be followed; do not raise an issue that contradicts them.

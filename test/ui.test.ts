@@ -62,6 +62,20 @@ test("pasted lines are not lost between two askMessage calls", async () => {
   assert.deepEqual(await orTimeout(both), ["one", "two"]);
 });
 
+// Finding 20: the dialogue is serialized; a second concurrent ask waits for the first.
+test("two concurrent asks are answered in order, and the second prompt appears only after the first answer", async () => {
+  const io = streams();
+  const answers = withUi(io, (ui) => Effect.all([ui.ask("First > "), ui.ask("Second > ")], { concurrency: "unbounded" }));
+  await sleep(20);
+  assert.match(io.written(), /First > /);
+  assert.doesNotMatch(io.written(), /Second > /, "the second prompt was shown while the first ask was pending");
+  io.input.write("one\n");
+  await sleep(20);
+  assert.match(io.written(), /Second > /);
+  io.input.write("two\n");
+  assert.deepEqual(await orTimeout(answers), ["one", "two"]);
+});
+
 test("say writes the text and a newline", async () => {
   const io = streams();
   await withUi(io, (ui) => ui.say("hello"));

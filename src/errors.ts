@@ -1,6 +1,6 @@
 // Typed errors: one per cause that ends a run, and one per I/O or parse failure that used to escape
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
-import { Data } from "effect";
+import { Data, Result, Schema } from "effect";
 import { type Change, renderChange } from "./snapshot.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
@@ -19,6 +19,8 @@ export class RoundInvalid extends Data.TaggedError("RoundInvalid")<{
   /** Generated self-correction ids that already exist in the log. */
   readonly collidingIds: readonly string[];
 }> {}
+/** A question list whose structure is invalid (duplicate or empty ids): a halt without a repair turn, by analogy with Q3 (step 4.6). */
+export class QuestionListInvalid extends Data.TaggedError("QuestionListInvalid")<{ readonly duplicateIds: readonly string[]; readonly emptyIds: number }> {}
 export class RoundLimitStop extends Data.TaggedError("RoundLimitStop")<{ readonly heading: string }> {}
 export class ClaudeCallFailed extends Data.TaggedError("ClaudeCallFailed")<{ readonly message: string }> {}
 export class CodexCallFailed extends Data.TaggedError("CodexCallFailed")<{ readonly message: string }> {}
@@ -36,6 +38,7 @@ export type RunError =
   | PlanNotWritten
   | AcceptedWithoutChange
   | RoundInvalid
+  | QuestionListInvalid
   | RoundLimitStop
   | ClaudeCallFailed
   | CodexCallFailed
@@ -49,7 +52,7 @@ export type RunError =
 const indent = (changes: readonly Change[]): string => changes.map((change) => `\n  ${renderChange(change)}`).join("");
 
 /** The text that the program prints for an error. */
-export const describe = (error: RunError): string => {
+export const describe = (error: RunErrorFields): string => {
   switch (error._tag) {
     case "UserStopped":
       return "stopped by the user";
@@ -73,6 +76,12 @@ export const describe = (error: RunError): string => {
       if (error.collidingIds.length > 0) parts.push(`a generated self-correction id already exists in the log: ${error.collidingIds.join(", ")}`);
       return `the round is invalid: ${parts.join("; ")}`;
     }
+    case "QuestionListInvalid": {
+      const parts: string[] = [];
+      if (error.duplicateIds.length > 0) parts.push(`more than one question with the id: ${error.duplicateIds.join(", ")}`);
+      if (error.emptyIds > 0) parts.push(`${error.emptyIds} question(s) without an id`);
+      return `the question list is invalid: ${parts.join("; ")}`;
+    }
     case "RoundLimitStop":
       return `stopped by the user at the round limit of ${error.heading}`;
     case "ClaudeCallFailed":
@@ -94,20 +103,58 @@ export const describe = (error: RunError): string => {
   }
 };
 
-const TAGS = new Set<string>([
-  "UserStopped", "ProjectChanged", "ReviewedFileChanged", "PlanNotWritten", "AcceptedWithoutChange",
-  "RoundInvalid", "RoundLimitStop", "ClaudeCallFailed", "CodexCallFailed", "AgentReplyInvalid",
-  "ConfigInvalid", "StateFileInvalid", "FileSystemError", "GitError", "Interrupted",
+/**
+ * The data of each error, as a schema: `describe` reads only these fields, so a value that was decoded
+ * from an unknown source (the entry point's catch) is described like an instance (finding 10).
+ */
+const Strings = Schema.Array(Schema.String);
+const ChangeData = Schema.Struct({
+  kind: Schema.Literals(["added", "removed", "content_changed", "type_changed", "status_changed"]),
+  path: Schema.String,
+  from: Schema.optionalKey(Schema.String),
+  to: Schema.optionalKey(Schema.String),
+});
+const RunErrorData = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal("UserStopped"), where: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("ProjectChanged"), during: Schema.Literals(["planning", "review"]), fileLabel: Schema.NullOr(Schema.String), changes: Schema.Array(ChangeData) }),
+  Schema.Struct({ _tag: Schema.Literal("ReviewedFileChanged"), fileLabel: Schema.String, changes: Schema.Array(ChangeData) }),
+  Schema.Struct({ _tag: Schema.Literal("PlanNotWritten"), file: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("AcceptedWithoutChange"), fileLabel: Schema.String, accepted: Schema.Number }),
+  Schema.Struct({
+    _tag: Schema.Literal("RoundInvalid"),
+    duplicateIssues: Strings,
+    missing: Strings,
+    duplicateDispositions: Strings,
+    unknownDispositions: Strings,
+    emptyIds: Strings,
+    collidingIds: Strings,
+  }),
+  Schema.Struct({ _tag: Schema.Literal("QuestionListInvalid"), duplicateIds: Strings, emptyIds: Schema.Number }),
+  Schema.Struct({ _tag: Schema.Literal("RoundLimitStop"), heading: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("ClaudeCallFailed"), message: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("CodexCallFailed"), message: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("AgentReplyInvalid"), agent: Schema.String, issue: Schema.String, files: Strings }),
+  Schema.Struct({ _tag: Schema.Literal("ConfigInvalid"), file: Schema.String, path: Schema.String, message: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("StateFileInvalid"), file: Schema.String, message: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("FileSystemError"), operation: Schema.String, path: Schema.String, message: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("GitError"), args: Strings, message: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("Interrupted"), where: Schema.String }),
 ]);
+/** The fields of one of the program's errors; every `RunError` instance is one. */
+export type RunErrorFields = typeof RunErrorData.Type;
+const decodeRunErrorData = Schema.decodeUnknownResult(RunErrorData);
 
-/** True for one of the program's typed errors. */
-export const isRunError = (error: unknown): error is RunError => {
-  const tag: unknown = (error as { _tag?: unknown } | null)?._tag;
-  return typeof tag === "string" && TAGS.has(tag);
+/** The error's fields when the value carries one of our tags with that tag's payload; null otherwise. */
+export const decodeRunError = (error: unknown): RunErrorFields | null => {
+  const decoded = decodeRunErrorData(error);
+  return Result.isSuccess(decoded) ? decoded.success : null;
 };
 
 /**
  * What the entry point prints for an error, or null if the error is none of ours, in which case the
  * entry point rethrows it. Keeps that decision out of the untested main.ts.
  */
-export const haltMessage = (error: unknown): string | null => (isRunError(error) ? `HALTED: ${describe(error)}` : null);
+export const haltMessage = (error: unknown): string | null => {
+  const decoded = decodeRunError(error);
+  return decoded === null ? null : `HALTED: ${describe(decoded)}`;
+};

@@ -7,6 +7,7 @@ import { AcceptedWithoutChange, RoundLimitStop, type RunError } from "./errors.t
 import { parseExtraRounds } from "./input.ts";
 import * as log from "./issueLog.ts";
 import { type IssueId, validateReview, validateRound, type ValidatedReview, type ValidatedRound } from "./round.ts";
+import type { RoundRecord } from "./records.ts";
 import type { Config, LogEntry, PlannerResponse, Review } from "./schema.ts";
 import { Result } from "effect";
 
@@ -24,6 +25,7 @@ export type ReviewCommand =
   | Readonly<{ kind: "SaveReview"; round: number; review: Review }>
   | Readonly<{ kind: "SaveResponse"; round: number; response: PlannerResponse }>
   | Readonly<{ kind: "SaveLog"; log: readonly LogEntry[] }>
+  | Readonly<{ kind: "SaveRound"; record: RoundRecord }>
   | Readonly<{ kind: "AskLimit"; limit: number }>
   | Readonly<{ kind: "AskDecision"; subject: string; id: IssueId | null }>
   | Readonly<{ kind: "CallReviewer"; round: number }>
@@ -49,6 +51,8 @@ export type ReviewEvent =
 export type ReviewSetup = Readonly<{
   heading: string;
   fileLabel: string;
+  /** The subject directory under plan-review/, recorded in the round records. */
+  dirName: string;
   phase: number;
   proceedLabel: string;
   hasAmend: boolean;
@@ -195,7 +199,11 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
   if (Result.isFailure(checked)) return halt(s, checked.failure);
   const counted = log.countedIssues(review, countMinor);
   const state: ReviewState = { ...s, counts: [...s.counts, counted], current: { ...freshRound, review, validatedReview: checked.success } };
-  const before: ReviewCommand[] = [{ kind: "SaveReview", round: n, review }, say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`)];
+  const before: ReviewCommand[] = [
+    { kind: "SaveReview", round: n, review },
+    { kind: "SaveRound", record: { kind: "no_response", subject: s.setup.dirName, phase: s.setup.phase, round: n, reconstructed: false, review: checked.success } },
+    say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`),
+  ];
   if (counted === 0) {
     return done(state, { kind: "Finish", result: "converged" }, [...before, { kind: "Converse", markdown: `## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n` }]);
   }
@@ -218,6 +226,19 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
   const state: ReviewState = { ...withCost, current: { ...s.current, round, response, resultText } };
   const before: ReviewCommand[] = [
     { kind: "SaveResponse", round: n, response },
+    {
+      kind: "SaveRound",
+      record: {
+        kind: "validated",
+        subject: s.setup.dirName,
+        phase,
+        round: n,
+        reconstructed: false,
+        review: round.review,
+        response: { dispositions: round.dispositions, selfCorrections: round.selfCorrections, reviewerFeedback: round.reviewerFeedback, questionsForUser: round.questionsForUser },
+        notes: round.notes,
+      },
+    },
     { kind: "Converse", markdown: renderRound(heading, n, review, response) },
     ...round.notes.map((note): ReviewCommand => {
       const why = note.reason === "unknown" ? "names no current entry of the issue log" : "names an issue whose current disposition is not an accepted correction";

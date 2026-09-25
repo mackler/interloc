@@ -1,0 +1,35 @@
+{
+  "dispositions": [
+    {
+      "id": "P1-R1-1",
+      "action": "accepted",
+      "rationale": "Correct. Q7 puts the gate before Stage 1, and the plan had production schemas (old 1.1/1.2) before the proof. The proof is now step 0.4 in Stage 0, and Stage 1 is marked as starting only after the gate. The prototype is self-contained and imports nothing from src/. It has its own Effect definitions of the seven schemas, transcribed from today's src/schemas.ts, plus an inline strict transform. It writes both variants to prototypes/proto-schema-output/ and records the choice in CHOSEN. Stage 1 then ties the production code to the proof: a test asserts that the production schemas generate exactly the files the prototype proved, and a second test asserts that agentJsonSchema returns the CHOSEN variant.",
+      "duplicate_of": "",
+      "reverses": ""
+    },
+    {
+      "id": "P1-R1-2",
+      "action": "accepted",
+      "rationale": "Agreed. Accepting 'Cannot find package' contradicted the requirement, and tsc would have stopped the run before any test executed. The smoke test is removed. The failing test for 0.2 is test/deps.test.ts. It has no static import of effect, so tsc runs without the package installed, and it fails on assertions: effect is not a dependency in package.json, and the version read from node_modules/effect/package.json through node:fs is undefined. 0.3 (the API ledger) is now documentation only. The first Effect code is exercised by the Red tests of stage 1, which fail on assertions against scaffolding. R2 now says that a missing module or package is never an accepted failure.",
+      "duplicate_of": "",
+      "reverses": ""
+    },
+    {
+      "id": "P1-R1-3",
+      "action": "accepted",
+      "rationale": "Valid. New step 1.0 copies src/schemas.ts and src/types.ts verbatim into test/fixtures/legacy-schemas.ts and test/fixtures/legacy-types.ts before any production schema exists. The type comparisons in 1.1 and the shape comparisons in 1.2 read these fixtures. Step 4.1 notes that deleting the src files leaves them intact, and none of the comparisons compares the new definitions with themselves.",
+      "duplicate_of": "",
+      "reverses": ""
+    },
+    {
+      "id": "P1-R1-4",
+      "action": "accepted",
+      "rationale": "Correct. In src/review.ts the round-limit halt is reached only when ui.ask returns something that is neither 'p' nor a number. 'q' is handled inside the Ui first, by TerminalUi.ask and by ScriptedUi. Step 2.1 now has two tests: '0 at the round limit stops with RoundLimitStop', which keeps today's text, and 'q at the round limit stops with UserStopped'.",
+      "duplicate_of": "",
+      "reverses": ""
+    }
+  ],
+  "self_corrections": [],
+  "reviewer_feedback": "",
+  "questions_for_user": []
+}

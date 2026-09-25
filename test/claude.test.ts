@@ -61,7 +61,7 @@ test("a planning call returns the structured output and records usage", async ()
   assert.equal(Effect.runSync(fake.planner.sessionId), "session-7");
   const usage = fs.readFileSync(path.join(fake.dir, "usage.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(usage.length, 1);
-  assert.deepEqual([usage[0].agent, usage[0].session_id, usage[0].num_turns, usage[0].total_cost_usd], ["claude", "session-7", 3, 0.25]);
+  assert.deepEqual([usage[0].agent, usage[0].session, usage[0].num_turns, usage[0].total_cost_usd], ["claude", "session-7", 3, 0.25]);
 });
 
 test("a failed planning call fails with ClaudeCallFailed", async () => {
@@ -84,6 +84,18 @@ test("the planning hook denies an edit outside plan-review/ and permits one insi
   assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.dir, "plan.md") })), undefined);
   assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.project, "src/x.ts") })), "deny");
   assert.equal(decision(await runHook(options, "Edit", { file_path: "../outside.txt" })), "deny");
+});
+
+// Finding 21: the target is resolved on the file system, so a symlink under plan-review/ cannot lead outside it.
+test("the planning hook denies an edit through a symlink that leaves plan-review/", async () => {
+  const fake = await planner([messages(init(), success({}))]);
+  await run(fake.planner.planning("write the plan", schema));
+  fs.mkdirSync(path.join(fake.project, "src"), { recursive: true });
+  fs.symlinkSync(path.join("..", "src"), path.join(fake.dir, "out"));
+  const options = fake.sdk.calls[0].options;
+  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.dir, "out", "x.ts") })), "deny");
+  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.dir, "notes", "new.md") })), undefined, "a new file under plan-review/ must stay allowed");
+  assert.equal(decision(await runHook(options, "Write", { file_path: path.join("plan-review", "out", "y.ts") })), "deny", "a relative path through the link");
 });
 
 test("planning canUseTool relays AskUserQuestion to the user and returns the answers", async () => {
@@ -205,6 +217,48 @@ test("execution without a report and without a stop is aborted", async () => {
   const outcome = await run(fake.planner.executing("implement the plan"));
   assert.equal(outcome.status, "aborted");
   assert.equal(outcome.summary, "text only");
+});
+
+// Finding 17: malformed callback data is a typed failure of the call, never a throw inside the callback.
+test("a questions value that is not an array yields a deny in the callback and ClaudeCallFailed naming the field after the call", async () => {
+  const results: (PermissionResult | { thrown: string } | null)[] = [];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    results.push(await permission(call.options)("AskUserQuestion", { questions: "nope" }, callContext()).catch((e: unknown) => ({ thrown: String(e) })));
+    yield success({ wrote_plan: true, questions_for_user: [] });
+  })();
+  const fake = await planner([script]);
+  await assert.rejects(run(fake.planner.planning("plan", schema)), (e: unknown) => tag(e) === "ClaudeCallFailed" && /questions/.test((e as { message: string }).message));
+  assert.equal((results[0] as PermissionResult).behavior, "deny", `the callback did not deny: ${JSON.stringify(results[0])}`);
+});
+
+// Finding 20: the stop state belongs to one execution call.
+test("a second execution call cannot see the first call's stop", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }] }];
+  let stopped: () => void = () => undefined;
+  let checked: () => void = () => undefined;
+  const firstStopped = new Promise<void>((resolve) => (stopped = resolve));
+  const secondChecked = new Promise<void>((resolve) => (checked = resolve));
+  const seen: (string | undefined)[] = [];
+  const first: Script = (call) => (async function* () {
+    yield init("s-1");
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    stopped();
+    await secondChecked;
+    yield success({ status: "needs_input", summary: "s", question: "", remaining_work: "w" });
+  })();
+  const second: Script = (call) => (async function* () {
+    yield init("s-2");
+    await firstStopped;
+    seen.push(decision(await runHook(call.options, "Write")));
+    checked();
+    yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
+  })();
+  const fake = await planner([first, second], ["A"]);
+  const [one, two] = await run(Effect.all([fake.planner.executing("first"), fake.planner.executing("second")], { concurrency: "unbounded" }));
+  assert.equal(one.status, "needs_input");
+  assert.deepEqual(seen, [undefined], "the second call's hook saw the first call's stop");
+  assert.equal(two.status, "finished");
 });
 
 test("an execution permission request asks the user; y allows, anything else denies", async () => {

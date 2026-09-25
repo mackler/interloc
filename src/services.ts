@@ -2,9 +2,8 @@
 // Tests provide scripted layers; main.ts provides the live ones. API names: docs/effect-v4-api.md.
 
 import { Context, Effect } from "effect";
-import type { Schema } from "effect";
+import type { Brand, Schema } from "effect";
 import type { ClaudeCallFailed, CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
-import { isRunError } from "./errors.ts";
 import type { Config, ExecOutcome, LogEntry, QuestionsFile } from "./schema.ts";
 import type { UsageLine, UsageSummary } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
@@ -15,15 +14,15 @@ export type PlannerError = ClaudeCallFailed | UserStopped | StoreError;
 export type ReviewerError = CodexCallFailed | StoreError;
 
 export interface UiShape {
-  say(text: string): Effect.Effect<void>;
+  readonly say: (text: string) => Effect.Effect<void>;
   /** Reads one line. The answer "q" fails with UserStopped. */
-  ask(prompt: string): Effect.Effect<string, UserStopped>;
+  readonly ask: (prompt: string) => Effect.Effect<string, UserStopped>;
   /** Reads one message of the interview (see TerminalUi). The message "/quit" fails with UserStopped. */
-  askMessage(prompt: string): Effect.Effect<string, UserStopped>;
+  readonly askMessage: (prompt: string) => Effect.Effect<string, UserStopped>;
 }
 export class Ui extends Context.Service<Ui, UiShape>()("plan-review/Ui") {}
 
-export type PlanningResult = { output: unknown; resultText: string; costUsd: number | null };
+export type PlanningResult = Readonly<{ output: unknown; resultText: string; costUsd: number | null }>;
 export interface PlannerShape {
   /** A call in which Claude Code may write only under plan-review/. The output is returned as produced; the caller decodes it. */
   planning(prompt: string, schema: Schema.Top, progress?: boolean): Effect.Effect<PlanningResult, PlannerError>;
@@ -33,26 +32,34 @@ export interface PlannerShape {
 }
 export class Planner extends Context.Service<Planner, PlannerShape>()("plan-review/Planner") {}
 
-export interface ReviewerShape {
-  /** Starts a new thread. Called at the start of every review loop. A start failure is a typed error. */
-  readonly newPhase: Effect.Effect<void, ReviewerError>;
+/** One review loop's thread (behaviour 5). Every call goes to the thread the session was started with. */
+export interface ReviewSession {
   /** One review turn. Returns the reply text as Codex produced it; the caller decodes it. */
   review(prompt: string): Effect.Effect<string, ReviewerError>;
 }
+export interface ReviewerShape {
+  /** Starts a new thread and returns the session bound to it. Called at the start of every review loop. A start failure is a typed error (finding 11). */
+  readonly startPhase: Effect.Effect<ReviewSession, CodexCallFailed>;
+}
 export class Reviewer extends Context.Service<Reviewer, ReviewerShape>()("plan-review/Reviewer") {}
+
+/** An absolute path inside the project (finding 21): the root the change detection watches. */
+export type ProjectPath = Brand.Branded<string, "ProjectPath">;
+/** An absolute path under <project>/plan-review/: where the program and the planning calls may write. */
+export type RecordPath = Brand.Branded<string, "RecordPath">;
 
 /** The files in <project>/plan-review/ and the comparison of the project state (today's State). */
 export interface StoreShape {
-  readonly project: string;
-  readonly dir: string;
-  readonly plan: string;
-  readonly questions: string;
-  readonly requirements: string;
+  readonly project: ProjectPath;
+  readonly dir: RecordPath;
+  readonly plan: RecordPath;
+  readonly questions: RecordPath;
+  readonly requirements: RecordPath;
   init(task: string): Effect.Effect<void, StoreError>;
   subDir(name: string): Effect.Effect<string, StoreError>;
   writeJson(file: string, value: unknown): Effect.Effect<void, StoreError>;
   writeText(file: string, text: string): Effect.Effect<void, StoreError>;
-  loadLog(name?: string): Effect.Effect<LogEntry[], StoreError>;
+  loadLog(name?: string): Effect.Effect<readonly LogEntry[], StoreError>;
   saveLog(name: string, log: readonly LogEntry[]): Effect.Effect<void, StoreError>;
   loadQuestions(): Effect.Effect<QuestionsFile, StoreError>;
   recordDecision(subject: string, decision: string): Effect.Effect<void, StoreError>;
@@ -75,17 +82,3 @@ export class Sdk extends Context.Service<Sdk, AgentSdk>()("plan-review/Sdk") {}
 
 /** Everything the procedure needs. */
 export type Services = Ui | Planner | Reviewer | Store | RunConfig;
-
-/**
- * Lifts a function that throws one of the program's typed errors into an Effect. `E` names the errors
- * the wrapped code can throw; a throw of anything else is a defect. Used where a synchronous decoder
- * that throws the program's errors is called from an Effect (src/store.ts).
- */
-export const lift = <A, E extends RunError>(f: () => A): Effect.Effect<A, E> =>
-  Effect.suspend(() => {
-    try {
-      return Effect.succeed(f());
-    } catch (e) {
-      return isRunError(e) ? Effect.fail(e as E) : Effect.die(e);
-    }
-  });
