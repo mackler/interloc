@@ -90,14 +90,19 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
 
 ## Pinned versions
 
-The two SDKs, `effect` and `@effect/platform-node` are pinned to exact versions (`test/deps.test.ts`
-checks the pins and the installed versions), because the facts above were established on those
-versions, each Agent SDK release bundles a new Claude Code, and Effect 4 is a release candidate whose
-API may still move. The developer wants the program to stay current with all four, which are
-released often, and does not want it to fall behind.
+The two SDKs, `effect`, `@effect/platform-node` and the test dependency `fast-check` are pinned to
+exact versions (`test/deps.test.ts` checks the pins and the installed versions), because the facts
+above were established on those versions, each Agent SDK release bundles a new Claude Code, and
+Effect 4 is a release candidate whose API may still move. The developer wants the program to stay
+current with all five, which are released often, and does not want it to fall behind.
 
 - At the start of every session in this repository, run `npm outdated` and tell the developer if
-  any of the four has a newer version, before starting other work.
+  any of the five has a newer version, before starting other work. For `effect`, `npm outdated`
+  shows the `latest` tag (3.x); the relevant tag is `rc` (or a final 4.x): `npm view effect dist-tags`.
+- `fast-check` (4.10.2, added 25 Sep 2026 on the developer's instruction) is used only for the
+  property-based tests that `docs/functional-design-review.md`, recommendation E, names; every other
+  test is an example test. Upgrading it is `npm install --save-dev --save-exact fast-check@<version>`
+  and `npm test`.
 - Upgrade procedure for an SDK: change the version in `package.json`, `npm install`, `npm test`, run the matching
   prototype in `prototypes/` in a project container, then one real run. Update the version numbers
   and any changed facts in the section above, and commit.
@@ -105,7 +110,8 @@ released often, and does not want it to fall behind.
   run `prototypes/proto-schema.ts` in a project container (the schema acceptance proof), then one real
   run. Check the names in `docs/effect-v4-api.md` against the new declarations, update the recorded
   versions and facts, and commit.
-- An upgrade reaches real runs after `git pull` and `npm ci` in `~/work/plan-review`.
+- An upgrade reaches real runs after `git pull` and `npm ci` in `~/work/plan-review`. `npm ci` is
+  needed whenever `package-lock.json` changed — it did when `fast-check` was added.
 
 ## Rules for changes
 

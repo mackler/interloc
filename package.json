@@ -10,6 +10,7 @@
   },
   "devDependencies": {
     "@types/node": "^22",
+    "fast-check": "4.10.2",
     "typescript": "^5.8"
   },
   "scripts": {

@@ -27,3 +27,9 @@ test("the installed effect version is the pinned one", () => {
     assert.equal(readJson(`node_modules/${name}/package.json`)?.version, pinned, `installed ${name} differs from the pinned version`);
   }
 });
+
+test("fast-check is a devDependency pinned to an exact version and the installed version matches", () => {
+  const pinned: string | undefined = readJson("package.json")?.devDependencies?.["fast-check"];
+  assert.match(pinned ?? "(absent)", /^\d+\.\d+\.\d+$/, "fast-check is not a devDependency pinned to an exact version");
+  assert.equal(readJson("node_modules/fast-check/package.json")?.version, pinned, "installed fast-check differs from the pinned version");
+});

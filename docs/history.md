@@ -212,6 +212,24 @@ the exit code comes from the runner's teardown; `runPromise` rejects with the ty
 itself; `Schema.Decoder<T>` is the type that both `toJsonSchemaDocument` and `decodeUnknownSync`
 accept.
 
+## Applying the functional design review (25 Sep 2026)
+
+Codex reviewed the Effect rewrite three times through its own `codex review` / `codex exec`: two
+regressions of the rewrite (the Claude Code message loop did not close its stream on a typed
+failure; a synchronous SDK start failure was a defect) were fixed test first, and the third run, with
+the developer's functional-programming instructions, produced `docs/functional-design-review.md`:
+32 findings and recommendations A–F. The developer chose to apply all of it, in the order of
+recommendation F, with `fast-check` permitted as the one new dependency.
+
+The plan for that work was made by this program on itself: question phase (eight decisions,
+`plan-review/requirements.md` of that run), then Codex reviewed the plan in rounds — 6, 4 and 1
+issues, all accepted, the first real run in which the exchange between the agents took place — until
+the run halted in round 4 on a Codex usage limit (3.2 million input tokens over seven turns, the
+thread's context growing with every round). Resume is not implemented, so the reviewed plan
+(`plan-review/plan.md` of that run, archived by any later run) was carried out by hand from here.
+
+- Stage 0: `fast-check` 4.10.2 as a pinned devDependency; `test/deps.test.ts` checks the pin.
+
 ## Rejected or deferred
 
 - `--permission-mode plan` and `plansDirectory` for the planning phases: the location of the
