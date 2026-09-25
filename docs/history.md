@@ -241,6 +241,15 @@ thread's context growing with every round). Resume is not implemented, so the re
   runs, and an unserializable reply is kept as a note instead of crashing (22); the scripted Ui shares
   the terminal's command parsing, script steps are typed, the doubles expose readiness signals instead of
   being polled, and temporary directories are removed (31). `src/input.ts` holds the pure parsers.
+- Stage 2: `src/round.ts` validates a review and a response into one readonly value (unique non-empty ids,
+  exactly one disposition per issue, references normalised per Q3 with a note in the record for each dropped
+  one, generated self-correction ids), and the log transitions take that value, so a missing disposition is
+  unrepresentable there; the Q2 overlap order is applied in `appendRound`. `src/snapshot.ts` is the Q1
+  snapshot: porcelain v2 records and the working-tree entry per path, compared into typed changes that the
+  errors carry. Answers to Claude Code's questions are keyed by question index, with a note when two questions
+  share a text. Property-based tests (fast-check) cover the rounds and the log, the snapshot (including
+  generated file operations on a real repository against a git oracle), the input parsers and the record
+  schemas; the input properties passed at once, as they specify what stage 1 had built.
 
 ## Rejected or deferred
 

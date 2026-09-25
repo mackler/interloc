@@ -1,0 +1,107 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { Schema } from "effect";
+import fc from "fast-check";
+import * as S from "../src/schema.ts";
+
+// Row 5 of the table in recommendation E of docs/functional-design-review.md: the program's own record schemas.
+const RUNS = { numRuns: 200, seed: 20260925 };
+const record = <T>(shape: { [K in keyof T]: fc.Arbitrary<T[K]> }): fc.Arbitrary<T> => fc.record(shape, { noNullPrototype: true }) as fc.Arbitrary<T>;
+const positiveInt = fc.integer({ min: 1, max: Number.MAX_SAFE_INTEGER });
+const nonNegativeInt = fc.integer({ min: 0, max: Number.MAX_SAFE_INTEGER });
+const cost = fc.double({ min: 0, max: 1e6, noNaN: true, noDefaultInfinity: true });
+const nonEmpty = fc.string({ minLength: 1 });
+
+const arbConfig = record<S.Config>({
+  questionPhase: fc.boolean(),
+  ignorePaths: fc.array(fc.string()),
+  maxRounds: positiveInt,
+  maxIdleRounds: positiveInt,
+  countMinor: fc.boolean(),
+  execPermissionMode: fc.constantFrom("auto", "acceptEdits", "bypassPermissions", "default"),
+  claudeModel: fc.option(fc.string(), { nil: null }),
+  codexModel: fc.option(fc.string(), { nil: null }),
+});
+const arbLogEntry = record<S.LogEntry>({
+  id: nonEmpty,
+  phase: nonNegativeInt,
+  round: nonNegativeInt,
+  source: fc.constantFrom("review", "self_correction", "user"),
+  problem: fc.string(),
+  action: fc.string(),
+  rationale: fc.string(),
+});
+const arbUsage = record<S.UsageEntry>({ time: fc.string(), agent: fc.string(), num_turns: nonNegativeInt, total_cost_usd: cost, usage: record({ input_tokens: nonNegativeInt, output_tokens: nonNegativeInt }) });
+const arbQuestions = record<S.QuestionsFile>({
+  task: fc.string(),
+  questions: fc.array(record({ id: nonEmpty, question: fc.string(), reason: fc.string(), proposed_answers: fc.array(record({ label: fc.string(), description: fc.string() })), default_answer: fc.string() })),
+});
+
+const roundTrips = <T>(schema: Schema.Codec<T>, value: T): void => {
+  const encoded = Schema.encodeSync(schema)(value);
+  assert.deepEqual(Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(encoded), value);
+};
+const rejected = (schema: Schema.Top & Schema.ConstraintDecoder<unknown>, value: unknown, what: string): void => assert.throws(() => Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(value), `${what} was accepted`);
+
+test("property: encode/decode round trips for the record schemas", () => {
+  fc.assert(fc.property(arbConfig, (c) => roundTrips(S.Config, c)), RUNS);
+  fc.assert(fc.property(arbLogEntry, (e) => roundTrips(S.LogEntry, e)), RUNS);
+  fc.assert(fc.property(arbUsage, (u) => roundTrips(S.UsageEntry, u)), RUNS);
+  fc.assert(fc.property(arbQuestions, (q) => roundTrips(S.QuestionsFile, q)), RUNS);
+});
+
+test("property: negative, fractional and unsafe counts fail; empty required identifiers fail", () => {
+  const badCount = fc.oneof(fc.integer({ max: 0 }), fc.double({ min: 1.0001, max: 1e6, noNaN: true, noInteger: true }), fc.constant(2 ** 53), fc.constant(Number.POSITIVE_INFINITY));
+  fc.assert(
+    fc.property(arbConfig, badCount, (c, bad) => {
+      rejected(S.Config, { ...c, maxRounds: bad }, `maxRounds ${bad}`);
+      rejected(S.Config, { ...c, maxIdleRounds: bad }, `maxIdleRounds ${bad}`);
+    }),
+    RUNS,
+  );
+  const badNonNegative = fc.oneof(fc.integer({ max: -1 }), fc.double({ min: 0.0001, max: 1e6, noNaN: true, noInteger: true }), fc.constant(2 ** 53));
+  fc.assert(
+    fc.property(arbLogEntry, badNonNegative, (e, bad) => {
+      rejected(S.LogEntry, { ...e, phase: bad }, `phase ${bad}`);
+      rejected(S.LogEntry, { ...e, round: bad }, `round ${bad}`);
+      rejected(S.LogEntry, { ...e, id: "" }, "empty id");
+    }),
+    RUNS,
+  );
+  fc.assert(
+    fc.property(arbUsage, badNonNegative, fc.double({ max: -0.0001, noNaN: true, noDefaultInfinity: true }), (u, bad, negativeCost) => {
+      rejected(S.UsageEntry, { ...u, num_turns: bad }, `num_turns ${bad}`);
+      rejected(S.UsageEntry, { ...u, total_cost_usd: negativeCost }, `cost ${negativeCost}`);
+      rejected(S.UsageEntry, { ...u, usage: { input_tokens: bad, output_tokens: 0 } }, `input_tokens ${bad}`);
+    }),
+    RUNS,
+  );
+  fc.assert(
+    fc.property(arbQuestions.filter((q) => q.questions.length > 0), fc.nat(), (q, pick) => {
+      const i = pick % q.questions.length;
+      rejected(S.QuestionsFile, { ...q, questions: q.questions.map((x, k) => (k === i ? { ...x, id: "" } : x)) }, "empty question id");
+    }),
+    RUNS,
+  );
+});
+
+test("property: partial configs merge right-biased per key, and any unknown key is rejected", () => {
+  const arbPartial = arbConfig.chain((c) => fc.subarray(Object.keys(c) as (keyof S.Config)[]).map((keys) => Object.fromEntries(keys.map((k) => [k, c[k]])) as Partial<S.Config>));
+  const decodePartial = Schema.decodeUnknownSync(S.PartialConfig, { onExcessProperty: "error" });
+  fc.assert(
+    fc.property(arbPartial, arbPartial, (shared, project) => {
+      const merged = { ...S.defaultConfig, ...decodePartial(shared), ...decodePartial(project) };
+      for (const key of Object.keys(S.defaultConfig) as (keyof S.Config)[]) {
+        const expected = key in project ? project[key] : key in shared ? shared[key] : S.defaultConfig[key];
+        assert.deepEqual(merged[key], expected, key);
+      }
+    }),
+    RUNS,
+  );
+  fc.assert(
+    fc.property(arbPartial, fc.stringMatching(/^[a-z][A-Za-z]{2,12}$/).filter((k) => !(k in S.defaultConfig)), fc.anything(), (partial, key, value) => {
+      assert.throws(() => decodePartial({ ...partial, [key]: value }), `unknown key ${key} was accepted`);
+    }),
+    RUNS,
+  );
+});

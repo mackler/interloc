@@ -43,13 +43,16 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/claude.ts` | Claude Code through `@anthropic-ai/claude-agent-sdk`, as the `Planner` layer |
 | `src/codex.ts` | Codex through `@openai/codex-sdk`, as the `Reviewer` layer |
 | `src/sdk.ts`, `src/sdkLive.ts` | The `AgentSdk` interface the adapters use, and its binding to the real SDKs (untested) |
+| `src/round.ts` | The validated round (pure): unique non-empty ids, one disposition per issue, references normalised, generated self-correction ids; `RoundInvalid` otherwise |
+| `src/snapshot.ts` | The project snapshot (pure): git's porcelain v2 records decoded, the working-tree entry per path, `compareSnapshots`, the exclusion predicate |
 | `src/prompts.ts` | Every prompt text. Prompts are not written anywhere else |
 | `src/input.ts` | Pure interpretation of what the user types: the option a reply chooses, the extra rounds at the round limit, the `q` and `/quit` commands (shared by the terminal and the scripted Ui) |
 | `src/store.ts` | The `Store` layer on Effect's FileSystem, Path and child-process services: files in `<project>/plan-review/`, the project snapshot, `loadConfig`; `platformLayer` |
-| `src/state.ts` | `describeChange` (pure) and the decoders of the program's own JSON records |
+| `src/state.ts` | The decoders of the program's own JSON records |
 | `src/ui.ts` | The `Ui` layer: one readline interface as a scoped resource |
 | `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer` (the services, scripted), `testLayer`, `testWiring`, temporary git repository |
 | `test/fakeSdk.ts` | A fake of the two SDKs for the adapter tests |
+| `test/*.property.test.ts` | Property-based tests with `fast-check`, for the rows of the table in `docs/functional-design-review.md`, recommendation E |
 | `docs/effect-v4-api.md` | The API ledger: every Effect name used, with its declaration and the facts observed about it |
 | `prototypes/` | The SDK prototypes and the schema acceptance prototype used to verify the environment; not part of the program |
 | `.githooks/pre-commit` | Type check before each commit; not part of the program |
@@ -81,6 +84,7 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
 - `NodeRuntime.runMain` interrupts the main fiber on SIGINT or SIGTERM and then calls the teardown, which sets the exit code (read in the runner's implementation, `@effect/platform-node-shared/dist/NodeRuntime.js`). In terminal mode readline receives Ctrl+C itself; `src/ui.ts` passes it on as a real SIGINT.
 - 25 Sep 2026, first real run after the Effect rewrite (a documentation task on a scratch project, in the development container, which has both agents' credentials and the installed program at `/opt/plan-review`): question phase with an empty agreed list, one planning phase, Codex convergence in round 1, one execution phase, `finished`; three Claude Code calls, two Codex turns; no agent process left running.
 - `total_cost_usd` of the Agent SDK's result message is the running total of the session, and a resumed session continues from its saved total (the SDK's own description, confirmed in that run: 0.49, 1.06, 1.77 across the three calls of one session). `usage.jsonl` keeps the value of each call; the usage summary reports each session's last value.
+- The project snapshot (decision Q1 of the functional design review, 25 Sep 2026): `git status --porcelain=v2 -z --untracked-files=all`, every listed path with its record and its working-tree entry — a regular file's content hash, a symbolic link's target (the link itself), a directory, or missing. It detects edits of untracked files, staged replacements, renames and retargeted links; gitignored files are unobserved. `plan-review/` and `ignorePaths` are excluded by one predicate.
 - 25 Sep 2026, the interruption check (plan step 6.3, three runs in the development container): Ctrl+C at the `Enter = start planning` prompt, during a Codex review, and during the Claude Code planning call each ended with `INTERRUPTED by the user. State is preserved in …`, the session id and usage lines, `**Interrupted by the user.**` in `conversation.md`, exit code 130, and no `claude` or `codex` process left running. An aborted Codex turn or Claude Code call leaves no `usage.jsonl` line, because usage is recorded only from a completed result.
 
 ## Not yet known or not yet built

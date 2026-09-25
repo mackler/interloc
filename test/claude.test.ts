@@ -5,7 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Fiber, Layer } from "effect";
-import { makeClaudePlanner } from "../src/claude.ts";
+import { makeClaudePlanner, toSdkAnswers } from "../src/claude.ts";
 import { FileSystemError, type RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
@@ -307,4 +307,27 @@ test("only a whole in-range number chooses an option; anything else is the answe
   assert.equal(await answersFor("0"), "0");
   assert.equal(await answersFor("3"), "3");
   assert.equal(await answersFor(" 2 "), "B");
+});
+
+// Step 2.5 of the plan: answers are collected by question index; two questions with the same text are
+// answered separately, the later one wins in the SDK object, and the record says so once.
+test("two questions with identical text are answered separately; the later answer reaches the SDK, with one note in the record", async () => {
+  const questions = [{ question: "Same?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }, { question: "Same?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  let relayed: Record<string, string> = {};
+  const script: Script = (call) => (async function* () {
+    yield init();
+    const result = await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    relayed = ((result as { updatedInput?: { answers?: Record<string, string> } }).updatedInput?.answers) ?? {};
+    yield success({});
+  })();
+  const fake = await planner([script], ["1", "2"]);
+  await run(fake.planner.planning("write the plan", schema));
+  assert.deepEqual(relayed, { "Same?": "B" });
+  const conversation = fs.readFileSync(path.join(fake.dir, "conversation.md"), "utf8");
+  assert.equal(conversation.match(/\*\*User answer:\*\*/g)?.length, 2, "both answers are recorded");
+  assert.equal(conversation.match(/\*\*Duplicate question text:\*\*/g)?.length, 1, "exactly one note");
+  const edge = toSdkAnswers(questions, new Map([[0, "A"], [1, "B"]]));
+  assert.deepEqual(edge.answers, { "Same?": "B" });
+  assert.deepEqual(edge.duplicates, ["Same?"]);
+  assert.deepEqual(toSdkAnswers([{ question: "X?" }, { question: "Y?" }], new Map([[0, "a"], [1, "b"]])), { answers: { "X?": "a", "Y?": "b" }, duplicates: [] });
 });

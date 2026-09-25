@@ -7,7 +7,7 @@ import type { ClaudeCallFailed, CodexCallFailed, FileSystemError, GitError, RunE
 import { isRunError } from "./errors.ts";
 import type { Config, ExecOutcome, LogEntry, QuestionsFile } from "./schema.ts";
 import type { AgentSdk } from "./sdk.ts";
-import type { Snapshot } from "./state.ts";
+import type { Snapshot } from "./snapshot.ts";
 
 export type StoreError = FileSystemError | StateFileInvalid | GitError;
 export type PlannerError = ClaudeCallFailed | UserStopped | StoreError;
@@ -52,7 +52,7 @@ export interface StoreShape {
   writeJson(file: string, value: unknown): Effect.Effect<void, StoreError>;
   writeText(file: string, text: string): Effect.Effect<void, StoreError>;
   loadLog(name?: string): Effect.Effect<LogEntry[], StoreError>;
-  saveLog(name: string, log: LogEntry[]): Effect.Effect<void, StoreError>;
+  saveLog(name: string, log: readonly LogEntry[]): Effect.Effect<void, StoreError>;
   loadQuestions(): Effect.Effect<QuestionsFile, StoreError>;
   recordDecision(subject: string, decision: string): Effect.Effect<void, StoreError>;
   recordFeedback(heading: string, round: number, text: string): Effect.Effect<void, StoreError>;

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
@@ -8,6 +10,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
 import type { StoreShape } from "../src/services.ts";
+import { compareSnapshots, type Snapshot } from "../src/snapshot.ts";
 import { makeStore, platformLayer } from "../src/store.ts";
 import { tempRepo } from "./helpers.ts";
 
@@ -118,7 +121,18 @@ test("planExists, fileHash and subDir", async () => {
   assert.ok(fs.statSync(dir).isDirectory());
 });
 
-test("the snapshot reflects the repository and ignores plan-review/ and the ignored paths", async () => {
+const git = (repo: string, ...args: string[]): void => void execFileSync("git", ["-C", repo, ...args]);
+const kinds = (changes: readonly { kind: string; path: string }[]): string[] => changes.map((c) => `${c.kind} ${c.path}`);
+/** Two snapshots of one repository around `change`, compared. */
+const around = async (repo: string, ignorePaths: readonly string[], change: () => void): Promise<{ before: Snapshot; after: Snapshot; changes: string[] }> => {
+  const s = await store(repo, ignorePaths);
+  const before = await Effect.runPromise(s.projectSnapshot());
+  change();
+  const after = await Effect.runPromise(s.projectSnapshot());
+  return { before, after, changes: kinds(compareSnapshots(before, after)) };
+};
+
+test("the snapshot lists the changed and untracked paths with their records and content, and ignores plan-review/ and the ignored paths", async () => {
   const repo = tempRepo();
   const s = await store(repo, ["ignored.txt"]);
   await Effect.runPromise(s.init("task"));
@@ -126,8 +140,80 @@ test("the snapshot reflects the repository and ignores plan-review/ and the igno
   fs.writeFileSync(path.join(repo, "ignored.txt"), "i\n");
   fs.writeFileSync(path.join(repo, "new.txt"), "n\n");
   const snapshot = await Effect.runPromise(s.projectSnapshot());
-  assert.deepEqual(snapshot.status, [" M a.txt", "?? new.txt"]);
-  assert.deepEqual([...snapshot.diffs.keys()], ["a.txt"]);
+  assert.deepEqual([...snapshot.entries.keys()].sort(), ["a.txt", "new.txt"]);
+  const a = snapshot.entries.get("a.txt")!;
+  assert.equal(a.record.kind, "changed");
+  assert.equal(a.record.kind === "changed" && a.record.xy, ".M");
+  assert.equal(a.content.type, "file");
+  assert.equal(snapshot.entries.get("new.txt")!.record.kind, "untracked");
+});
+
+// Decision Q1: the cases the stage-1 snapshot could not see (finding 1).
+test("editing an untracked file changes the snapshot", async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, "new.txt"), "1\n");
+  const { changes } = await around(repo, [], () => fs.writeFileSync(path.join(repo, "new.txt"), "2\n"));
+  assert.deepEqual(changes, ["content_changed new.txt"]);
+});
+
+test("replacing one staged version by another changes the snapshot", async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, "s.txt"), "1\n");
+  git(repo, "add", "s.txt");
+  const { changes } = await around(repo, [], () => {
+    fs.writeFileSync(path.join(repo, "s.txt"), "2\n");
+    git(repo, "add", "s.txt");
+  });
+  assert.deepEqual(changes, ["content_changed s.txt"]);
+});
+
+test("a rename is reported; a new empty directory is not (git does not list it)", async () => {
+  const repo = tempRepo();
+  const renamed = await around(repo, [], () => git(repo, "mv", "a.txt", "b.txt"));
+  assert.ok(renamed.changes.some((c) => c.endsWith(" b.txt")), renamed.changes.join(", "));
+  const empty = await around(tempRepo(), [], () => fs.mkdirSync(path.join(repo, "emptydir")));
+  assert.deepEqual(empty.changes, []);
+});
+
+test("a symlink is the link itself: retargeting between identical files is a content change, a dangling link is listed, and a file replacing a link is a type change", async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, "t1.txt"), "same\n");
+  fs.writeFileSync(path.join(repo, "t2.txt"), "same\n");
+  git(repo, "add", "-A");
+  git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "targets");
+  fs.symlinkSync("t1.txt", path.join(repo, "l"));
+  const retargeted = await around(repo, [], () => {
+    fs.rmSync(path.join(repo, "l"));
+    fs.symlinkSync("t2.txt", path.join(repo, "l"));
+  });
+  assert.deepEqual(retargeted.changes, ["content_changed l"]);
+
+  fs.symlinkSync("nowhere.txt", path.join(repo, "dangling"));
+  const s = await store(repo, []);
+  const snapshot = await Effect.runPromise(s.projectSnapshot());
+  assert.deepEqual(snapshot.entries.get("dangling")?.content, { type: "link", target: "nowhere.txt" });
+
+  const replaced = await around(repo, [], () => {
+    fs.rmSync(path.join(repo, "l"));
+    fs.writeFileSync(path.join(repo, "l"), "same\n");
+  });
+  assert.deepEqual(replaced.changes, ["type_changed l"]);
+});
+
+test("a symlink to target.txt and a regular file whose bytes are link:target.txt are different entries, in both directions", async () => {
+  const repo = tempRepo();
+  fs.writeFileSync(path.join(repo, "target.txt"), "t\n");
+  fs.symlinkSync("target.txt", path.join(repo, "l"));
+  const toFile = await around(repo, [], () => {
+    fs.rmSync(path.join(repo, "l"));
+    fs.writeFileSync(path.join(repo, "l"), "link:target.txt");
+  });
+  assert.deepEqual(toFile.changes, ["type_changed l"]);
+  const toLink = await around(repo, [], () => {
+    fs.rmSync(path.join(repo, "l"));
+    fs.symlinkSync("target.txt", path.join(repo, "l"));
+  });
+  assert.deepEqual(toLink.changes, ["type_changed l"]);
 });
 
 // The command service seen by the store: a fake spawner that records the arguments and answers
@@ -154,23 +240,22 @@ const recordingSpawner = (answer: (args: readonly string[]) => string): { layer:
   return { layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, ChildProcessSpawner.make(spawn)), commands };
 };
 
-test("the snapshot runs git through the command service", async () => {
+/** Porcelain v2 -z as git writes it, for the recording spawner. */
+const v2 = (entries: { xy?: string; name: string }[]): string =>
+  entries.map((e) => (e.xy === undefined ? `? ${e.name}\0` : `1 ${e.xy} N... 100644 100644 100644 ${"1".repeat(40)} ${"1".repeat(40)} ${e.name}\0`)).join("");
+
+test("the snapshot decodes git's porcelain v2 records and reads the working tree of each listed path", async () => {
   const repo = tempRepo();
-  const { layer, commands } = recordingSpawner((args) => {
-    if (args.includes("status")) return " M a.txt\0 M ignored.txt\0?? plan-review/plan.md\0";
-    if (args.includes("--name-only")) return "a.txt\0ignored.txt\0";
-    return "diff of a.txt";
-  });
+  const { layer, commands } = recordingSpawner(() => v2([{ xy: ".M", name: "a.txt" }, { xy: ".M", name: "ignored.txt" }, { name: "plan-review/plan.md" }, { name: "gone.txt" }]));
   const platform = Layer.mergeAll(platformLayer, layer);
   const s = await Effect.runPromise(makeStore(repo, ["ignored.txt"]).pipe(Effect.provide(platform)));
   const snapshot = await Effect.runPromise(s.projectSnapshot());
-  assert.deepEqual(snapshot.status, [" M a.txt"]);
-  assert.deepEqual([...snapshot.diffs.keys()], ["a.txt"]);
-  assert.deepEqual(commands, [
-    ["git", "-C", repo, "status", "--porcelain", "-z"],
-    ["git", "-C", repo, "diff", "--name-only", "-z"],
-    ["git", "-C", repo, "diff", "--", "a.txt"],
-  ]);
+  assert.deepEqual([...snapshot.entries.keys()].sort(), ["a.txt", "gone.txt"]);
+  assert.deepEqual(snapshot.entries.get("a.txt")?.content, { type: "file", hash: createHash("sha256").update(fs.readFileSync(path.join(repo, "a.txt"))).digest("hex") });
+  assert.deepEqual(snapshot.entries.get("gone.txt")?.content, { type: "missing" });
+  assert.equal(commands.length, 1, JSON.stringify(commands));
+  assert.deepEqual(commands[0].slice(0, 3), ["git", "-C", repo]);
+  assert.ok(commands[0].includes("--porcelain=v2") && commands[0].includes("-z") && commands[0].includes("--untracked-files=all"), commands[0].join(" "));
 });
 
 test("usageSummary reports the running total of each Claude Code session, not the sum of the calls", async () => {
@@ -181,17 +266,6 @@ test("usageSummary reports the running total of each Claude Code session, not th
   await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-1", num_turns: 4, total_cost_usd: 1.25 }));
   await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-2", num_turns: 2, total_cost_usd: 0.25 }));
   assert.match(await Effect.runPromise(s.usageSummary()), /Claude Code: 3 calls in 2 sessions, total_cost_usd = 1\.50 \(the sessions' last reported running totals, an estimate by the client\)/);
-});
-
-// Finding 1 of docs/functional-design-review.md: describeChange ignored diff entries that appear or disappear.
-test("describeChange reports a diff entry that appears or disappears, and nothing for a snapshot compared with itself", async () => {
-  const { describeChange } = await import("../src/state.ts");
-  const before = { status: [" M a.txt"], diffs: new Map<string, string>() };
-  const after = { status: [" M a.txt"], diffs: new Map([["a.txt", "h1"]]) };
-  assert.notDeepEqual(describeChange(before, after), [], "an added diff entry was not reported");
-  assert.notDeepEqual(describeChange(after, before), [], "a removed diff entry was not reported");
-  assert.deepEqual(describeChange(after, after), []);
-  assert.deepEqual(describeChange(before, before), []);
 });
 
 // Finding 22 of docs/functional-design-review.md: the time was read and the JSON serialized when the
@@ -215,36 +289,20 @@ test("writeJson of a value that cannot be serialized fails with FileSystemError 
   await fails(s.writeJson(path.join(s.dir, "x.json"), cyclic), "FileSystemError", /serialize/, /x\.json/);
 });
 
-// Finding 2 of docs/functional-design-review.md: plan-review/ was filtered from the status but not from the diff
-// names, and git's C-quoted names were undone only by stripping the quotes. The fake git answers in the quoted
-// form unless asked for -z, as git does.
-const gitAnswers = (repo: string, entries: { status: string; name: string; diff: boolean }[]) => (args: readonly string[]): string => {
-  const z = args.includes("-z");
-  const quote = (name: string): string => (/[\t"\\ ]/.test(name) ? `"${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\t/g, "\\t")}"` : name);
-  const render = (name: string): string => (z ? name : quote(name));
-  if (args.includes("status")) return entries.map((e) => `${e.status} ${render(e.name)}${z ? "\0" : "\n"}`).join("");
-  if (args.includes("--name-only")) return entries.filter((e) => e.diff).map((e) => `${render(e.name)}${z ? "\0" : "\n"}`).join("");
-  void repo;
-  return "diff text";
-};
-
-test("plan-review/ is excluded from the diff names as it is from the status, and no diff of it is requested", async () => {
+// Finding 2 of docs/functional-design-review.md: plan-review/ and ignorePaths under one exclusion predicate,
+// and git's raw names (never quoted) matched and used as they are.
+test("plan-review/ is excluded from the snapshot", async () => {
   const repo = tempRepo();
-  const { layer, commands } = recordingSpawner(gitAnswers(repo, [{ status: " M", name: "a.txt", diff: true }, { status: "??", name: "plan-review/plan.md", diff: true }]));
+  const { layer } = recordingSpawner(() => v2([{ xy: ".M", name: "a.txt" }, { name: "plan-review/plan.md" }]));
   const s = await Effect.runPromise(makeStore(repo, []).pipe(Effect.provide(Layer.mergeAll(platformLayer, layer))));
   const snapshot = await Effect.runPromise(s.projectSnapshot());
-  assert.deepEqual(snapshot.status, [" M a.txt"]);
-  assert.deepEqual([...snapshot.diffs.keys()], ["a.txt"]);
-  assert.ok(!commands.some((c) => c.includes("plan-review/plan.md")), `a git command named plan-review/plan.md: ${JSON.stringify(commands)}`);
+  assert.deepEqual([...snapshot.entries.keys()], ["a.txt"]);
 });
 
-test("names with tabs and quotes are the real names: matched against ignorePaths and passed to git diff as they are", async () => {
+test("names with tabs and quotes are the real names: matched against ignorePaths and kept as they are", async () => {
   const repo = tempRepo();
-  const { layer, commands } = recordingSpawner(gitAnswers(repo, [{ status: "??", name: "tab\there.txt", diff: false }, { status: " M", name: 'q"uote.txt', diff: true }]));
+  const { layer } = recordingSpawner(() => v2([{ name: "tab\there.txt" }, { xy: ".M", name: 'q"uote.txt' }]));
   const s = await Effect.runPromise(makeStore(repo, ["tab\there.txt"]).pipe(Effect.provide(Layer.mergeAll(platformLayer, layer))));
   const snapshot = await Effect.runPromise(s.projectSnapshot());
-  assert.deepEqual(snapshot.status, [' M q"uote.txt']);
-  assert.deepEqual([...snapshot.diffs.keys()], ['q"uote.txt']);
-  assert.ok(commands.some((c) => c.slice(-3).join(" ") === 'diff -- q"uote.txt'), `no diff of the real name: ${JSON.stringify(commands)}`);
-  assert.ok(!commands.some((c) => c.some((a) => a.includes("\\"))), `an escaped name reached git: ${JSON.stringify(commands)}`);
+  assert.deepEqual([...snapshot.entries.keys()], ['q"uote.txt']);
 });

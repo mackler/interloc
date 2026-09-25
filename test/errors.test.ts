@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { ConfigInvalid, haltMessage, ProjectChanged } from "../src/errors.ts";
 
 test("haltMessage reports a typed error with its description", () => {
-  const error = new ProjectChanged({ during: "planning", fileLabel: null, changes: ["new status line:  M a.txt"] });
+  const error = new ProjectChanged({ during: "planning", fileLabel: null, changes: [{ kind: "content_changed", path: "a.txt" }] });
   const message = haltMessage(error);
   assert.match(message ?? "", /^HALTED: the project outside plan-review\/ changed during a planning-phase call/);
   assert.match(message ?? "", /a\.txt/);

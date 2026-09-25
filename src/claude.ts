@@ -20,6 +20,23 @@ type CallbackError = UserStopped | StoreError;
 /** Runs an Effect inside a callback of the SDK; on failure the call is aborted and `fallback` is answered. */
 type InCallback = <A>(effect: Effect.Effect<A, CallbackError>, fallback: A) => Promise<A>;
 
+/**
+ * The answers as the SDK wants them: an object keyed by question text. Answers are collected by question
+ * index, so two questions with the same text are answered separately; in the object the later one wins,
+ * and `duplicates` names the texts for which that happened (finding 18 / 8 of the functional design review).
+ */
+export const toSdkAnswers = (questions: readonly { readonly question: string }[], answers: ReadonlyMap<number, string>): { answers: Record<string, string>; duplicates: readonly string[] } => {
+  const object: Record<string, string> = {};
+  const duplicates: string[] = [];
+  questions.forEach((q, index) => {
+    const answer = answers.get(index);
+    if (answer === undefined) return;
+    if (q.question in object && !duplicates.includes(q.question)) duplicates.push(q.question);
+    object[q.question] = answer;
+  });
+  return { answers: object, duplicates };
+};
+
 const decodeExecReport = Schema.decodeUnknownSync(S.ExecReport);
 /** The status report of an execution call, or null if there is none or it does not match its schema. */
 const execReport = (structured: unknown): ExecReport | null => {
@@ -41,20 +58,28 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   const session = yield* Ref.make<string | null>(null);
   const stop = yield* Ref.make<Stop | null>(null);
 
-  const relayQuestions = (questions: Question[]): Effect.Effect<Record<string, string>, CallbackError> =>
+  /** Asks the user each question; the answers are keyed by the question's index, so equal texts stay apart. */
+  const relayQuestions = (questions: readonly Question[]): Effect.Effect<ReadonlyMap<number, string>, CallbackError> =>
     Effect.gen(function* () {
-      const answers: Record<string, string> = {};
-      for (const q of questions) {
+      const answers = new Map<number, string>();
+      for (const [index, q] of questions.entries()) {
         yield* ui.say(`\nQuestion from Claude Code: ${q.question}`);
         for (const [i, o] of q.options.entries()) yield* ui.say(`  ${i + 1}. ${o.label} - ${o.description}`);
         let reply = "";
         while (reply === "") reply = yield* ui.ask("Number or free text (q = quit) > ");
         const chosen = chooseOption(reply, q.options.length);
         const answer = chosen === null ? reply : q.options[chosen].label;
-        answers[q.question] = answer;
+        answers.set(index, answer);
         yield* store.converse(`**Question from Claude Code:** ${q.question}\n\n**User answer:** ${answer}\n\n`);
       }
       return answers;
+    });
+  /** The SDK object, with one note in the record when two questions shared a text (the later answer is delivered). */
+  const sdkAnswers = (questions: readonly Question[], answers: ReadonlyMap<number, string>): Effect.Effect<Record<string, string>, CallbackError> =>
+    Effect.gen(function* () {
+      const edge = toSdkAnswers(questions, answers);
+      if (edge.duplicates.length > 0) yield* store.converse(`**Duplicate question text:** ${edge.duplicates.join("; ")} — the answer to the later question is the one Claude Code receives.\n\n`);
+      return edge.answers;
     });
 
   // Planning: deny every file edit whose target is outside plan-review/. A hook runs before the
@@ -94,7 +119,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     async (toolName, input): Promise<PermissionResult> => {
       if (toolName === "AskUserQuestion") {
         const questions = (input.questions ?? []) as Question[];
-        const answers = await inCallback(relayQuestions(questions), {});
+        const answers = await inCallback(relayQuestions(questions).pipe(Effect.flatMap((a) => sdkAnswers(questions, a))), {});
         return { behavior: "allow", updatedInput: { questions, answers } };
       }
       if (EDIT_TOOLS.includes(toolName)) return { behavior: "allow", updatedInput: input };
@@ -112,7 +137,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
             const answers = yield* relayQuestions(questions);
             yield* Ref.set(stop, {
               question: questions.map((q) => q.question).join(" / "),
-              input: Object.entries(answers).map(([q, a]) => `${q} -> ${a}`).join("; "),
+              input: [...answers].map(([index, a]) => `${questions[index].question} -> ${a}`).join("; "),
             });
           }),
           undefined,

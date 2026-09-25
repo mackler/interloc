@@ -2,16 +2,17 @@
 // rounds end when a review contains no counted issue or when the user chooses to proceed.
 // The procedure is applied to three subjects: the question list, the requirements, and the plan.
 
-import { Effect, Schema } from "effect";
+import { Effect, Result, Schema } from "effect";
 import * as path from "node:path";
 import * as log from "./issueLog.ts";
-import { AcceptedWithoutChange, AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, RoundInvalid, RoundLimitStop, type RunError } from "./errors.ts";
+import { AcceptedWithoutChange, AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, RoundLimitStop, type RunError } from "./errors.ts";
 import { parseExtraRounds } from "./input.ts";
 import { repairReplyPrompt } from "./prompts.ts";
+import { validateReview, validateRound } from "./round.ts";
 import * as S from "./schema.ts";
-import type { PlannerResponse, Review } from "./schema.ts";
+import type { LogEntry, PlannerResponse, Review } from "./schema.ts";
 import { Planner, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
-import { describeChange } from "./state.ts";
+import { compareSnapshots } from "./snapshot.ts";
 
 /** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
 const ReviewText = Schema.fromJsonString(S.Review);
@@ -111,7 +112,7 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
       Effect.gen(function* () {
         const before = yield* store.projectSnapshot();
         const result = yield* planner.planning(text, schema, progress);
-        const changes = describeChange(before, yield* store.projectSnapshot());
+        const changes = compareSnapshots(before, yield* store.projectSnapshot());
         if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "planning", fileLabel: null, changes }));
         return result;
       });
@@ -180,18 +181,18 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
           const projectBefore = yield* store.projectSnapshot();
           const fileBefore = yield* store.fileHash(file);
           const reply = yield* reviewer.review(text);
-          const changes = describeChange(projectBefore, yield* store.projectSnapshot());
+          const changes = compareSnapshots(projectBefore, yield* store.projectSnapshot());
           const fileChanged = (yield* store.fileHash(file)) !== fileBefore;
-          if (fileChanged) changes.push(`content changed: ${fileLabel}`);
-          if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes }));
+          if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes: [...changes, { kind: "content_changed", path: fileLabel }] }));
           if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "review", fileLabel, changes }));
           return reply;
         });
       const review: Review = yield* decodeWithRepair("codex", ReviewText, yield* reviewCall(subject.reviewPrompt(n)), reviewCall);
       yield* store.writeJson(path.join(dir, `review-${n}.json`), review);
-      // A review whose ids are not unique is invalid before anything is counted or asked (finding 3, decision Q3).
-      const { duplicateIssues } = log.reviewProblems(review);
-      if (duplicateIssues.length > 0) return yield* Effect.fail(new RoundInvalid({ duplicateIssues, missing: [], duplicateDispositions: [], unknownDispositions: [] }));
+      // A review whose ids are not unique or empty is invalid before anything is counted or asked (finding 3, decision Q3).
+      const checkedReview = validateReview(review);
+      if (Result.isFailure(checkedReview)) return yield* Effect.fail(checkedReview.failure);
+      const validatedReview = checkedReview.success;
       const counted = log.countedIssues(review, config.countMinor);
       counts.push(counted);
       yield* ui.say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`);
@@ -201,7 +202,7 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
       }
 
       // Pause: Codex reused the id of an issue that was not accepted in full.
-      let issueLog = yield* store.loadLog(logName);
+      let issueLog: readonly LogEntry[] = yield* store.loadLog(logName);
       for (const id of log.reraisedIds(issueLog, review)) {
         yield* ui.say(`\nCodex has raised again an issue that Claude Code did not accept in full:`);
         yield* ui.say(JSON.stringify(issueLog.filter((e) => e.id === id), null, 2));
@@ -216,12 +217,16 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
       costs.push(call.costUsd);
       yield* store.writeJson(path.join(dir, `cc-${n}.json`), response);
       if (subject.afterPlannerCall) yield* subject.afterPlannerCall(response);
-      // Exactly one disposition per review issue, and none for anything else, before the round is recorded.
-      const problems = log.roundProblems(review, response);
-      if (problems.missing.length + problems.duplicateDispositions.length + problems.unknownDispositions.length > 0) {
-        return yield* Effect.fail(new RoundInvalid({ duplicateIssues: [], ...problems }));
-      }
+      // Exactly one disposition per review issue, none for anything else, references normalised (Q3), before the
+      // round is recorded. A dropped reference is noted in the readable record (behaviour 8) and causes no pause.
+      const checkedRound = validateRound(validatedReview, response, issueLog, phase, n);
+      if (Result.isFailure(checkedRound)) return yield* Effect.fail(checkedRound.failure);
+      const round = checkedRound.success;
       yield* store.converse(renderRound(heading, n, review, response));
+      for (const note of round.notes) {
+        const why = note.reason === "unknown" ? "names no current entry of the issue log" : "names an issue whose current disposition is not an accepted correction";
+        yield* store.converse(`**Reference dropped:** ${note.field} = ${note.named} of issue ${note.id} ${why}; treated as no reference.\n\n`);
+      }
       if (response.reviewer_feedback !== "") yield* store.recordFeedback(heading, n, response.reviewer_feedback);
 
       // Pauses: items that require a decision of the user.
@@ -236,7 +241,7 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
         });
       const show = (value: unknown): Effect.Effect<void> => ui.say(JSON.stringify(value, null, 2));
 
-      for (const id of log.secondClarifications(issueLog, response)) {
+      for (const id of log.secondClarifications(issueLog, round)) {
         yield* ui.say(`\nClaude Code requests clarification of issue ${id} a second time:`);
         yield* show(issueLog.filter((e) => e.id === id));
         yield* show(response.dispositions.find((d) => d.id === id));
@@ -247,14 +252,14 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
         yield* show(issueLog.filter((e) => e.id === sc.id));
         yield* decide(`the accepted correction for ${sc.id}, which Claude Code now considers wrong`, sc.id);
       }
-      for (const [idNew, idOld] of log.reversals(response)) {
+      for (const [idNew, idOld] of log.reversals(round)) {
         yield* ui.say(`\nIssue ${idNew} requests the reversal of the correction made for issue ${idOld}:`);
         yield* show(issueLog.filter((e) => e.id === idOld));
         yield* show(review.issues.find((i) => i.id === idNew));
         yield* show(response.dispositions.find((d) => d.id === idNew));
         yield* decide(`issue ${idNew} against the accepted correction for ${idOld}`, idNew);
       }
-      for (const [idNew, idOld] of log.repeatedUnderNewId(issueLog, response)) {
+      for (const [idNew, idOld] of log.repeatedUnderNewId(issueLog, round)) {
         yield* ui.say(`\nIssue ${idNew} repeats issue ${idOld}, which Claude Code did not accept in full, under a new id:`);
         yield* show(issueLog.filter((e) => e.id === idOld));
         yield* show(review.issues.find((i) => i.id === idNew));
@@ -270,12 +275,12 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
       if (subject.amend) yield* subject.amend(review, response, n);
 
       // Issue log update. Decisions of the user on single issues replace the disposition of the round.
-      issueLog = log.appendRound(issueLog, review, response, phase, n);
+      issueLog = log.appendRound(issueLog, round);
       for (const [id, decision] of userDecisions) issueLog = log.appendUserDecision(issueLog, id, decision, phase, n);
       yield* store.saveLog(logName, issueLog);
 
       // Progress checks.
-      const accepted = log.acceptedCount(response);
+      const accepted = log.acceptedCount(round);
       const selfCount = response.self_corrections.length;
       const last = observations[observations.length - 1].hash;
       let hash = yield* store.fileHash(file);

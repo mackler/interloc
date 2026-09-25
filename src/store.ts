@@ -1,8 +1,8 @@
 // The Store service on the platform services: the files in <project>/plan-review/ and the
-// comparison of the project state. describeChange stays a pure function in state.ts.
+// comparison of the project state (decoded and compared by src/snapshot.ts).
 // API names: docs/effect-v4-api.md.
 
-import { Effect, FileSystem, Layer, Path, type PlatformError, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Option, Path, type PlatformError, Schema, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcessSpawner";
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
@@ -12,7 +12,8 @@ import { ConfigInvalid, FileSystemError, GitError, type StateFileInvalid } from 
 import * as S from "./schema.ts";
 import type { Config, LogEntry } from "./schema.ts";
 import { lift, Store, type StoreError, type StoreShape } from "./services.ts";
-import { decodeRecord, parseJson, type Snapshot, splitNul } from "./state.ts";
+import { decodeStatusV2, excluded, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
+import { decodeRecord, parseJson } from "./state.ts";
 
 /** The platform services the store needs. */
 export type Platform = FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner;
@@ -99,7 +100,7 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
     /** Reads, parses and decodes a JSON file of the program's own records. */
     const readJson = <Out extends Schema.ConstraintDecoder<unknown>>(file: string, schema: Out): Effect.Effect<Out["Type"], StoreError> =>
       readText(file).pipe(Effect.flatMap((text) => lift<Out["Type"], StateFileInvalid>(() => decodeRecord(file, schema, parseJson(file, text)))));
-    const saveLog = (name: string, log: LogEntry[]) => writeJson(path.join(dir, name), log);
+    const saveLog = (name: string, log: readonly LogEntry[]) => writeJson(path.join(dir, name), log);
     const converse = (markdown: string) => append(conversationFile, markdown);
     const subDir = (name: string) =>
       Effect.gen(function* () {
@@ -108,9 +109,26 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
         return d;
       });
 
-    const ignored = (file: string): boolean => ignorePaths.some((p) => file === p || file.startsWith(p.endsWith("/") ? p : `${p}/`));
-    /** One exclusion policy for both git commands: the program's own records and the configured paths (finding 2). */
-    const excluded = (file: string): boolean => file.startsWith("plan-review/") || ignored(file);
+    /**
+     * What is at a working-tree path: a link is the link itself (readLink, which also works for a dangling
+     * link), a regular file its content hash, a directory or a missing path as such. stat follows links,
+     * so readLink is asked first.
+     */
+    const inspect = (relative: string): Effect.Effect<WorkingTreeEntry, FileSystemError> =>
+      Effect.gen(function* () {
+        const file = path.join(project, relative);
+        const link = yield* fs.readLink(file).pipe(Effect.map(Option.some), Effect.catch(() => Effect.succeed(Option.none<string>())));
+        if (Option.isSome(link)) return { type: "link" as const, target: link.value };
+        const stat = yield* Effect.exit(fs.stat(file));
+        if (Exit.isFailure(stat)) {
+          const error = Cause.findErrorOption(stat.cause);
+          if (Option.isSome(error) && error.value.reason._tag === "NotFound") return { type: "missing" as const };
+          return yield* Effect.fail(new FileSystemError({ operation: "stat", path: file, message: Option.isSome(error) ? error.value.message : String(Cause.squash(stat.cause)) }));
+        }
+        if (stat.value.type === "Directory") return { type: "directory" as const };
+        const bytes = yield* io("read", file, fs.readFile(file));
+        return { type: "file" as const, hash: createHash("sha256").update(bytes).digest("hex") };
+      });
 
     /** One git command in the project. A non-zero exit or a spawn failure is a GitError. */
     const git = (args: string[]): Effect.Effect<string, GitError> =>
@@ -202,24 +220,16 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           return path.join("plan-review", "invalid-replies", name);
         }),
       /**
-       * The project outside plan-review/: the changed and untracked paths, and a hash of the diff of each
-       * modified tracked file. A change to the content of an untracked file is not detected.
+       * The project outside plan-review/ (decision Q1): every path git lists as changed, staged, renamed,
+       * unmerged or untracked, with its porcelain v2 record and what is in the working tree at it.
+       * Gitignored files are unobserved; the excluded paths (plan-review/, ignorePaths) are dropped.
        */
       projectSnapshot: (): Effect.Effect<Snapshot, StoreError> =>
         Effect.gen(function* () {
-          // -z: names are NUL-terminated and never quoted. In the porcelain -z format a rename or copy
-          // entry ("R  new") is followed by the original name as its own entry, which is skipped here.
-          const entries = splitNul(yield* git(["status", "--porcelain", "-z"]));
-          const status: string[] = [];
-          for (let i = 0; i < entries.length; i++) {
-            const entry = entries[i];
-            if (/^[RC]/.test(entry.slice(0, 2))) i++;
-            if (!excluded(entry.slice(3))) status.push(entry);
-          }
-          const diffs = new Map<string, string>();
-          const names = splitNul(yield* git(["diff", "--name-only", "-z"])).filter((n) => !excluded(n));
-          for (const name of names) diffs.set(name, createHash("sha256").update(yield* git(["diff", "--", name])).digest("hex"));
-          return { status, diffs };
+          const records = decodeStatusV2(yield* git(["status", "--porcelain=v2", "-z", "--untracked-files=all"])).filter((r) => !excluded(r.path, ignorePaths));
+          const entries = new Map<string, { record: (typeof records)[number]; content: WorkingTreeEntry }>();
+          for (const record of records) entries.set(record.path, { record, content: yield* inspect(record.path) });
+          return { entries };
         }),
     };
   });

@@ -98,6 +98,13 @@ new name. Material online describes v3 in most cases and is not a source.
 |---|---|---|
 | `Data.TaggedError` | Data.d.ts:966 | `(tag) => new <A>(args: A) => Cause.YieldableError & { _tag: Tag } & Readonly<A>`. Usage: `class X extends Data.TaggedError("X")<{ readonly f: string }> {}`, which is erasable syntax. A value can be yielded in `Effect.gen` to fail with it. |
 
+## Result (`effect/dist/Result.d.ts`; verified 25 Sep, review stage 2)
+
+| Name | Line | Notes |
+|---|---|---|
+| `Result.succeed` / `Result.fail` | 262 / 288 | `Result<A, E> = Success<A, E> \| Failure<A, E>` (line 57); the value is `.success`, the error `.failure` |
+| `Result.isSuccess` / `Result.isFailure` | 668 / 637 | type guards. A `Result` is not yieldable in `Effect.gen`: a failure is lifted with `Effect.fail(result.failure)` |
+
 ## Schema (`effect/dist/Schema.d.ts`)
 
 | Name | Line | Notes |
@@ -131,6 +138,9 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Struct.map` | Struct.d.ts:1101 | `Struct.map(lambda)`: applies a lambda to every value of a struct; `Schema.optionalKey` is such a lambda |
 | `SchemaIssue.makeFormatterStandardSchemaV1` | SchemaIssue.d.ts:752 | `({ leafHook?, checkHook? }) => (issue) => { issues: [{ path: PropertyKey[] \| PathSegment[], message }] }`. Observed: `{maxRounds:"5"}` → path `["maxRounds"]`, message `Expected number`; an excess key → `Expected no excess property`; `["a", 2]` for an array of strings → path `["ignorePaths", 1]`. Used by `firstIssue` in src/schema.ts. |
 | `SchemaIssue.defaultLeafHook` | SchemaIssue.d.ts:667 | the built-in leaf renderer, passed to the formatter above |
+| `Schema.encodeSync` | 1820 | `(schema) => (value: Type) => Encoded`; used by the round-trip properties |
+| `FileSystem.readLink` / `stat` (verified stage 2) | FileSystem.d.ts:200 / 232 | `stat` follows symbolic links (Node's `fs.stat`), so the snapshot asks `readLink` first; `Info.type` is `"File" \| "Directory" \| "SymbolicLink" \| …` (line 592) |
+| `PlatformError.reason._tag` | PlatformError.d.ts:73, 141 | `SystemErrorTag`: `"NotFound"` for ENOENT (platform-node-shared/dist/internal/utils.js), used to tell a missing path from a failure |
 | `Schema.toJsonSchemaDocument` | 10619 | `(schema, options?: ToJsonSchemaOptions) => JsonSchema.Document<"draft-2020-12">`, which returns `{ dialect, schema, definitions }`. The JSON Schema to pass to an agent is `.schema` (plus `$defs` if `definitions` is not empty). |
 | `ToJsonSchemaOptions.onExcessProperty` | 10524 | with `"error"`, every object gets `additionalProperties: false` (observed); with the default, `additionalProperties: true`. |
 

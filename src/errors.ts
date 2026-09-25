@@ -1,10 +1,11 @@
 // Typed errors: one per cause that ends a run, and one per I/O or parse failure that used to escape
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
 import { Data } from "effect";
+import { type Change, renderChange } from "./snapshot.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
-export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: string[] }> {}
-export class ReviewedFileChanged extends Data.TaggedError("ReviewedFileChanged")<{ readonly fileLabel: string; readonly changes: string[] }> {}
+export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: readonly Change[] }> {}
+export class ReviewedFileChanged extends Data.TaggedError("ReviewedFileChanged")<{ readonly fileLabel: string; readonly changes: readonly Change[] }> {}
 export class PlanNotWritten extends Data.TaggedError("PlanNotWritten")<{ readonly file: string }> {}
 export class AcceptedWithoutChange extends Data.TaggedError("AcceptedWithoutChange")<{ readonly fileLabel: string; readonly accepted: number }> {}
 /** A review or a response whose structure is invalid: decision Q3 of the functional design review, a halt without a repair turn. */
@@ -13,6 +14,10 @@ export class RoundInvalid extends Data.TaggedError("RoundInvalid")<{
   readonly missing: readonly string[];
   readonly duplicateDispositions: readonly string[];
   readonly unknownDispositions: readonly string[];
+  /** What carried an empty id ("an issue of the review", "a disposition of the response"). */
+  readonly emptyIds: readonly string[];
+  /** Generated self-correction ids that already exist in the log. */
+  readonly collidingIds: readonly string[];
 }> {}
 export class RoundLimitStop extends Data.TaggedError("RoundLimitStop")<{ readonly heading: string }> {}
 export class ClaudeCallFailed extends Data.TaggedError("ClaudeCallFailed")<{ readonly message: string }> {}
@@ -41,7 +46,7 @@ export type RunError =
   | GitError
   | Interrupted;
 
-const indent = (changes: string[]): string => changes.map((line) => `\n  ${line}`).join("");
+const indent = (changes: readonly Change[]): string => changes.map((change) => `\n  ${renderChange(change)}`).join("");
 
 /** The text that the program prints for an error. */
 export const describe = (error: RunError): string => {
@@ -64,6 +69,8 @@ export const describe = (error: RunError): string => {
       if (error.missing.length > 0) parts.push(`Claude Code returned no disposition for: ${error.missing.join(", ")}`);
       if (error.duplicateDispositions.length > 0) parts.push(`Claude Code returned more than one disposition for: ${error.duplicateDispositions.join(", ")}`);
       if (error.unknownDispositions.length > 0) parts.push(`Claude Code returned a disposition for an id that is not in the review: ${error.unknownDispositions.join(", ")}`);
+      if (error.emptyIds.length > 0) parts.push(`an empty id in ${error.emptyIds.join(" and ")}`);
+      if (error.collidingIds.length > 0) parts.push(`a generated self-correction id already exists in the log: ${error.collidingIds.join(", ")}`);
       return `the round is invalid: ${parts.join("; ")}`;
     }
     case "RoundLimitStop":
