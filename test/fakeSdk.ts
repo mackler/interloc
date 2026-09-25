@@ -42,6 +42,16 @@ export class FakeSdk implements AgentSdk {
   readonly threads: { options: ThreadOptions | undefined; calls: ThreadCall[] }[] = [];
   private readonly scripts: Script[];
   private readonly turns: TurnAnswer[];
+  private waiters: (() => void)[] = [];
+  /** Resolves when the next query or thread turn begins. */
+  nextCall(): Promise<void> {
+    return new Promise((resolve) => this.waiters.push(resolve));
+  }
+  private signal(): void {
+    const current = this.waiters;
+    this.waiters = [];
+    for (const resolve of current) resolve();
+  }
 
   constructor(scripts: Script[] = [], turns: TurnAnswer[] = []) {
     this.scripts = [...scripts];
@@ -51,6 +61,7 @@ export class FakeSdk implements AgentSdk {
   query(params: { prompt: string; options?: Options }): AsyncIterable<SDKMessage> {
     const call: Call = { prompt: params.prompt, options: params.options ?? {} };
     this.calls.push(call);
+    this.signal();
     const script = this.scripts.shift();
     if (script === undefined) throw new Error(`no scripted Claude Code call for: ${params.prompt.slice(0, 60)}`);
     return script(call);
@@ -65,6 +76,7 @@ export class FakeSdk implements AgentSdk {
       id,
       run: async (input: string, turnOptions?: TurnOptions): Promise<RunResult> => {
         record.calls.push({ input, turnOptions });
+        this.signal();
         const answer = answers.shift();
         if (answer === undefined) throw new Error("no scripted Codex turn");
         if (answer instanceof Error) throw answer;

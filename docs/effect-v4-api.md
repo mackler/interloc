@@ -108,6 +108,8 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Schema.Literal` / `Literals` | 2140 / 3960 | `Literals(["a", "b"])` generates `{type: "string", enum: [...]}` (observed) |
 | `Schema.Array` | 3679 (`ArraySchema as Array`) | `Array(item)` |
 | `Schema.NullOr` / `Union` | — / 3921 | `Union(members, options?)` |
+| `Schema.Int` / `Schema.NonEmptyString` (verified 25 Sep, review stage 1) | 5812 / 6335 | integers (no NaN/Infinity); non-empty strings. Used for the program's own records only |
+| `.check(...checks)` on a schema (verified 25 Sep) | 141 | `check(...checks: [Check<Type>, ...]) => Rebuild`; the filters are `Schema.isGreaterThanOrEqualTo(min)` (5694), `isLessThanOrEqualTo(max)` (5732), `isBetween` (5754), `isGreaterThan` (5675), `isFinite` (5573); they correspond to JSON Schema `minimum`/`maximum`. There is no `greaterThanOrEqualTo` without the `is` prefix in v4. |
 | `Schema.optionalKey` | 1888 | `optionalKey(schema)`: the key may be absent (the `?:` of `LogEntry`) |
 | `Schema.declare` | 399 | `declare(is: (u) => u is T, annotations?)`, used for the stage 1 scaffolding |
 | `Schema.fromJsonString` | 6729 | `fromJsonString(schema, options?)`: a string decoded as JSON, then as `schema`. Used for Codex's `finalResponse` and for JSON files. |

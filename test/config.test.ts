@@ -72,3 +72,9 @@ test("a wrong element type in a list names the element's path", async () => {
   fs.writeFileSync(projectFile, JSON.stringify({ ignorePaths: ["a.txt", 2] }));
   await failsWith(project, shared, "ConfigInvalid", /ignorePaths\[1\]/);
 });
+
+test("a round limit of 0 is reported with its field path", async () => {
+  const { project, shared, projectFile } = setup();
+  fs.writeFileSync(projectFile, JSON.stringify({ maxRounds: 0 }));
+  await failsWith(project, shared, "ConfigInvalid", /maxRounds/);
+});

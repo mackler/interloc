@@ -3,10 +3,12 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { after } from "node:test";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import type { Schema } from "effect";
 import type { RunError } from "../src/errors.ts";
 import { describe, UserStopped } from "../src/errors.ts";
+import { parseAskLine, parseMessage } from "../src/input.ts";
 import type { Wiring } from "../src/program.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
@@ -25,8 +27,19 @@ const { defaultConfig } = S;
 export type Paths = { readonly project: string; readonly plan: string };
 export const pathsOf = (repo: string): Paths => ({ project: path.resolve(repo), plan: path.join(repo, "plan-review", "plan.md") });
 
+/** Every temporary directory a test file created; removed when the file's tests are done. */
+const tempDirs: string[] = [];
+export const tempDir = (prefix: string): string => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+};
+after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
+
 export function tempRepo(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pr-test-"));
+  const dir = tempDir("pr-test-");
   const git = (...args: string[]): void => void execFileSync("git", ["-C", dir, ...args]);
   git("init", "-q");
   fs.writeFileSync(path.join(dir, "a.txt"), "x\n");
@@ -35,29 +48,60 @@ export function tempRepo(): string {
   return dir;
 }
 
+/** One scripted answer: the text the user types, or a step that never completes (for interruption tests). */
+export type ScriptedAnswer = string | { readonly wait: true };
+
+/** A promise that resolves when `signal` is next called; for tests that wait for a double to be reached. */
+const readiness = (): { wait: () => Promise<void>; signal: () => void } => {
+  let waiters: (() => void)[] = [];
+  return {
+    wait: () => new Promise((resolve) => waiters.push(resolve)),
+    signal: () => {
+      const current = waiters;
+      waiters = [];
+      for (const resolve of current) resolve();
+    },
+  };
+};
+
 export class ScriptedUi implements UiShape {
   readonly said: string[] = [];
   readonly asked: string[] = [];
-  private readonly answers: string[];
-  constructor(answers: string[]) {
+  private readonly answers: ScriptedAnswer[];
+  private readonly asks = readiness();
+  constructor(answers: readonly ScriptedAnswer[]) {
     this.answers = [...answers];
+  }
+  /** Resolves when the next prompt is asked. */
+  nextAsk(): Promise<void> {
+    return this.asks.wait();
   }
   say(text: string): Effect.Effect<void> {
     return Effect.sync(() => void this.said.push(text));
   }
-  /** The answer "q" fails with UserStopped; the answer "<wait>" never completes (for interruption tests). */
+  /** The commands are the terminal's (src/input.ts): "q" ends the run at a one-line prompt. */
   ask(prompt: string): Effect.Effect<string, UserStopped> {
-    return Effect.suspend(() => {
-      this.asked.push(prompt);
-      const answer = this.answers.shift();
-      if (answer === undefined) return Effect.die(new Error(`no scripted answer for: ${prompt}`));
-      if (answer === "q") return Effect.fail(new UserStopped({ where: prompt }));
-      if (answer === "<wait>") return Effect.never;
-      return Effect.succeed(answer);
+    return this.take(prompt, (text) => {
+      const parsed = parseAskLine(text);
+      return parsed.kind === "quit" ? Effect.fail(new UserStopped({ where: prompt })) : Effect.succeed(parsed.text);
     });
   }
+  /** "/quit" ends the run in a message; "q" is a message like any other. */
   askMessage(prompt: string): Effect.Effect<string, UserStopped> {
-    return this.ask(prompt);
+    return this.take(prompt, (text) => {
+      const parsed = parseMessage(text);
+      return parsed.kind === "quit" ? Effect.fail(new UserStopped({ where: prompt })) : Effect.succeed(parsed.text);
+    });
+  }
+  private take(prompt: string, interpret: (text: string) => Effect.Effect<string, UserStopped>): Effect.Effect<string, UserStopped> {
+    return Effect.suspend(() => {
+      this.asked.push(prompt);
+      this.asks.signal();
+      const answer = this.answers.shift();
+      if (answer === undefined) return Effect.die(new Error(`no scripted answer for: ${prompt}`));
+      if (typeof answer !== "string") return Effect.never;
+      return interpret(answer);
+    });
   }
 }
 
@@ -70,6 +114,11 @@ export class ScriptedPlanner implements PlannerShape {
   readonly schemas: Schema.Top[] = [];
   /** The abort signals of the calls that hang. */
   readonly hangSignals: AbortSignal[] = [];
+  private readonly hangs = readiness();
+  /** Resolves when the next hanging call begins. */
+  nextHang(): Promise<void> {
+    return this.hangs.wait();
+  }
   private readonly state: Paths;
   private readonly steps: PlanningStep[];
   private readonly execs: ExecOutcome[];
@@ -86,7 +135,12 @@ export class ScriptedPlanner implements PlannerShape {
       this.schemas.push(schema);
       const step = this.steps.shift();
       if (!step) return Effect.die(new Error(`no scripted planning step for: ${prompt.slice(0, 60)}`));
-      if (step.hang) return Effect.callback((_resume, signal) => void this.hangSignals.push(signal));
+      if (step.hang) {
+        return Effect.callback((_resume, signal) => {
+          this.hangSignals.push(signal);
+          this.hangs.signal();
+        });
+      }
       if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
       if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
       return Effect.succeed({ output: step.output, resultText: "", costUsd: 0.1 });
@@ -145,7 +199,7 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
-export type TestOptions = { answers?: string[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; config?: Partial<Config> };
+export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; config?: Partial<Config> };
 /** What a test inspects after a run: the scripted implementations, the paths, and a reader of the logs on disk. */
 export type Probe = {
   dir: string;
@@ -198,7 +252,7 @@ export type WiringProbe = { ui: ScriptedUi; planner: ScriptedPlanner; reviewer: 
 export function testWiring(repo: string, options: TestOptions = {}): { wiring: Wiring; probe: WiringProbe } {
   const paths = pathsOf(repo);
   const dir = path.join(paths.project, "plan-review");
-  const shared = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pr-shared-")), "config.json");
+  const shared = path.join(tempDir("pr-shared-"), "config.json");
   fs.writeFileSync(shared, "{}");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ questionPhase: false, ...options.config }));

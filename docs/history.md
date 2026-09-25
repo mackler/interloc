@@ -229,6 +229,18 @@ thread's context growing with every round). Resume is not implemented, so the re
 (`plan-review/plan.md` of that run, archived by any later run) was carried out by hand from here.
 
 - Stage 0: `fast-check` 4.10.2 as a pinned devDependency; `test/deps.test.ts` checks the pin.
+- Stage 1: regression tests and the least fixes for the confirmed defects. `describeChange` reports diff
+  entries that appear or disappear (finding 1); git runs with `-z`, so names are never quoted, and one
+  exclusion predicate covers `plan-review/` and `ignorePaths` in both commands (2); a review with
+  duplicate ids, or a response with a missing, duplicate or unknown disposition, halts with `RoundInvalid`
+  before anything is counted or recorded — decision Q3, replacing `MissingDispositions` (3); the
+  program's own records constrain counts, costs and ids, and the round-limit answer is parsed as a
+  whole safe integer (5); reviewer start failures are `CodexCallFailed` (11); the identical-content
+  message names the round after which the content was seen, also after an idle decision (14); only a
+  whole in-range number chooses an option (18); the store reads the time and serializes when the effect
+  runs, and an unserializable reply is kept as a note instead of crashing (22); the scripted Ui shares
+  the terminal's command parsing, script steps are typed, the doubles expose readiness signals instead of
+  being polled, and temporary directories are removed (31). `src/input.ts` holds the pure parsers.
 
 ## Rejected or deferred
 

@@ -34,6 +34,27 @@ export function secondClarifications(log: LogEntry[], response: PlannerResponse)
 }
 
 /** Issue ids of the review that have no disposition. */
+const duplicates = (ids: readonly string[]): string[] => [...new Set(ids.filter((id, i) => ids.indexOf(id) !== i))];
+
+/** Structural problems of a review, checked before anything is done with it: an id that appears more than once. */
+export function reviewProblems(review: Review): { duplicateIssues: string[] } {
+  return { duplicateIssues: duplicates(review.issues.map((i) => i.id)) };
+}
+
+/**
+ * Structural problems of a response against its review: an issue without a disposition, an id with more than
+ * one disposition, and a disposition for an id that is not in the review. Any of them makes the round invalid.
+ */
+export function roundProblems(review: Review, response: PlannerResponse): { missing: string[]; duplicateDispositions: string[]; unknownDispositions: string[] } {
+  const issueIds = new Set(review.issues.map((i) => i.id));
+  const dispositionIds = response.dispositions.map((d) => d.id);
+  return {
+    missing: missingDispositions(review, response),
+    duplicateDispositions: duplicates(dispositionIds),
+    unknownDispositions: [...new Set(dispositionIds.filter((id) => !issueIds.has(id)))],
+  };
+}
+
 export function missingDispositions(review: Review, response: PlannerResponse): string[] {
   const answered = new Set(response.dispositions.map((d) => d.id));
   return review.issues.map((i) => i.id).filter((id) => !answered.has(id));

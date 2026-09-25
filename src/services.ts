@@ -33,8 +33,8 @@ export interface PlannerShape {
 export class Planner extends Context.Service<Planner, PlannerShape>()("plan-review/Planner") {}
 
 export interface ReviewerShape {
-  /** Starts a new thread. Called at the start of every review loop. */
-  readonly newPhase: Effect.Effect<void>;
+  /** Starts a new thread. Called at the start of every review loop. A start failure is a typed error. */
+  readonly newPhase: Effect.Effect<void, ReviewerError>;
   /** One review turn. Returns the reply text as Codex produced it; the caller decodes it. */
   review(prompt: string): Effect.Effect<string, ReviewerError>;
 }

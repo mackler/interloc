@@ -7,7 +7,13 @@ export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonl
 export class ReviewedFileChanged extends Data.TaggedError("ReviewedFileChanged")<{ readonly fileLabel: string; readonly changes: string[] }> {}
 export class PlanNotWritten extends Data.TaggedError("PlanNotWritten")<{ readonly file: string }> {}
 export class AcceptedWithoutChange extends Data.TaggedError("AcceptedWithoutChange")<{ readonly fileLabel: string; readonly accepted: number }> {}
-export class MissingDispositions extends Data.TaggedError("MissingDispositions")<{ readonly ids: string[] }> {}
+/** A review or a response whose structure is invalid: decision Q3 of the functional design review, a halt without a repair turn. */
+export class RoundInvalid extends Data.TaggedError("RoundInvalid")<{
+  readonly duplicateIssues: readonly string[];
+  readonly missing: readonly string[];
+  readonly duplicateDispositions: readonly string[];
+  readonly unknownDispositions: readonly string[];
+}> {}
 export class RoundLimitStop extends Data.TaggedError("RoundLimitStop")<{ readonly heading: string }> {}
 export class ClaudeCallFailed extends Data.TaggedError("ClaudeCallFailed")<{ readonly message: string }> {}
 export class CodexCallFailed extends Data.TaggedError("CodexCallFailed")<{ readonly message: string }> {}
@@ -24,7 +30,7 @@ export type RunError =
   | ReviewedFileChanged
   | PlanNotWritten
   | AcceptedWithoutChange
-  | MissingDispositions
+  | RoundInvalid
   | RoundLimitStop
   | ClaudeCallFailed
   | CodexCallFailed
@@ -52,8 +58,14 @@ export const describe = (error: RunError): string => {
       return `Claude Code did not write ${error.file}`;
     case "AcceptedWithoutChange":
       return `Claude Code accepted ${error.accepted} issues in full or in part but ${error.fileLabel} is unchanged`;
-    case "MissingDispositions":
-      return `Claude Code returned no disposition for: ${error.ids.join(", ")}`;
+    case "RoundInvalid": {
+      const parts: string[] = [];
+      if (error.duplicateIssues.length > 0) parts.push(`Codex returned more than one issue with the id: ${error.duplicateIssues.join(", ")}`);
+      if (error.missing.length > 0) parts.push(`Claude Code returned no disposition for: ${error.missing.join(", ")}`);
+      if (error.duplicateDispositions.length > 0) parts.push(`Claude Code returned more than one disposition for: ${error.duplicateDispositions.join(", ")}`);
+      if (error.unknownDispositions.length > 0) parts.push(`Claude Code returned a disposition for an id that is not in the review: ${error.unknownDispositions.join(", ")}`);
+      return `the round is invalid: ${parts.join("; ")}`;
+    }
     case "RoundLimitStop":
       return `stopped by the user at the round limit of ${error.heading}`;
     case "ClaudeCallFailed":
@@ -77,7 +89,7 @@ export const describe = (error: RunError): string => {
 
 const TAGS = new Set<string>([
   "UserStopped", "ProjectChanged", "ReviewedFileChanged", "PlanNotWritten", "AcceptedWithoutChange",
-  "MissingDispositions", "RoundLimitStop", "ClaudeCallFailed", "CodexCallFailed", "AgentReplyInvalid",
+  "RoundInvalid", "RoundLimitStop", "ClaudeCallFailed", "CodexCallFailed", "AgentReplyInvalid",
   "ConfigInvalid", "StateFileInvalid", "FileSystemError", "GitError", "Interrupted",
 ]);
 

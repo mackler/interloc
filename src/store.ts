@@ -12,7 +12,7 @@ import { ConfigInvalid, FileSystemError, GitError, type StateFileInvalid } from 
 import * as S from "./schema.ts";
 import type { Config, LogEntry } from "./schema.ts";
 import { lift, Store, type StoreError, type StoreShape } from "./services.ts";
-import { decodeRecord, parseJson, type Snapshot } from "./state.ts";
+import { decodeRecord, parseJson, type Snapshot, splitNul } from "./state.ts";
 
 /** The platform services the store needs. */
 export type Platform = FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner;
@@ -89,7 +89,13 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
     const append = (file: string, text: string) => io("append to", file, fs.writeFileString(file, text, { flag: "a" }));
     const mkdir = (d: string) => io("create directory", d, fs.makeDirectory(d, { recursive: true }));
     const list = (d: string) => io("list", d, fs.readDirectory(d));
-    const writeJson = (file: string, value: unknown) => writeText(file, JSON.stringify(value, null, 2) + "\n");
+    /** JSON text of a value, inside the effect: a value that cannot be serialized is a FileSystemError ("serialize"). */
+    const serialize = (file: string, value: unknown, indent?: number): Effect.Effect<string, FileSystemError> =>
+      Effect.try({
+        try: () => JSON.stringify(value, null, indent),
+        catch: (e: unknown) => new FileSystemError({ operation: "serialize", path: file, message: e instanceof Error ? e.message : String(e) }),
+      });
+    const writeJson = (file: string, value: unknown) => serialize(file, value, 2).pipe(Effect.flatMap((text) => writeText(file, text + "\n")));
     /** Reads, parses and decodes a JSON file of the program's own records. */
     const readJson = <Out extends Schema.ConstraintDecoder<unknown>>(file: string, schema: Out): Effect.Effect<Out["Type"], StoreError> =>
       readText(file).pipe(Effect.flatMap((text) => lift<Out["Type"], StateFileInvalid>(() => decodeRecord(file, schema, parseJson(file, text)))));
@@ -103,6 +109,8 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       });
 
     const ignored = (file: string): boolean => ignorePaths.some((p) => file === p || file.startsWith(p.endsWith("/") ? p : `${p}/`));
+    /** One exclusion policy for both git commands: the program's own records and the configured paths (finding 2). */
+    const excluded = (file: string): boolean => file.startsWith("plan-review/") || ignored(file);
 
     /** One git command in the project. A non-zero exit or a spawn failure is a GitError. */
     const git = (args: string[]): Effect.Effect<string, GitError> =>
@@ -147,8 +155,9 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       recordDecision: (subject, decision) =>
         append(decisionsFile, `Subject: ${subject}\nDecision: ${decision}\n\n`).pipe(Effect.andThen(converse(`**User decision** on ${subject}: ${decision}\n\n`))),
       recordFeedback: (heading, round, text) => append(feedbackFile, `## ${heading}, round ${round}\n${text}\n\n`),
-      /** Appends one line to usage.jsonl: the usage that an agent reported for one call. */
-      recordUsage: (entry) => append(usageFile, JSON.stringify({ time: new Date().toISOString(), ...entry }) + "\n"),
+      /** Appends one line to usage.jsonl: the usage that an agent reported for one call. The time is read when the effect runs, and it is the store's. */
+      recordUsage: (entry) =>
+        Effect.suspend(() => serialize(usageFile, { ...entry, time: new Date().toISOString() })).pipe(Effect.flatMap((line) => append(usageFile, line + "\n"))),
       /**
        * Per agent: the number of calls, and the reported values. The Agent SDK's total_cost_usd is the
        * running total of a session (a resumed session continues from its saved total), so the cost is
@@ -198,12 +207,17 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
        */
       projectSnapshot: (): Effect.Effect<Snapshot, StoreError> =>
         Effect.gen(function* () {
-          const status = (yield* git(["status", "--porcelain"]))
-            .split("\n")
-            .filter((line) => line !== "" && !/^.. "?plan-review\//.test(line))
-            .filter((line) => !ignored(line.slice(3).replace(/^"|"$/g, "")));
+          // -z: names are NUL-terminated and never quoted. In the porcelain -z format a rename or copy
+          // entry ("R  new") is followed by the original name as its own entry, which is skipped here.
+          const entries = splitNul(yield* git(["status", "--porcelain", "-z"]));
+          const status: string[] = [];
+          for (let i = 0; i < entries.length; i++) {
+            const entry = entries[i];
+            if (/^[RC]/.test(entry.slice(0, 2))) i++;
+            if (!excluded(entry.slice(3))) status.push(entry);
+          }
           const diffs = new Map<string, string>();
-          const names = (yield* git(["diff", "--name-only"])).split("\n").filter((n) => n !== "" && !ignored(n));
+          const names = splitNul(yield* git(["diff", "--name-only", "-z"])).filter((n) => !excluded(n));
           for (const name of names) diffs.set(name, createHash("sha256").update(yield* git(["diff", "--", name])).digest("hex"));
           return { status, diffs };
         }),

@@ -91,10 +91,20 @@ export const ExecOutcome = Schema.Struct({
   userInput: Schema.NullOr(Schema.String),
 });
 
+// Constraints for the program's own records (finding 5 of docs/functional-design-review.md). The seven agent
+// schemas are unchanged, so the JSON Schema the agents receive is unchanged.
+const safeInteger = Schema.isLessThanOrEqualTo(Number.MAX_SAFE_INTEGER);
+/** An integer ≥ 1 within the safe range: round limits. */
+export const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1), safeInteger);
+/** An integer ≥ 0 within the safe range: phases, rounds, turn and token counts. */
+export const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0), safeInteger);
+/** A finite number ≥ 0: costs. */
+export const NonNegativeFinite = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
+
 export const LogEntry = Schema.Struct({
-  id: Schema.String,
-  phase: Schema.Finite,
-  round: Schema.Finite,
+  id: Schema.NonEmptyString,
+  phase: NonNegativeInt,
+  round: NonNegativeInt,
   source: Schema.Literals(["review", "self_correction", "user"]),
   severity: Schema.optionalKey(Severity),
   location: Schema.optionalKey(Schema.String),
@@ -111,8 +121,8 @@ export const Config = Schema.Struct({
   questionPhase: Schema.Boolean,
   /** Paths relative to the project that the change detection ignores. A directory covers everything below it. */
   ignorePaths: Schema.Array(Schema.String),
-  maxRounds: Schema.Finite,
-  maxIdleRounds: Schema.Finite,
+  maxRounds: PositiveInt,
+  maxIdleRounds: PositiveInt,
   countMinor: Schema.Boolean,
   execPermissionMode: Schema.Literals(["auto", "acceptEdits", "bypassPermissions", "default"]),
   claudeModel: Schema.NullOr(Schema.String),
@@ -122,10 +132,10 @@ export const Config = Schema.Struct({
 /** A config file: any subset of the keys of Config. Unknown keys are rejected where it is decoded. */
 export const PartialConfig = Config.mapFields(Struct.map(Schema.optionalKey));
 
-/** plan-review/questions.json: the task and the agreed list. */
+/** plan-review/questions.json: the task and the agreed list. Unlike the agent schema, an entry's id must not be empty. */
 export const QuestionsFile = Schema.Struct({
   task: Schema.String,
-  questions: Schema.Array(QuestionEntry),
+  questions: Schema.Array(Schema.Struct({ ...QuestionEntry.fields, id: Schema.NonEmptyString })),
 });
 
 /**
@@ -137,10 +147,10 @@ export const UsageEntry = Schema.Struct({
   agent: Schema.String,
   session_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
   thread_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
-  num_turns: Schema.optionalKey(Schema.Finite),
-  total_cost_usd: Schema.optionalKey(Schema.NullOr(Schema.Finite)),
+  num_turns: Schema.optionalKey(NonNegativeInt),
+  total_cost_usd: Schema.optionalKey(Schema.NullOr(NonNegativeFinite)),
   usage: Schema.optionalKey(
-    Schema.NullOr(Schema.Struct({ input_tokens: Schema.optionalKey(Schema.Finite), output_tokens: Schema.optionalKey(Schema.Finite) })),
+    Schema.NullOr(Schema.Struct({ input_tokens: Schema.optionalKey(NonNegativeInt), output_tokens: Schema.optionalKey(NonNegativeInt) })),
   ),
 });
 

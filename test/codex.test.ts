@@ -4,9 +4,10 @@ import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import type { TurnOptions } from "@openai/codex-sdk";
-import { Effect, Fiber, Layer } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Option } from "effect";
 import { makeCodexReviewer } from "../src/codex.ts";
-import type { RunError } from "../src/errors.ts";
+import { describe, type RunError } from "../src/errors.ts";
+import type { AgentSdk } from "../src/sdk.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
 import { type ReviewerShape, RunConfig, Sdk, Store } from "../src/services.ts";
@@ -86,9 +87,31 @@ test("each newPhase starts a new thread", async () => {
   assert.deepEqual(fake.sdk.threads.map((t) => t.calls.length), [1, 1]);
 });
 
-test("review before newPhase fails", async () => {
+// Finding 11 of docs/functional-design-review.md: startup failures were defects, not typed errors.
+const typedFailure = async (effect: Effect.Effect<unknown, RunError>): Promise<RunError> => {
+  const exit = await Effect.runPromiseExit(effect);
+  assert.ok(Exit.isFailure(exit), "the effect succeeded");
+  const error = Cause.findErrorOption(exit.cause);
+  assert.ok(Option.isSome(error), `a defect, not a typed error: ${Cause.pretty(exit.cause)}`);
+  return error.value;
+};
+
+test("review before newPhase fails with CodexCallFailed, not a defect", async () => {
   const fake = await reviewer([]);
-  await assert.rejects(run(fake.reviewer.review("review the plan")));
+  const error = await typedFailure(fake.reviewer.review("review the plan"));
+  assert.equal(error._tag, "CodexCallFailed");
+  assert.match(describe(error), /no review thread/);
+});
+
+test("a startThread that throws makes newPhase fail with CodexCallFailed, not a defect", async () => {
+  const store = await run(makeStore(tempRepo(), []).pipe(Effect.provide(platformLayer)));
+  const fake = new FakeSdk();
+  const sdk: AgentSdk = { query: (params) => fake.query(params), startThread: () => { throw new Error("spawn codex ENOENT"); } };
+  const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Sdk, sdk), Layer.succeed(RunConfig, S.defaultConfig));
+  const codex = await run(makeCodexReviewer.pipe(Effect.provide(deps)));
+  const error = await typedFailure(codex.newPhase);
+  assert.equal(error._tag, "CodexCallFailed");
+  assert.match(describe(error), /spawn codex ENOENT/);
 });
 
 test("interrupting a review aborts the Codex turn", async () => {
@@ -104,8 +127,9 @@ test("interrupting a review aborts the Codex turn", async () => {
     });
   const fake = await reviewer([waitForAbort]);
   await run(fake.reviewer.newPhase);
+  const reached = fake.sdk.nextCall();
   const fiber = Effect.runFork(fake.reviewer.review("review the plan"));
-  while ((fake.sdk.threads[0]?.calls.length ?? 0) === 0) await sleep(5);
+  await reached;
   await sleep(10);
   await run(Fiber.interrupt(fiber));
   assert.equal(sawAbort, true, "the Codex turn was not aborted");

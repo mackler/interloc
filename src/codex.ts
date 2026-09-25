@@ -17,19 +17,23 @@ export const makeCodexReviewer: Effect.Effect<ReviewerShape, never, Sdk | Store 
   return {
     // Bubblewrap cannot start in the container, so Codex's own sandbox is off. The container and its
     // firewall are the boundary, and the caller compares the project state after every turn.
-    newPhase: Effect.sync(() =>
-      sdk.startThread({
-        workingDirectory: store.project,
-        sandboxMode: "danger-full-access",
-        approvalPolicy: "never",
-        ...(config.codexModel !== null ? { model: config.codexModel } : {}),
-      }),
-    ).pipe(Effect.flatMap((started) => Ref.set(thread, started))),
+    // Starting a thread can throw synchronously (for example when the SDK cannot start its CLI); that is
+    // a typed failure, like a failed turn, not a defect (finding 11 of docs/functional-design-review.md).
+    newPhase: Effect.try({
+      try: () =>
+        sdk.startThread({
+          workingDirectory: store.project,
+          sandboxMode: "danger-full-access",
+          approvalPolicy: "never",
+          ...(config.codexModel !== null ? { model: config.codexModel } : {}),
+        }),
+      catch: (e: unknown) => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) }),
+    }).pipe(Effect.flatMap((started) => Ref.set(thread, started))),
 
     review: (prompt) =>
       Effect.gen(function* () {
         const current = yield* Ref.get(thread);
-        if (current === null) return yield* Effect.die(new Error("newPhase() was not called"));
+        if (current === null) return yield* Effect.fail(new CodexCallFailed({ message: "no review thread: newPhase() was not called" }));
         // The signal of tryPromise is aborted when the fiber is interrupted; the SDK cancels the turn.
         const turn = yield* Effect.tryPromise({
           try: (signal) => current.run(prompt, { outputSchema: agentJsonSchema(S.Review), signal }),

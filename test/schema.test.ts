@@ -87,3 +87,23 @@ test("each schema rejects a wrong enum value, a missing field and a wrong type",
 test("Config rejects an unknown key", () => {
   rejects(S.Config, { ...config, maxRound: 3 }, "a misspelled key");
 });
+
+// Finding 5 of docs/functional-design-review.md: the program's own records accepted nonsensical numbers and empty ids.
+test("the program's record schemas constrain counts, costs and ids", () => {
+  for (const bad of [-0.5, 0, 1.5, 2 ** 53]) {
+    rejects(S.Config, { ...config, maxRounds: bad }, `maxRounds ${bad}`);
+    rejects(S.Config, { ...config, maxIdleRounds: bad }, `maxIdleRounds ${bad}`);
+  }
+  assert.equal(decode(S.Config, { ...config, maxRounds: 1, maxIdleRounds: 1 }).maxRounds, 1);
+  rejects(S.LogEntry, { ...logEntry, phase: -1 }, "phase -1");
+  rejects(S.LogEntry, { ...logEntry, round: 0.5 }, "round 0.5");
+  rejects(S.LogEntry, { ...logEntry, id: "" }, "an empty log entry id");
+  assert.equal(decode(S.LogEntry, { ...logEntry, phase: 0, round: 1 }).phase, 0);
+  const usage = { time: "t", agent: "claude", num_turns: 0, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0 } };
+  assert.equal(decode(S.UsageEntry, usage).num_turns, 0);
+  rejects(S.UsageEntry, { ...usage, num_turns: -1 }, "num_turns -1");
+  rejects(S.UsageEntry, { ...usage, total_cost_usd: -0.01 }, "a negative cost");
+  rejects(S.UsageEntry, { ...usage, usage: { input_tokens: -1, output_tokens: 0 } }, "negative input tokens");
+  rejects(S.UsageEntry, { ...usage, usage: { input_tokens: 0, output_tokens: -1 } }, "negative output tokens");
+  rejects(S.QuestionsFile, { task: "t", questions: [{ ...questionEntry, id: "" }] }, "an empty question id in questions.json");
+});

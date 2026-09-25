@@ -44,6 +44,7 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/codex.ts` | Codex through `@openai/codex-sdk`, as the `Reviewer` layer |
 | `src/sdk.ts`, `src/sdkLive.ts` | The `AgentSdk` interface the adapters use, and its binding to the real SDKs (untested) |
 | `src/prompts.ts` | Every prompt text. Prompts are not written anywhere else |
+| `src/input.ts` | Pure interpretation of what the user types: the option a reply chooses, the extra rounds at the round limit, the `q` and `/quit` commands (shared by the terminal and the scripted Ui) |
 | `src/store.ts` | The `Store` layer on Effect's FileSystem, Path and child-process services: files in `<project>/plan-review/`, the project snapshot, `loadConfig`; `platformLayer` |
 | `src/state.ts` | `describeChange` (pure) and the decoders of the program's own JSON records |
 | `src/ui.ts` | The `Ui` layer: one readline interface as a scoped resource |
@@ -84,7 +85,7 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
 
 ## Not yet known or not yet built
 
-- The exchange between the agents (rejections, clarifications, pauses) and the repair turn have run only in scripted tests, not against the real agents: every real review so far returned zero issues in round 1.
+- The exchange between the agents has run for real once (25 Sep 2026, the plan for the functional design review: 6, 4 and 1 issues in three rounds, all accepted); rejections, clarifications, the pause conditions and the repair turn have run only in scripted tests. That run also showed Codex's turns growing with the thread (147k to 1.35M input tokens over seven turns) until its usage limit halted the run.
 - Resuming an interrupted run is not implemented. The developer wants it later.
 - Threads that the orchestrator starts are stored in the same `~/.codex` volume as the developer's interactive Codex sessions; the effect on `codex resume --last` is unverified.
 
@@ -118,7 +119,7 @@ current with all five, which are released often, and does not want it to fall be
 - Test first, without exception. Before application code is written or changed, the test that specifies it is written, run, and seen to fail for the reason the change is meant to fix (a failed assertion, or a type error naming the signature being changed; never a missing module or a typo). Then the least code that makes it pass. A new module may first be scaffolded with its final signature and a body that does nothing useful, so that the test fails on its assertion. The observed failure is recorded in the commit message.
 - Every change to behaviour gets a scenario test in `test/` that runs the procedure against the test layers of `test/helpers.ts` (`testLayer`, `testWiring`). `src/issueLog.ts` stays free of I/O and of Effect services so that it can be tested directly.
 - `src/claude.ts` and `src/codex.ts` receive the SDKs through the `Sdk` service and are tested with `test/fakeSdk.ts`. Only `src/sdkLive.ts` (the binding) and `src/main.ts` (the wiring and the runner) are untested; their text is shown to the developer before it is written. No scaffolding may reach a real agent: a scaffold of an adapter makes the SDK call impossible. Verify SDK option names against the type declarations in `node_modules`, not from memory.
-- Do not add a dependency without the developer's instruction. Permitted besides the two SDKs: `effect` and `@effect/platform-node`.
+- Do not add a dependency without the developer's instruction. Permitted besides the two SDKs: `effect`, `@effect/platform-node`, and `fast-check` (tests only).
 - This directory is the development clone. The installed program is `~/work/plan-review` on the host, which project containers mount read-only at `/opt/plan-review`. A change here takes effect in real runs only after the developer merges it there with `git pull` and runs `npm ci` there when `package-lock.json` changed.
 - `bin/dev-claude` starts the development container (`compose.cc.yaml`); it is not part of the program.
 

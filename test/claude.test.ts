@@ -230,8 +230,9 @@ test("interrupting a planning call aborts the Agent SDK call", async () => {
     throw new Error("The operation was aborted");
   })();
   const fake = await planner([script]);
+  const reached = fake.sdk.nextCall();
   const fiber = Effect.runFork(fake.planner.planning("write the plan", schema));
-  while (fake.sdk.calls.length === 0) await sleep(5);
+  await reached;
   await sleep(10);
   await run(Fiber.interrupt(fiber));
   assert.equal(sawAbort, true, "the SDK call was not aborted");
@@ -284,4 +285,26 @@ test("an SDK that fails to start is a call error: ClaudeCallFailed for planning,
   const outcome = await run(executing.planner.executing("implement the plan"));
   assert.equal(outcome.status, "aborted");
   assert.match(outcome.question, /spawn claude ENOENT/);
+});
+
+// Finding 18 of docs/functional-design-review.md: parseInt accepted a prefix, so "1 please explain" chose option 1.
+test("only a whole in-range number chooses an option; anything else is the answer as typed", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  const answersFor = async (reply: string): Promise<string> => {
+    let relayed: Record<string, string> = {};
+    const script: Script = (call) => (async function* () {
+      yield init();
+      const result = await permission(call.options)("AskUserQuestion", { questions }, callContext());
+      relayed = ((result as { updatedInput?: { answers?: Record<string, string> } }).updatedInput?.answers) ?? {};
+      yield success({});
+    })();
+    const fake = await planner([script], [reply]);
+    await run(fake.planner.planning("write the plan", schema));
+    return relayed["A or B?"] ?? "";
+  };
+  assert.equal(await answersFor("1 please explain"), "1 please explain");
+  assert.equal(await answersFor("1.5"), "1.5");
+  assert.equal(await answersFor("0"), "0");
+  assert.equal(await answersFor("3"), "3");
+  assert.equal(await answersFor(" 2 "), "B");
 });

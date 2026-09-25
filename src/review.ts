@@ -5,7 +5,8 @@
 import { Effect, Schema } from "effect";
 import * as path from "node:path";
 import * as log from "./issueLog.ts";
-import { AcceptedWithoutChange, AgentReplyInvalid, MissingDispositions, ProjectChanged, ReviewedFileChanged, RoundLimitStop, type RunError } from "./errors.ts";
+import { AcceptedWithoutChange, AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, RoundInvalid, RoundLimitStop, type RunError } from "./errors.ts";
+import { parseExtraRounds } from "./input.ts";
 import { repairReplyPrompt } from "./prompts.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
@@ -56,6 +57,16 @@ export const askDecision = (subject: string): Effect.Effect<string, RunError, Ui
 
 const AGENT_LABEL = { claude: "Claude Code", codex: "Codex" } as const;
 
+/** The text kept for an invalid reply. Total: a reply that JSON cannot represent is kept as a note of that failure. */
+export const serializeReply = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value ?? null, null, 2);
+  } catch (e) {
+    return `<reply not serializable: ${e instanceof Error ? e.message : String(e)}>`;
+  }
+};
+
 /**
  * Decodes an agent's reply with its schema. A reply that does not match is kept on disk and the agent
  * gets one repair turn in the same session or thread; a second mismatch fails with AgentReplyInvalid.
@@ -77,8 +88,7 @@ export const decodeWithRepair = <Out extends Schema.Decoder<unknown>, E, R>(
         throw e;
       }
     };
-    const keep = (value: unknown): Effect.Effect<string, StoreError> =>
-      store.saveInvalidReply(agent, typeof value === "string" ? value : JSON.stringify(value ?? null, null, 2));
+    const keep = (value: unknown): Effect.Effect<string, StoreError> => store.saveInvalidReply(agent, serializeReply(value));
 
     const first = decode(reply);
     if (first.ok) return first.value;
@@ -137,7 +147,10 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
     const reviewer = yield* Reviewer;
     const { heading, fileLabel, file, logName, phase } = subject;
     const dir = yield* store.subDir(subject.dirName);
-    const hashes: string[] = [yield* store.fileHash(file)];
+    /** The content of the file after each round (and after a decision that changed it), for the identical-content pause. */
+    type Observation = { round: number; stage: "start" | "response" | "decision"; hash: string };
+    const observations: Observation[] = [{ round: 0, stage: "start", hash: yield* store.fileHash(file) }];
+    const describeObservation = (o: Observation): string => (o.stage === "decision" ? `round ${o.round} (after the user's decision)` : `round ${o.round}`);
     const counts: number[] = [];
     const costs: (number | null)[] = [];
     let idle = 0;
@@ -154,8 +167,9 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
           yield* store.converse(`**User decision:** ${subject.proceedLabel} without convergence after round ${n - 1} of ${heading}.\n\n`);
           return "proceed" as const;
         }
-        if (!/^[1-9][0-9]*$/.test(extra)) return yield* Effect.fail(new RoundLimitStop({ heading }));
-        limit += Number(extra);
+        const added = parseExtraRounds(extra);
+        if (added === null) return yield* Effect.fail(new RoundLimitStop({ heading }));
+        limit += added;
       }
 
       // Codex review. Codex runs without a sandbox, so the project and the reviewed file are compared
@@ -175,6 +189,9 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
         });
       const review: Review = yield* decodeWithRepair("codex", ReviewText, yield* reviewCall(subject.reviewPrompt(n)), reviewCall);
       yield* store.writeJson(path.join(dir, `review-${n}.json`), review);
+      // A review whose ids are not unique is invalid before anything is counted or asked (finding 3, decision Q3).
+      const { duplicateIssues } = log.reviewProblems(review);
+      if (duplicateIssues.length > 0) return yield* Effect.fail(new RoundInvalid({ duplicateIssues, missing: [], duplicateDispositions: [], unknownDispositions: [] }));
       const counted = log.countedIssues(review, config.countMinor);
       counts.push(counted);
       yield* ui.say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`);
@@ -199,8 +216,11 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
       costs.push(call.costUsd);
       yield* store.writeJson(path.join(dir, `cc-${n}.json`), response);
       if (subject.afterPlannerCall) yield* subject.afterPlannerCall(response);
-      const missing = log.missingDispositions(review, response);
-      if (missing.length > 0) return yield* Effect.fail(new MissingDispositions({ ids: missing }));
+      // Exactly one disposition per review issue, and none for anything else, before the round is recorded.
+      const problems = log.roundProblems(review, response);
+      if (problems.missing.length + problems.duplicateDispositions.length + problems.unknownDispositions.length > 0) {
+        return yield* Effect.fail(new RoundInvalid({ duplicateIssues: [], ...problems }));
+      }
       yield* store.converse(renderRound(heading, n, review, response));
       if (response.reviewer_feedback !== "") yield* store.recordFeedback(heading, n, response.reviewer_feedback);
 
@@ -257,8 +277,9 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
       // Progress checks.
       const accepted = log.acceptedCount(response);
       const selfCount = response.self_corrections.length;
-      const last = hashes[hashes.length - 1];
+      const last = observations[observations.length - 1].hash;
       let hash = yield* store.fileHash(file);
+      let stage: Observation["stage"] = "response";
 
       if (accepted > 0 && hash === last) return yield* Effect.fail(new AcceptedWithoutChange({ fileLabel, accepted }));
 
@@ -268,18 +289,20 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
         if ((yield* askDecision(`the unexplained change to ${fileLabel} in ${heading}, round ${n}`)) !== "") {
           yield* applyDecisions(subject);
           hash = yield* store.fileHash(file);
+          stage = "decision";
         }
       }
 
-      const earlier = hash !== last ? hashes.indexOf(hash) : -1;
-      if (earlier >= 0) {
-        yield* ui.say(`\n${fileLabel} after round ${n} is identical to ${fileLabel} after round ${earlier} (round 0 is the state at the start).`);
+      const seen = hash !== last ? observations.find((o) => o.hash === hash) : undefined;
+      if (seen !== undefined) {
+        yield* ui.say(`\n${fileLabel} after round ${n} is identical to ${fileLabel} after ${describeObservation(seen)} (round 0 is the state at the start).`);
         if ((yield* askDecision(`which of the two alternating versions of ${fileLabel} is correct`)) !== "") {
           yield* applyDecisions(subject);
           hash = yield* store.fileHash(file);
+          stage = "decision";
         }
       }
-      hashes.push(hash);
+      observations.push({ round: n, stage, hash });
 
       idle = accepted === 0 && selfCount === 0 ? idle + 1 : 0;
       if (idle >= config.maxIdleRounds) {
@@ -289,7 +312,7 @@ export const reviewLoop = <R extends PlannerResponse>(subject: Subject<R>): Effe
         }
         if ((yield* askDecision(`the issues of the last ${idle} rounds that produced no amendment`)) !== "") {
           yield* applyDecisions(subject);
-          hashes.push(yield* store.fileHash(file));
+          observations.push({ round: n, stage: "decision", hash: yield* store.fileHash(file) });
         }
         idle = 0;
       }

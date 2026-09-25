@@ -4,6 +4,7 @@ import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHoo
 import { Effect, Exit, Layer, Ref, Schema } from "effect";
 import * as path from "node:path";
 import { ClaudeCallFailed, isRunError, type UserStopped } from "./errors.ts";
+import { chooseOption } from "./input.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as S from "./schema.ts";
 import type { ExecReport } from "./schema.ts";
@@ -48,7 +49,8 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         for (const [i, o] of q.options.entries()) yield* ui.say(`  ${i + 1}. ${o.label} - ${o.description}`);
         let reply = "";
         while (reply === "") reply = yield* ui.ask("Number or free text (q = quit) > ");
-        const answer = q.options[Number.parseInt(reply, 10) - 1]?.label ?? reply;
+        const chosen = chooseOption(reply, q.options.length);
+        const answer = chosen === null ? reply : q.options[chosen].label;
         answers[q.question] = answer;
         yield* store.converse(`**Question from Claude Code:** ${q.question}\n\n**User answer:** ${answer}\n\n`);
       }

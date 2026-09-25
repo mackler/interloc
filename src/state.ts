@@ -27,6 +27,9 @@ export const decodeRecord = <Out extends Schema.ConstraintDecoder<unknown>>(file
   }
 };
 
+/** The entries of NUL-delimited output (`git … -z`): no quoting exists in it, so names are taken as they are. */
+export const splitNul = (output: string): string[] => output.split("\0").filter((entry) => entry !== "");
+
 export type Snapshot = { status: string[]; diffs: Map<string, string> };
 
 /** The differences between two snapshots, one line per path. An empty result means no change. */
@@ -35,7 +38,9 @@ export function describeChange(before: Snapshot, after: Snapshot): string[] {
   for (const s of after.status) if (!before.status.includes(s)) lines.push(`new status line: ${s}`);
   for (const s of before.status) if (!after.status.includes(s)) lines.push(`status line gone: ${s}`);
   for (const [name, hash] of after.diffs) {
-    if (before.diffs.has(name) && before.diffs.get(name) !== hash) lines.push(`content changed again: ${name}`);
+    if (!before.diffs.has(name)) lines.push(`diff added: ${name}`);
+    else if (before.diffs.get(name) !== hash) lines.push(`content changed again: ${name}`);
   }
+  for (const name of before.diffs.keys()) if (!after.diffs.has(name)) lines.push(`diff gone: ${name}`);
   return lines;
 }

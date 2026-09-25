@@ -60,13 +60,10 @@ test("an invalid config prints HALTED with the file and field and exits 1, befor
   assert.ok(!fs.existsSync(path.join(probe.dir, "conversation.md")), "the records were initialised");
 });
 
-/** Runs the program in a fiber, waits for `ready`, interrupts it, and returns its exit. */
-const interruptWhen = async (wiring: Wiring, ready: () => boolean): Promise<Exit.Exit<number, never>> => {
+/** Runs the program in a fiber, waits for the double to be reached, interrupts it, and returns its exit. */
+const interruptWhen = async (wiring: Wiring, reached: Promise<void>): Promise<Exit.Exit<number, never>> => {
   const fiber = Effect.runFork(Effect.scoped(program(["task"], wiring)));
-  for (let waited = 0; !ready(); waited += 5) {
-    assert.ok(waited < 5000, "the program did not reach the point to interrupt within 5 s");
-    await sleep(5);
-  }
+  await Promise.race([reached, sleep(5000).then(() => assert.fail("the program did not reach the point to interrupt within 5 s"))]);
   await sleep(10);
   await Effect.runPromise(Fiber.interrupt(fiber));
   return Effect.runPromise(Fiber.await(fiber));
@@ -81,18 +78,18 @@ const assertInterrupted = (probe: WiringProbe, exit: Exit.Exit<number, never>): 
 
 test("interrupt while the UI waits for input", async () => {
   const { wiring, probe } = testWiring(tempRepo(), {
-    answers: ["<wait>"],
+    answers: [{ wait: true }],
     steps: [{ output: noQuestions, plan: "v1" }],
     reviews: [{ issues: [] }],
     execs: [{ status: "aborted", summary: "", question: "no status", remainingWork: "", userInput: null }],
   });
-  const exit = await interruptWhen(wiring, () => probe.ui.asked.length === 1);
+  const exit = await interruptWhen(wiring, probe.ui.nextAsk());
   assertInterrupted(probe, exit);
 });
 
 test("interrupt while a scripted agent call is pending", async () => {
   const { wiring, probe } = testWiring(tempRepo(), { steps: [{ hang: true }] });
-  const exit = await interruptWhen(wiring, () => probe.planner.hangSignals.length === 1);
+  const exit = await interruptWhen(wiring, probe.planner.nextHang());
   assertInterrupted(probe, exit);
   assert.equal(probe.planner.hangSignals[0].aborted, true, "the pending call was not aborted");
 });

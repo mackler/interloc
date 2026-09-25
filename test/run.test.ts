@@ -168,12 +168,12 @@ test("q at a decision prompt stops with UserStopped", async () => {
   await runFails(layer, "UserStopped", /stopped by the user/);
 });
 
-test("a missing disposition stops with MissingDispositions naming the id", async () => {
+test("a missing disposition stops with RoundInvalid naming the id", async () => {
   const { layer } = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
     reviews: [{ issues: [issue("A"), issue("B")] }],
   });
-  await runFails(layer, "MissingDispositions", /Claude Code returned no disposition for: B/);
+  await runFails(layer, "RoundInvalid", /Claude Code returned no disposition for: B/);
 });
 
 test("no plan written stops with PlanNotWritten", async () => {
@@ -187,4 +187,97 @@ test("Codex changing the reviewed file stops with ReviewedFileChanged", async ()
     reviews: [{ issues: [issue("A")], plan: "changed by the reviewer" }],
   });
   await runFails(layer, "ReviewedFileChanged", /plan\.md changed during a Codex review/);
+});
+
+// Finding 14 of docs/functional-design-review.md: after an idle-round decision appended a second hash for one
+// round, the position in the history was printed as a round number.
+test("the identical-content message names the round after which the content was seen, also after an idle decision", async () => {
+  const reject = (id: string, plan?: string) => ({ output: respond([[id, "rejected"]]), ...(plan === undefined ? {} : { plan }) });
+  const { layer, probe } = testLayer(tempRepo(), {
+    // round 1: unexplained change (no decision), idle prompt (a decision that applies changes -> v3)
+    // rounds 2 and 3: unexplained change and idle prompt, no decisions; round 4: the plan is v4 again
+    answers: ["", "apply the missing step", "", "", "", "", "", "", ""],
+    steps: [
+      { output: noQuestions, plan: "v1" },
+      reject("A", "v2"),
+      { output: noQuestions, plan: "v3" }, // applies the decision of round 1
+      reject("B", "v4"),
+      reject("C", "v5"),
+      reject("D", "v4"),
+    ],
+    reviews: [{ issues: [issue("A")] }, { issues: [issue("B")] }, { issues: [issue("C")] }, { issues: [issue("D")] }, { issues: [] }],
+    execs: [finished],
+    config: { maxIdleRounds: 1, maxRounds: 6 },
+  });
+  assert.equal(await runTask(layer), 1);
+  const identical = probe.ui.said.filter((line) => /is identical to plan\.md after/.test(line));
+  assert.equal(identical.length, 1, probe.ui.said.join("\n"));
+  assert.match(identical[0], /identical to plan\.md after round 2\b/);
+});
+
+// Finding 3 of docs/functional-design-review.md: duplicate or extra dispositions and duplicate review ids passed
+// the presence check, so counts and the recorded actions could disagree. Decision Q3: a structural halt.
+test("two dispositions for one issue halt the run with RoundInvalid naming the id", async () => {
+  const { layer } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "rejected"], ["A", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("A")] }],
+  });
+  await runFails(layer, "RoundInvalid", /\bA\b/);
+});
+
+test("a disposition for an id that is not in the review halts the run with RoundInvalid naming the id", async () => {
+  const { layer } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"], ["B", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("A")] }],
+  });
+  await runFails(layer, "RoundInvalid", /\bB\b/);
+});
+
+test("a review with two issues of the same id halts the run with RoundInvalid before any response", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [issue("A", "first"), issue("A", "second")] }],
+  });
+  await runFails(layer, "RoundInvalid", /\bA\b/);
+  assert.equal(probe.planner.prompts.length, 1, "Claude Code was asked to respond to an invalid review");
+});
+
+test("a review with two minor issues of the same id halts instead of converging when minor issues do not count", async () => {
+  const minor = (id: string) => ({ ...issue(id), severity: "minor" as const });
+  const { layer } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [minor("A"), minor("A")] }],
+    execs: [finished],
+    config: { countMinor: false },
+  });
+  await runFails(layer, "RoundInvalid", /\bA\b/);
+});
+
+test("a missing disposition still halts, now as RoundInvalid, naming the id", async () => {
+  const { layer } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("A"), issue("B")] }],
+  });
+  await runFails(layer, "RoundInvalid", /returned no disposition for: B/);
+});
+
+// Finding 5 of docs/functional-design-review.md: the extra-rounds answer accepted integers beyond safe range.
+test("at the round limit, an integer beyond the safe range is an invalid answer and stops; a small one adds rounds", async () => {
+  const huge = testLayer(tempRepo(), {
+    answers: ["99999999999999999999"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("A")] }],
+    config: { maxRounds: 1 },
+  });
+  await runFails(huge.layer, "RoundLimitStop", /round limit/);
+
+  const three = testLayer(tempRepo(), {
+    answers: ["3"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }],
+    execs: [finished],
+    config: { maxRounds: 1 },
+  });
+  assert.equal(await runTask(three.layer), 1);
+  assert.ok(three.probe.ui.said.some((line) => /round 2 \(limit 4\)/.test(line)), three.probe.ui.said.join("\n"));
 });

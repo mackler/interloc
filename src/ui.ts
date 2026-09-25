@@ -6,6 +6,7 @@
 import { Effect, Layer, type Scope } from "effect";
 import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
+import { parseAskLine, parseMessage } from "./input.ts";
 import { Ui as UiService, type UiShape } from "./services.ts";
 
 /**
@@ -63,9 +64,9 @@ export const terminalUi = (
       ask: (prompt) =>
         Effect.gen(function* () {
           yield* showPrompt(prompt);
-          const answer = (yield* nextLine(prompt)).trim();
-          if (answer === "q") return yield* Effect.fail(new UserStopped({ where: prompt }));
-          return answer;
+          const parsed = parseAskLine(yield* nextLine(prompt));
+          if (parsed.kind === "quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
+          return parsed.text;
         }),
       askMessage: (prompt) =>
         Effect.gen(function* () {
@@ -82,9 +83,9 @@ export const terminalUi = (
             collected.push(line);
             if (!block) break;
           }
-          const message = collected.join("\n").trim();
-          if (message === "/quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
-          return message;
+          const parsed = parseMessage(collected.join("\n"));
+          if (parsed.kind === "quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
+          return parsed.text;
         }),
     };
   });

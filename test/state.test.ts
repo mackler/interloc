@@ -157,8 +157,8 @@ const recordingSpawner = (answer: (args: readonly string[]) => string): { layer:
 test("the snapshot runs git through the command service", async () => {
   const repo = tempRepo();
   const { layer, commands } = recordingSpawner((args) => {
-    if (args.includes("status")) return " M a.txt\n M ignored.txt\n?? plan-review/plan.md\n";
-    if (args.includes("--name-only")) return "a.txt\nignored.txt\n";
+    if (args.includes("status")) return " M a.txt\0 M ignored.txt\0?? plan-review/plan.md\0";
+    if (args.includes("--name-only")) return "a.txt\0ignored.txt\0";
     return "diff of a.txt";
   });
   const platform = Layer.mergeAll(platformLayer, layer);
@@ -167,8 +167,8 @@ test("the snapshot runs git through the command service", async () => {
   assert.deepEqual(snapshot.status, [" M a.txt"]);
   assert.deepEqual([...snapshot.diffs.keys()], ["a.txt"]);
   assert.deepEqual(commands, [
-    ["git", "-C", repo, "status", "--porcelain"],
-    ["git", "-C", repo, "diff", "--name-only"],
+    ["git", "-C", repo, "status", "--porcelain", "-z"],
+    ["git", "-C", repo, "diff", "--name-only", "-z"],
     ["git", "-C", repo, "diff", "--", "a.txt"],
   ]);
 });
@@ -181,4 +181,70 @@ test("usageSummary reports the running total of each Claude Code session, not th
   await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-1", num_turns: 4, total_cost_usd: 1.25 }));
   await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-2", num_turns: 2, total_cost_usd: 0.25 }));
   assert.match(await Effect.runPromise(s.usageSummary()), /Claude Code: 3 calls in 2 sessions, total_cost_usd = 1\.50 \(the sessions' last reported running totals, an estimate by the client\)/);
+});
+
+// Finding 1 of docs/functional-design-review.md: describeChange ignored diff entries that appear or disappear.
+test("describeChange reports a diff entry that appears or disappears, and nothing for a snapshot compared with itself", async () => {
+  const { describeChange } = await import("../src/state.ts");
+  const before = { status: [" M a.txt"], diffs: new Map<string, string>() };
+  const after = { status: [" M a.txt"], diffs: new Map([["a.txt", "h1"]]) };
+  assert.notDeepEqual(describeChange(before, after), [], "an added diff entry was not reported");
+  assert.notDeepEqual(describeChange(after, before), [], "a removed diff entry was not reported");
+  assert.deepEqual(describeChange(after, after), []);
+  assert.deepEqual(describeChange(before, before), []);
+});
+
+// Finding 22 of docs/functional-design-review.md: the time was read and the JSON serialized when the
+// effect was built, not when it ran; a serialization failure was a defect.
+test("recordUsage reads the time when it runs, and the store owns the time", async () => {
+  const s = await initialised();
+  const once = s.recordUsage({ agent: "claude", session_id: "s", total_cost_usd: 1 });
+  await Effect.runPromise(once);
+  await new Promise((resolve) => setTimeout(resolve, 3));
+  await Effect.runPromise(once);
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s", total_cost_usd: 2, time: "1999" }));
+  const lines = fs.readFileSync(path.join(s.dir, "usage.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.notEqual(lines[0].time, lines[1].time, "one effect run twice recorded the same time");
+  assert.notEqual(lines[2].time, "1999", "the entry's own time overrode the store's");
+});
+
+test("writeJson of a value that cannot be serialized fails with FileSystemError (serialize), not a defect", async () => {
+  const s = await initialised();
+  const cyclic: Record<string, unknown> = {};
+  cyclic.self = cyclic;
+  await fails(s.writeJson(path.join(s.dir, "x.json"), cyclic), "FileSystemError", /serialize/, /x\.json/);
+});
+
+// Finding 2 of docs/functional-design-review.md: plan-review/ was filtered from the status but not from the diff
+// names, and git's C-quoted names were undone only by stripping the quotes. The fake git answers in the quoted
+// form unless asked for -z, as git does.
+const gitAnswers = (repo: string, entries: { status: string; name: string; diff: boolean }[]) => (args: readonly string[]): string => {
+  const z = args.includes("-z");
+  const quote = (name: string): string => (/[\t"\\ ]/.test(name) ? `"${name.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\t/g, "\\t")}"` : name);
+  const render = (name: string): string => (z ? name : quote(name));
+  if (args.includes("status")) return entries.map((e) => `${e.status} ${render(e.name)}${z ? "\0" : "\n"}`).join("");
+  if (args.includes("--name-only")) return entries.filter((e) => e.diff).map((e) => `${render(e.name)}${z ? "\0" : "\n"}`).join("");
+  void repo;
+  return "diff text";
+};
+
+test("plan-review/ is excluded from the diff names as it is from the status, and no diff of it is requested", async () => {
+  const repo = tempRepo();
+  const { layer, commands } = recordingSpawner(gitAnswers(repo, [{ status: " M", name: "a.txt", diff: true }, { status: "??", name: "plan-review/plan.md", diff: true }]));
+  const s = await Effect.runPromise(makeStore(repo, []).pipe(Effect.provide(Layer.mergeAll(platformLayer, layer))));
+  const snapshot = await Effect.runPromise(s.projectSnapshot());
+  assert.deepEqual(snapshot.status, [" M a.txt"]);
+  assert.deepEqual([...snapshot.diffs.keys()], ["a.txt"]);
+  assert.ok(!commands.some((c) => c.includes("plan-review/plan.md")), `a git command named plan-review/plan.md: ${JSON.stringify(commands)}`);
+});
+
+test("names with tabs and quotes are the real names: matched against ignorePaths and passed to git diff as they are", async () => {
+  const repo = tempRepo();
+  const { layer, commands } = recordingSpawner(gitAnswers(repo, [{ status: "??", name: "tab\there.txt", diff: false }, { status: " M", name: 'q"uote.txt', diff: true }]));
+  const s = await Effect.runPromise(makeStore(repo, ["tab\there.txt"]).pipe(Effect.provide(Layer.mergeAll(platformLayer, layer))));
+  const snapshot = await Effect.runPromise(s.projectSnapshot());
+  assert.deepEqual(snapshot.status, [' M q"uote.txt']);
+  assert.deepEqual([...snapshot.diffs.keys()], ['q"uote.txt']);
+  assert.ok(commands.some((c) => c.slice(-3).join(" ") === 'diff -- q"uote.txt'), `no diff of the real name: ${JSON.stringify(commands)}`);
+  assert.ok(!commands.some((c) => c.some((a) => a.includes("\\"))), `an escaped name reached git: ${JSON.stringify(commands)}`);
 });
