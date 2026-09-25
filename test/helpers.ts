@@ -7,10 +7,12 @@ import { Cause, Effect, Exit, Layer, Option } from "effect";
 import type { Schema } from "effect";
 import type { RunError } from "../src/errors.ts";
 import { describe, UserStopped } from "../src/errors.ts";
+import type { Wiring } from "../src/program.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
 import { Planner, type PlannerShape, Reviewer, type ReviewerShape, RunConfig, type Services, Ui, type UiShape } from "../src/services.ts";
 import { makeStore, platformLayer, storeLayer } from "../src/store.ts";
+import { FakeSdk } from "./fakeSdk.ts";
 
 type Config = typeof S.Config.Type;
 type ExecOutcome = typeof S.ExecOutcome.Type;
@@ -43,12 +45,14 @@ export class ScriptedUi implements UiShape {
   say(text: string): Effect.Effect<void> {
     return Effect.sync(() => void this.said.push(text));
   }
+  /** The answer "q" fails with UserStopped; the answer "<wait>" never completes (for interruption tests). */
   ask(prompt: string): Effect.Effect<string, UserStopped> {
     return Effect.suspend(() => {
       this.asked.push(prompt);
       const answer = this.answers.shift();
       if (answer === undefined) return Effect.die(new Error(`no scripted answer for: ${prompt}`));
       if (answer === "q") return Effect.fail(new UserStopped({ where: prompt }));
+      if (answer === "<wait>") return Effect.never;
       return Effect.succeed(answer);
     });
   }
@@ -57,12 +61,15 @@ export class ScriptedUi implements UiShape {
   }
 }
 
-export type PlanningStep = { output: unknown; plan?: string; touchProject?: boolean };
+/** `hang` makes the call wait until it is interrupted, recording the abort signal it was given. */
+export type PlanningStep = { output?: unknown; plan?: string; touchProject?: boolean; hang?: boolean };
 
 export class ScriptedPlanner implements PlannerShape {
   readonly prompts: string[] = [];
   /** The Effect schema of each planning call, in order. */
   readonly schemas: Schema.Top[] = [];
+  /** The abort signals of the calls that hang. */
+  readonly hangSignals: AbortSignal[] = [];
   private readonly state: Paths;
   private readonly steps: PlanningStep[];
   private readonly execs: ExecOutcome[];
@@ -74,14 +81,15 @@ export class ScriptedPlanner implements PlannerShape {
   readonly sessionId = Effect.succeed("test-session");
   /** Returns the scripted output as it is: the caller decodes it, as with the real agent. */
   planning(prompt: string, schema: Schema.Top): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }> {
-    return Effect.sync(() => {
+    return Effect.suspend(() => {
       this.prompts.push(prompt);
       this.schemas.push(schema);
       const step = this.steps.shift();
-      if (!step) throw new Error(`no scripted planning step for: ${prompt.slice(0, 60)}`);
+      if (!step) return Effect.die(new Error(`no scripted planning step for: ${prompt.slice(0, 60)}`));
+      if (step.hang) return Effect.callback((_resume, signal) => void this.hangSignals.push(signal));
       if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
       if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
-      return { output: step.output, resultText: "", costUsd: 0.1 };
+      return Effect.succeed({ output: step.output, resultText: "", costUsd: 0.1 });
     });
   }
   executing(): Effect.Effect<ExecOutcome> {
@@ -177,4 +185,35 @@ export async function runFails(layer: Layer.Layer<Services>, tag: RunError["_tag
   assert.equal(error.value._tag, tag);
   for (const text of texts) assert.match(describe(error.value), text);
   return error.value;
+}
+
+/** What a program test inspects: the scripted implementations, the paths, and the usage lines. */
+export type WiringProbe = { ui: ScriptedUi; planner: ScriptedPlanner; reviewer: ScriptedReviewer; dir: string; usageLines: string[] };
+
+/**
+ * The wiring of the program with scripted agents and Ui over a temporary repository. The shared
+ * config file is an empty object in a temporary directory, so the repository's own config.json
+ * plays no part; `options.config` is written to the project's plan-review/config.json.
+ */
+export function testWiring(repo: string, options: TestOptions = {}): { wiring: Wiring; probe: WiringProbe } {
+  const paths = pathsOf(repo);
+  const dir = path.join(paths.project, "plan-review");
+  const shared = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pr-shared-")), "config.json");
+  fs.writeFileSync(shared, "{}");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ questionPhase: false, ...options.config }));
+  const ui = new ScriptedUi(options.answers ?? []);
+  const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? []);
+  const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
+  const usageLines: string[] = [];
+  const wiring: Wiring = {
+    ui: Effect.succeed(ui),
+    platform: platformLayer,
+    sdk: new FakeSdk(),
+    agents: Layer.mergeAll(Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer)),
+    sharedConfig: shared,
+    cwd: paths.project,
+    usage: (text) => Effect.sync(() => void usageLines.push(text)),
+  };
+  return { wiring, probe: { ui, planner, reviewer, dir, usageLines } };
 }

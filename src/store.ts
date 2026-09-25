@@ -8,9 +8,9 @@ import * as NodeChildProcessSpawner from "@effect/platform-node/NodeChildProcess
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import { createHash } from "node:crypto";
-import { FileSystemError, GitError, type StateFileInvalid } from "./errors.ts";
+import { ConfigInvalid, FileSystemError, GitError, type StateFileInvalid } from "./errors.ts";
 import * as S from "./schema.ts";
-import type { LogEntry } from "./schema.ts";
+import type { Config, LogEntry } from "./schema.ts";
 import { lift, Store, type StoreError, type StoreShape } from "./services.ts";
 import { decodeRecord, parseJson, type Snapshot } from "./state.ts";
 
@@ -19,6 +19,46 @@ export type Platform = FileSystem.FileSystem | Path.Path | ChildProcessSpawner.C
 
 /** The live platform services of Node.js. */
 export const platformLayer: Layer.Layer<Platform> = Layer.provideMerge(NodeChildProcessSpawner.layer, Layer.mergeAll(NodeFileSystem.layer, NodePath.layer));
+
+const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+const decodeConfigFile = Schema.decodeUnknownSync(S.PartialConfig, { onExcessProperty: "error" });
+
+/** The content of one config file. Invalid JSON, a wrong type and an unknown key are ConfigInvalid. */
+const decodeConfigText = (file: string, text: string): Partial<Config> => {
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch (e) {
+    throw new ConfigInvalid({ file, path: "", message: message(e) });
+  }
+  try {
+    return decodeConfigFile(json);
+  } catch (e) {
+    if (Schema.isSchemaError(e)) throw new ConfigInvalid({ file, ...S.firstIssue(e) });
+    throw e;
+  }
+};
+
+/**
+ * The configuration: the defaults, then the shared config file, then <project>/plan-review/config.json
+ * (decided behaviour 9). Invalid JSON, a wrong type or an unknown key is ConfigInvalid (Q4).
+ */
+export const loadConfig = (project: string, sharedFile: string): Effect.Effect<Config, ConfigInvalid | FileSystemError, FileSystem.FileSystem | Path.Path> =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const io = <A>(file: string, effect: Effect.Effect<A, PlatformError.PlatformError>): Effect.Effect<A, FileSystemError> =>
+      Effect.mapError(effect, (e) => new FileSystemError({ operation: "read", path: file, message: e.message }));
+    const read = (file: string): Effect.Effect<Partial<Config>, ConfigInvalid | FileSystemError> =>
+      Effect.gen(function* () {
+        if (!(yield* io(file, fs.exists(file)))) return {};
+        const text = yield* io(file, fs.readFileString(file));
+        return yield* lift<Partial<Config>, ConfigInvalid>(() => decodeConfigText(file, text));
+      });
+    const shared = yield* read(sharedFile);
+    const own = yield* read(path.join(path.resolve(project), "plan-review", "config.json"));
+    return { ...S.defaultConfig, ...shared, ...own };
+  });
 
 const LogFile = Schema.Array(S.LogEntry);
 const LOG_FILES = ["issue-log.json", "questions-log.json", "requirements-log.json"];

@@ -53,6 +53,14 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Effect.runSync` / `Effect.runFork` | 16866 / 16530 | `runSync(effect): A`; `runFork(effect): Fiber` |
 | `Fiber.interrupt` (verified stage 5.3) | Fiber.d.ts:347 | `(fiber) => Effect<void>`, completes after the finalizers ran |
 | `Scope.Scope` | index.d.ts:452 (`export * as Scope`) | the requirement added by `acquireRelease` |
+| `Effect.exit` (verified stage 6.1) | 3505 | `(self) => Effect<Exit<A, E>, never, R>`. **Observed**: an interruption of the fiber from outside is *not* captured; the code after `exit` does not run and the fiber ends interrupted. The INTERRUPTED output therefore comes from `Effect.onInterrupt` finalizers (which do run), and the exit code from the teardown. |
+| `Effect.ensuring` (verified stage 6.1) | 12336 | **observed** to run on interruption |
+| `Effect.never` / `Effect.ignore` / `Effect.failCause` | 1650 / 7293 / 2113 | |
+| `Exit.succeed` / `Exit.interrupt(fiberId)` / `Exit.die` | Exit.d.ts | constructors, used by the test of `exitCodeOf` |
+| `Cause.hasInterruptsOnly` | Cause.d.ts:596 | true when the cause holds interruptions and nothing else: the 130 case |
+| `Layer.build` (verified stage 6.1) | Layer.d.ts:622 | `(layer) => Effect<Context<ROut>, E, RIn \| Scope>`: builds the layer once; `Context.get(context, Planner)` then reaches the same planner instance that `run` uses (for the session id at the end) |
+| `Runtime.defaultTeardown` (read stage 6.1) | Runtime.d.ts:50–70 | exit codes: 0 on success, 130 for interruption-only failures, `errorExitCode` of the squashed error when present, otherwise 1 |
+| `NodeRuntime.runMain(effect, { disableErrorReporting?, teardown? })` (read stage 6.1) | @effect/platform-node/dist/NodeRuntime.d.ts; implementation in platform-node-shared/dist/NodeRuntime.js | on SIGINT or SIGTERM it calls `fiber.interruptUnsafe(fiber.id)`, so finalizers run; when the fiber ends it removes the handlers and calls `teardown(exit, code => …)`, which calls `process.exit(code)` when a signal was received or the code is not 0. `disableErrorReporting` only silences the automatic log of unreported non-interruption failures; a custom `teardown` decides the code. |
 | `RunOptions` | 16495 | `{ signal?: AbortSignal; scheduler?; uninterruptible?; onFiberStart? }` |
 
 ## Fiber, Exit, Cause, Ref

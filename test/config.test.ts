@@ -3,77 +3,72 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { test } from "node:test";
+import { Cause, Effect, Exit, Option } from "effect";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
 import { defaultConfig } from "../src/schema.ts";
-import { State } from "../src/state.ts";
+import { loadConfig, platformLayer } from "../src/store.ts";
 import { tempRepo } from "./helpers.ts";
 
 /** A project with a plan-review/ directory and a shared config file outside it. Neither file exists yet. */
-const setup = (): { state: State; shared: string; project: string } => {
-  const state = new State(tempRepo());
-  fs.mkdirSync(state.dir, { recursive: true });
+const setup = (): { project: string; shared: string; projectFile: string } => {
+  const project = tempRepo();
+  fs.mkdirSync(path.join(project, "plan-review"), { recursive: true });
   const shared = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "pr-shared-")), "config.json");
-  return { state, shared, project: path.join(state.dir, "config.json") };
+  return { project, shared, projectFile: path.join(project, "plan-review", "config.json") };
 };
 
-const failsWith = (run: () => unknown, tag: RunError["_tag"], ...texts: RegExp[]): void => {
-  assert.throws(run, (e: unknown) => {
-    const error = e as RunError;
-    assert.equal(error._tag, tag);
-    for (const text of texts) assert.match(describe(error), text);
-    return true;
-  });
+const load = (project: string, shared: string) => Effect.runPromise(loadConfig(project, shared).pipe(Effect.provide(platformLayer)));
+
+const failsWith = async (project: string, shared: string, tag: RunError["_tag"], ...texts: RegExp[]): Promise<void> => {
+  const exit = await Effect.runPromiseExit(loadConfig(project, shared).pipe(Effect.provide(platformLayer)));
+  assert.ok(Exit.isFailure(exit), "the configuration was accepted");
+  const error = Cause.findErrorOption(exit.cause);
+  assert.ok(Option.isSome(error), `a defect, not a typed error: ${Cause.pretty(exit.cause)}`);
+  assert.equal(error.value._tag, tag);
+  for (const text of texts) assert.match(describe(error.value), text);
 };
 
-test("precedence: defaults, then shared, then project", () => {
-  const { state, shared, project } = setup();
+test("precedence: defaults, then shared, then project", async () => {
+  const { project, shared, projectFile } = setup();
   fs.writeFileSync(shared, JSON.stringify({ maxRounds: 7, countMinor: false, ignorePaths: ["shared.txt"] }));
-  fs.writeFileSync(project, JSON.stringify({ maxRounds: 9, ignorePaths: ["project.txt"] }));
-  const config = state.loadConfig(shared, project);
+  fs.writeFileSync(projectFile, JSON.stringify({ maxRounds: 9, ignorePaths: ["project.txt"] }));
+  const config = await load(project, shared);
   assert.equal(config.maxRounds, 9);
   assert.equal(config.countMinor, false);
   assert.equal(config.maxIdleRounds, defaultConfig.maxIdleRounds);
   assert.deepEqual(config.ignorePaths, ["project.txt"]);
-  assert.deepEqual(state.ignorePaths, ["project.txt"]);
 });
 
-test("missing config files give the defaults", () => {
-  const { state, shared, project } = setup();
-  assert.deepEqual(state.loadConfig(shared, project), defaultConfig);
+test("missing config files give the defaults", async () => {
+  const { project, shared } = setup();
+  assert.deepEqual(await load(project, shared), defaultConfig);
 });
 
 for (const which of ["shared", "project"] as const) {
-  const target = (files: ReturnType<typeof setup>): string => files[which];
+  const target = (files: ReturnType<typeof setup>): string => (which === "shared" ? files.shared : files.projectFile);
 
-  test(`invalid JSON in the ${which} config fails with ConfigInvalid naming the file`, () => {
+  test(`invalid JSON in the ${which} config fails with ConfigInvalid naming the file`, async () => {
     const files = setup();
     fs.writeFileSync(target(files), "{");
-    failsWith(() => files.state.loadConfig(files.shared, files.project), "ConfigInvalid", new RegExp(target(files).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    await failsWith(files.project, files.shared, "ConfigInvalid", new RegExp(target(files).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   });
 
-  test(`a wrong type in the ${which} config fails with ConfigInvalid naming the field path`, () => {
+  test(`a wrong type in the ${which} config fails with ConfigInvalid naming the field path`, async () => {
     const files = setup();
     fs.writeFileSync(target(files), JSON.stringify({ maxRounds: "5" }));
-    failsWith(() => files.state.loadConfig(files.shared, files.project), "ConfigInvalid", /maxRounds/, new RegExp(path.basename(target(files))));
+    await failsWith(files.project, files.shared, "ConfigInvalid", /maxRounds/, new RegExp(path.basename(target(files))));
   });
 
-  test(`an unknown key in the ${which} config fails with ConfigInvalid naming the key`, () => {
+  test(`an unknown key in the ${which} config fails with ConfigInvalid naming the key`, async () => {
     const files = setup();
     fs.writeFileSync(target(files), JSON.stringify({ maxRound: 3 }));
-    failsWith(() => files.state.loadConfig(files.shared, files.project), "ConfigInvalid", /maxRound/);
+    await failsWith(files.project, files.shared, "ConfigInvalid", /maxRound/);
   });
 }
 
-test("a wrong element type in a list names the element's path", () => {
-  const { state, shared, project } = setup();
-  fs.writeFileSync(project, JSON.stringify({ ignorePaths: ["a.txt", 2] }));
-  failsWith(() => state.loadConfig(shared, project), "ConfigInvalid", /ignorePaths\[1\]/);
-});
-
-test("the live loader reads plan-review/config.json of the project by default", () => {
-  const { state, project } = setup();
-  fs.writeFileSync(project, JSON.stringify({ maxRounds: 11 }));
-  // The shared file of this repository sets only ignorePaths, so maxRounds comes from the project file.
-  assert.equal(state.loadConfig().maxRounds, 11);
+test("a wrong element type in a list names the element's path", async () => {
+  const { project, shared, projectFile } = setup();
+  fs.writeFileSync(projectFile, JSON.stringify({ ignorePaths: ["a.txt", 2] }));
+  await failsWith(project, shared, "ConfigInvalid", /ignorePaths\[1\]/);
 });
