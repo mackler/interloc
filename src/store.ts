@@ -14,6 +14,7 @@ import type { Config, LogEntry } from "./schema.ts";
 import { lift, Store, type StoreError, type StoreShape } from "./services.ts";
 import { decodeStatusV2, excluded, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
 import { decodeRecord, parseJson } from "./state.ts";
+import { summarizeUsage, type UsageLine, type UsageSummary } from "./usage.ts";
 
 /** The platform services the store needs. */
 export type Platform = FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner;
@@ -173,31 +174,33 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       recordDecision: (subject, decision) =>
         append(decisionsFile, `Subject: ${subject}\nDecision: ${decision}\n\n`).pipe(Effect.andThen(converse(`**User decision** on ${subject}: ${decision}\n\n`))),
       recordFeedback: (heading, round, text) => append(feedbackFile, `## ${heading}, round ${round}\n${text}\n\n`),
-      /** Appends one line to usage.jsonl: the usage that an agent reported for one call. The time is read when the effect runs, and it is the store's. */
-      recordUsage: (entry) =>
-        Effect.suspend(() => serialize(usageFile, { ...entry, time: new Date().toISOString() })).pipe(Effect.flatMap((line) => append(usageFile, line + "\n"))),
       /**
-       * Per agent: the number of calls, and the reported values. The Agent SDK's total_cost_usd is the
-       * running total of a session (a resumed session continues from its saved total), so the cost is
-       * the sum of each session's last value, not the sum of the calls.
+       * Appends one line to usage.jsonl: the usage an agent reported for one call, in the on-disk shape
+       * (session_id, thread_id, usage). The time is read when the effect runs, and it is the store's.
        */
-      usageSummary: () =>
+      recordUsage: (line) =>
+        Effect.suspend(() => {
+          const fields =
+            line.agent === "claude"
+              ? { agent: "claude", session_id: line.session, num_turns: line.turns ?? undefined, total_cost_usd: line.totalCostUsd }
+              : { agent: "codex", thread_id: line.thread, usage: { input_tokens: line.inputTokens, output_tokens: line.outputTokens } };
+          return serialize(usageFile, { ...fields, time: new Date().toISOString() });
+        }).pipe(Effect.flatMap((text) => append(usageFile, text + "\n"))),
+      /** The usage lines, read into their per-agent shape and folded by src/usage.ts; no file gives the empty summary. */
+      usageSummary: (): Effect.Effect<UsageSummary, StoreError> =>
         Effect.gen(function* () {
-          if (!(yield* exists(usageFile))) return "no usage recorded";
-          const lines = (yield* readText(usageFile)).split("\n").filter((l) => l !== "");
+          if (!(yield* exists(usageFile))) return summarizeUsage([]);
+          const texts = (yield* readText(usageFile)).split("\n").filter((l) => l !== "");
           // Excess properties are ignored: the SDKs decide which usage fields they report.
           const entries = yield* lift<(typeof S.UsageEntry.Type)[], StateFileInvalid>(() =>
-            lines.map((line) => decodeRecord(usageFile, S.UsageEntry, parseJson(usageFile, line), { onExcessProperty: "ignore" })),
+            texts.map((text) => decodeRecord(usageFile, S.UsageEntry, parseJson(usageFile, text), { onExcessProperty: "ignore" })),
           );
-          const claude = entries.filter((e) => e.agent === "claude");
-          const codex = entries.filter((e) => e.agent === "codex");
-          const lastTotal = new Map<string, number>();
-          for (const e of claude) if (typeof e.total_cost_usd === "number") lastTotal.set(e.session_id ?? "", e.total_cost_usd);
-          const sessions = new Set(claude.map((e) => e.session_id ?? "")).size;
-          const cost = [...lastTotal.values()].reduce((sum, value) => sum + value, 0);
-          const input = codex.reduce((sum, e) => sum + (e.usage?.input_tokens ?? 0), 0);
-          const output = codex.reduce((sum, e) => sum + (e.usage?.output_tokens ?? 0), 0);
-          return `Claude Code: ${claude.length} calls in ${sessions} sessions, total_cost_usd = ${cost.toFixed(2)} (the sessions' last reported running totals, an estimate by the client). Codex: ${codex.length} turns, ${input} input tokens, ${output} output tokens. Details: plan-review/usage.jsonl`;
+          const lines: UsageLine[] = entries.map((e) =>
+            e.agent === "claude"
+              ? { agent: "claude", session: e.session_id ?? null, turns: e.num_turns ?? null, totalCostUsd: e.total_cost_usd ?? null }
+              : { agent: "codex", thread: e.thread_id ?? null, inputTokens: e.usage?.input_tokens ?? 0, outputTokens: e.usage?.output_tokens ?? 0 },
+          );
+          return summarizeUsage(lines);
         }),
       converse,
       planExists: () =>

@@ -212,7 +212,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
             }
           } else if (message.type === "result") {
             out.costUsd = message.total_cost_usd;
-            yield* store.recordUsage({ agent: "claude", session_id: yield* Ref.get(session), num_turns: message.num_turns, total_cost_usd: message.total_cost_usd });
+            yield* store.recordUsage({ agent: "claude", session: yield* Ref.get(session), turns: message.num_turns, totalCostUsd: message.total_cost_usd });
             if (message.subtype === "success") {
               out.structured = message.structured_output;
               out.resultText = message.result;

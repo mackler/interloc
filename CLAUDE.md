@@ -32,7 +32,9 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/main.ts` | Entry point: the live wiring and the platform runner (`NodeRuntime.runMain`) applied to the program; the only untested code besides `src/sdkLive.ts` |
 | `src/program.ts` | `program(args, wiring)`: arguments, configuration, the services from the wiring, the run, and what is printed at the end; `exitCodeOf` |
 | `src/run.ts` | Question phase, then alternation of planning phase K and execution phase K |
-| `src/review.ts` | The review procedure (`reviewLoop`) with every pause condition; `planningCall`; `decodeWithRepair`; generic over a `Subject` |
+| `src/review.ts` | `reviewLoop` as the interpreter of `src/reviewState.ts` (it executes the commands against the services and feeds the events back); `planningCall`; `decodeWithRepair`; generic over a `Subject` |
+| `src/reviewState.ts` | The review loop as a pure state machine: `advance(state, event)` returns the next state and the commands; every pause condition of behaviour 7, in its order, the log update and the progress checks live here. No I/O, no Effect |
+| `src/usage.ts` | The usage summary as a pure fold over the lines of `usage.jsonl` (per-agent lines, each identified session's last running total, unidentified calls counted separately) and its rendering |
 | `src/subjects.ts` | The three subjects: question list, requirements, plan |
 | `src/interview.ts` | Question phase and the interview in the terminal |
 | `src/issueLog.ts` | Pure functions on the issue log (no I/O, no Effect). Detection of repeated issues, supersession, user decisions |
@@ -46,7 +48,7 @@ There is no build step. Node.js (22.18 or later) runs the `.ts` files directly b
 | `src/round.ts` | The validated round (pure): unique non-empty ids, one disposition per issue, references normalised, generated self-correction ids; `RoundInvalid` otherwise |
 | `src/snapshot.ts` | The project snapshot (pure): git's porcelain v2 records decoded, the working-tree entry per path, `compareSnapshots`, the exclusion predicate |
 | `src/prompts.ts` | Every prompt text. Prompts are not written anywhere else |
-| `src/input.ts` | Pure interpretation of what the user types: the option a reply chooses, the extra rounds at the round limit, the `q` and `/quit` commands (shared by the terminal and the scripted Ui) |
+| `src/input.ts` | Pure interpretation of what the user types: the option a reply chooses, the extra rounds at the round limit, the `q` and `/quit` commands (shared by the terminal and the scripted Ui), the interview's `/done`, and the fold of the `"""` line protocol |
 | `src/store.ts` | The `Store` layer on Effect's FileSystem, Path and child-process services: files in `<project>/plan-review/`, the project snapshot, `loadConfig`; `platformLayer` |
 | `src/state.ts` | The decoders of the program's own JSON records |
 | `src/ui.ts` | The `Ui` layer: one readline interface as a scoped resource |

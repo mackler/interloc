@@ -31,7 +31,7 @@ const arbLogEntry = record<S.LogEntry>({
   action: fc.string(),
   rationale: fc.string(),
 });
-const arbUsage = record<S.UsageEntry>({ time: fc.string(), agent: fc.string(), num_turns: nonNegativeInt, total_cost_usd: cost, usage: record({ input_tokens: nonNegativeInt, output_tokens: nonNegativeInt }) });
+const arbUsage = record<S.UsageEntry>({ time: fc.string(), agent: fc.constantFrom("claude", "codex"), num_turns: nonNegativeInt, total_cost_usd: cost, usage: record({ input_tokens: nonNegativeInt, output_tokens: nonNegativeInt }) });
 const arbQuestions = record<S.QuestionsFile>({
   task: fc.string(),
   questions: fc.array(record({ id: nonEmpty, question: fc.string(), reason: fc.string(), proposed_answers: fc.array(record({ label: fc.string(), description: fc.string() })), default_answer: fc.string() })),

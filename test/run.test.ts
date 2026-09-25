@@ -38,7 +38,10 @@ test("a rejected issue raised again produces one prompt", async () => {
   assert.equal(probe.ui.asked.length, 1);
   assert.match(probe.ui.asked[0], /issue B, raised again/);
   const entries = (await probe.loadLog()).filter((e) => e.id === "B");
-  assert.deepEqual(entries.map((e) => e.superseded === true), [true, false]);
+  assert.deepEqual(entries.map((e) => e.superseded === true), [true, true, false]);
+  // Finding 15: the decision on the reraised issue is one typed decision, so it is in the issue log too.
+  assert.equal(entries.at(-1)?.action, "decided_by_user");
+  assert.equal(entries.at(-1)?.rationale, "keep the rejection");
 });
 
 test("a stop with a question starts a second planning phase with a new Codex thread", async () => {

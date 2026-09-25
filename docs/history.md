@@ -250,6 +250,15 @@ thread's context growing with every round). Resume is not implemented, so the re
   share a text. Property-based tests (fast-check) cover the rounds and the log, the snapshot (including
   generated file operations on a real repository against a git oracle), the input parsers and the record
   schemas; the input properties passed at once, as they specify what stage 1 had built.
+- Stage 3: the review loop is a pure state machine, `src/reviewState.ts` (`advance(state, event)` → next
+  state and commands; the pause order of behaviour 7 is the order of its steps), and `reviewLoop` its
+  interpreter; the user's decision is one typed event from which both the record lines and the
+  `decided_by_user` log entry derive, so a decision on a reraised issue now reaches the log too (Q7,
+  finding 15). The usage summary is a pure fold (`src/usage.ts`, Q8: calls without a session id are their
+  own sessions and are counted), the reader's agent type is closed, and `program.ts` renders the structured
+  summary. Properties: bounded generated event traces through `advance` against a model in the test, and
+  the usage fold's laws. Small helpers: `planningCall` reports `repaired` (a `Ref` instead of a mutable
+  binding), `askNonEmpty`, the interview's message variants and the line-protocol fold in `src/input.ts`.
 
 ## Rejected or deferred
 

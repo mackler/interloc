@@ -162,7 +162,7 @@ service class is `ChildProcessSpawner.ChildProcessSpawner`); the Node layers fro
 | `ChildProcessSpawner.make(spawn)` | ChildProcessSpawner.d.ts:~200 | builds the whole service from a `spawn` function; used by the test's recording spawner |
 | `Stream.decodeText(stream)` / `Stream.mkString` / `Stream.make` / `Stream.empty` | Stream.d.ts:12761 / 15449 / — / 585 | bytes → text → one string |
 | `Effect.all([a, b], { concurrency: "unbounded" })` | Effect.d.ts:388 | stdout and stderr are drained together |
-| `Effect.andThen` / `Effect.flatMap` / `Effect.mapError` | — / 2525 / 5769 | |
+| `Effect.andThen` / `Effect.flatMap` / `Effect.mapError` / `Effect.tap` | — / 2525 / 5769 / 3161 | `tap` runs a side effect on the success value and keeps it (the repair call of `planningCall` records itself in a `Ref`) |
 | `FileSystem` methods used | FileSystem.d.ts:103–285 | `exists`, `makeDirectory(path, { recursive })`, `readDirectory`, `readFileString`, `readFile`, `writeFileString(path, text, { flag: "a" })` (OpenFlag, line 321), `rename`, `stat` → `Info.size: ByteSize` (a branded bigint: compare with `0n`) |
 | `PlatformError` | PlatformError.d.ts:141 | `_tag: "PlatformError"`, `message` getter; mapped to `FileSystemError` / `GitError` in src/store.ts |
 | `Layer.provide(self, that)` / `Layer.provideMerge` / `Layer.effect(key, effect)` | Layer.d.ts:1704 / 2116 / 1131 | `platformLayer = provideMerge(NodeChildProcessSpawner.layer, mergeAll(NodeFileSystem.layer, NodePath.layer))` |

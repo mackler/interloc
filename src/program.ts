@@ -8,6 +8,7 @@ import { run } from "./run.ts";
 import type { AgentSdk } from "./sdk.ts";
 import { Planner, type Reviewer, RunConfig, Sdk, Store, type StoreShape, Ui, type UiShape } from "./services.ts";
 import { loadConfig, makeStore, type Platform } from "./store.ts";
+import { renderUsage } from "./usage.ts";
 
 /** What the program is wired to: the terminal, the platform, the SDKs and the agents. */
 export type Wiring = {
@@ -51,7 +52,7 @@ export const program = (args: readonly string[], wiring: Wiring): Effect.Effect<
     const tail = (sessionId: string | null, records: StoreShape) =>
       Effect.gen(function* () {
         yield* ui.say(`Claude Code session id: ${sessionId ?? "none"}`);
-        const usage = yield* records.usageSummary().pipe(Effect.catch((e) => Effect.succeed(`unavailable: ${describe(e)}`)));
+        const usage = yield* records.usageSummary().pipe(Effect.map(renderUsage), Effect.catch((e) => Effect.succeed(`unavailable: ${describe(e)}`)));
         yield* ui.say(`Usage: ${usage}`);
       });
     const halted = (reason: string, sessionId: string | null, records: StoreShape) =>

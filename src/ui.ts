@@ -6,7 +6,7 @@
 import { Effect, Layer, type Scope } from "effect";
 import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
-import { parseAskLine, parseMessage } from "./input.ts";
+import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
 import { Ui as UiService, type UiShape } from "./services.ts";
 
 /**
@@ -71,19 +71,9 @@ export const terminalUi = (
       askMessage: (prompt) =>
         Effect.gen(function* () {
           yield* showPrompt(prompt);
-          const collected: string[] = [];
-          let block = false;
-          for (;;) {
-            const line = yield* nextLine(prompt);
-            if (line.trim() === '"""') {
-              if (block) break;
-              block = true;
-              continue;
-            }
-            collected.push(line);
-            if (!block) break;
-          }
-          const parsed = parseMessage(collected.join("\n"));
+          let fold = emptyFold;
+          while (!fold.complete) fold = foldLine(fold, yield* nextLine(prompt));
+          const parsed = parseMessage(fold.lines.join("\n"));
           if (parsed.kind === "quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
           return parsed.text;
         }),
@@ -93,3 +83,12 @@ export const terminalUi = (
 /** The Ui service on the process streams. */
 export const terminalUiLayer = (input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): Layer.Layer<UiService> =>
   Layer.effect(UiService, terminalUi(input, output));
+
+/** Asks again until the answer is not empty. `ask` is a Ui's `ask` or `askMessage`. */
+export const askNonEmpty = <E>(ask: (prompt: string) => Effect.Effect<string, E>, prompt: string): Effect.Effect<string, E> =>
+  Effect.gen(function* () {
+    for (;;) {
+      const text = yield* ask(prompt);
+      if (text !== "") return text;
+    }
+  });

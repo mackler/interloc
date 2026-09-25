@@ -6,6 +6,7 @@ import type { Schema } from "effect";
 import type { ClaudeCallFailed, CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
 import { isRunError } from "./errors.ts";
 import type { Config, ExecOutcome, LogEntry, QuestionsFile } from "./schema.ts";
+import type { UsageLine, UsageSummary } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
 import type { Snapshot } from "./snapshot.ts";
 
@@ -56,8 +57,8 @@ export interface StoreShape {
   loadQuestions(): Effect.Effect<QuestionsFile, StoreError>;
   recordDecision(subject: string, decision: string): Effect.Effect<void, StoreError>;
   recordFeedback(heading: string, round: number, text: string): Effect.Effect<void, StoreError>;
-  recordUsage(entry: Record<string, unknown>): Effect.Effect<void, StoreError>;
-  usageSummary(): Effect.Effect<string, StoreError>;
+  recordUsage(line: UsageLine): Effect.Effect<void, StoreError>;
+  usageSummary(): Effect.Effect<UsageSummary, StoreError>;
   converse(markdown: string): Effect.Effect<void, StoreError>;
   planExists(): Effect.Effect<boolean, StoreError>;
   fileHash(file: string): Effect.Effect<string, StoreError>;

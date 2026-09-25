@@ -9,6 +9,7 @@ import { applyDecisions, askDecision, planningCall, reviewLoop } from "./review.
 import * as S from "./schema.ts";
 import { Planner, RunConfig, type Services, Store, Ui } from "./services.ts";
 import { planSubject } from "./subjects.ts";
+import { askNonEmpty } from "./ui.ts";
 
 /** The whole run. Succeeds with the number of execution phases when Claude Code reports 'finished'. */
 export const run = (task: string): Effect.Effect<number, RunError, Services> =>
@@ -47,12 +48,9 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
       if (outcome.status === "finished") return k;
 
       yield* ui.say(`Remaining work: ${outcome.remainingWork || "not reported"}`);
-      let input = outcome.userInput;
-      if (input === null) {
-        yield* ui.say(`Question or description: ${outcome.question}`);
-        input = "";
-        while (input === "") input = yield* ui.ask("Your input for Claude Code (q = quit) > ");
-      }
+      const input =
+        outcome.userInput ??
+        (yield* ui.say(`Question or description: ${outcome.question}`).pipe(Effect.andThen(askNonEmpty((p) => ui.ask(p), "Your input for Claude Code (q = quit) > "))));
       const question = outcome.question.replace(/\s+/g, " ");
       yield* store.recordDecision(`stop in execution phase ${k} (${outcome.status}): ${question}`, input);
     }

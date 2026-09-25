@@ -39,7 +39,8 @@ export const makeCodexReviewer: Effect.Effect<ReviewerShape, never, Sdk | Store 
           try: (signal) => current.run(prompt, { outputSchema: agentJsonSchema(S.Review), signal }),
           catch: (e: unknown) => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) }),
         });
-        yield* store.recordUsage({ agent: "codex", thread_id: current.id, usage: turn.usage });
+        const usage = turn.usage as { input_tokens?: number; output_tokens?: number } | null | undefined;
+        yield* store.recordUsage({ agent: "codex", thread: current.id, inputTokens: usage?.input_tokens ?? 0, outputTokens: usage?.output_tokens ?? 0 });
         return turn.finalResponse;
       }),
   };

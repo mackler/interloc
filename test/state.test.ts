@@ -12,6 +12,7 @@ import { describe } from "../src/errors.ts";
 import type { StoreShape } from "../src/services.ts";
 import { compareSnapshots, type Snapshot } from "../src/snapshot.ts";
 import { makeStore, platformLayer } from "../src/store.ts";
+import { renderUsage } from "../src/usage.ts";
 import { tempRepo } from "./helpers.ts";
 
 /** The store of a repository, built on the live platform services. */
@@ -97,12 +98,12 @@ test("the records: decisions, feedback, usage and the invalid-reply files", asyn
   const s = await initialised();
   await Effect.runPromise(s.recordDecision("issue A", "keep it"));
   await Effect.runPromise(s.recordFeedback("Planning phase 1", 2, "too strict"));
-  await Effect.runPromise(s.recordUsage({ agent: "claude", total_cost_usd: 1.5 }));
-  await Effect.runPromise(s.recordUsage({ agent: "codex", usage: { input_tokens: 10, output_tokens: 5 } }));
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s", turns: 1, totalCostUsd: 1.5 }));
+  await Effect.runPromise(s.recordUsage({ agent: "codex", thread: "t", inputTokens: 10, outputTokens: 5 }));
   assert.match(fs.readFileSync(path.join(s.dir, "user-decisions.md"), "utf8"), /Subject: issue A\nDecision: keep it/);
   assert.match(fs.readFileSync(path.join(s.dir, "conversation.md"), "utf8"), /\*\*User decision\*\* on issue A: keep it/);
   assert.match(fs.readFileSync(path.join(s.dir, "reviewer-feedback.md"), "utf8"), /## Planning phase 1, round 2\ntoo strict/);
-  assert.match(await Effect.runPromise(s.usageSummary()), /Claude Code: 1 calls in 1 sessions, total_cost_usd = 1\.50 .* Codex: 1 turns, 10 input tokens, 5 output tokens/);
+  assert.match(renderUsage(await Effect.runPromise(s.usageSummary())), /Claude Code: 1 calls in 1 sessions, total_cost_usd = 1\.50 .* Codex: 1 turns, 10 input tokens, 5 output tokens/);
   assert.equal(await Effect.runPromise(s.saveInvalidReply("codex", "x")), path.join("plan-review", "invalid-replies", "codex-1.json"));
   assert.equal(await Effect.runPromise(s.saveInvalidReply("codex", "y")), path.join("plan-review", "invalid-replies", "codex-2.json"));
   assert.equal(fs.readFileSync(path.join(s.dir, "invalid-replies", "codex-2.json"), "utf8"), "y");
@@ -262,21 +263,21 @@ test("usageSummary reports the running total of each Claude Code session, not th
   // The Agent SDK's total_cost_usd is cumulative for a session, and a resumed session continues from
   // its saved total, so every call of one session reports the total so far (observed in the run of 25 Sep 2026).
   const s = await initialised();
-  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-1", num_turns: 6, total_cost_usd: 0.5 }));
-  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-1", num_turns: 4, total_cost_usd: 1.25 }));
-  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-2", num_turns: 2, total_cost_usd: 0.25 }));
-  assert.match(await Effect.runPromise(s.usageSummary()), /Claude Code: 3 calls in 2 sessions, total_cost_usd = 1\.50 \(the sessions' last reported running totals, an estimate by the client\)/);
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s-1", turns: 6, totalCostUsd: 0.5 }));
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s-1", turns: 4, totalCostUsd: 1.25 }));
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s-2", turns: 2, totalCostUsd: 0.25 }));
+  assert.match(renderUsage(await Effect.runPromise(s.usageSummary())), /Claude Code: 3 calls in 2 sessions, total_cost_usd = 1\.50 \(the sessions' last reported running totals, an estimate by the client\)/);
 });
 
 // Finding 22 of docs/functional-design-review.md: the time was read and the JSON serialized when the
 // effect was built, not when it ran; a serialization failure was a defect.
 test("recordUsage reads the time when it runs, and the store owns the time", async () => {
   const s = await initialised();
-  const once = s.recordUsage({ agent: "claude", session_id: "s", total_cost_usd: 1 });
+  const once = s.recordUsage({ agent: "claude", session: "s", turns: 1, totalCostUsd: 1 });
   await Effect.runPromise(once);
   await new Promise((resolve) => setTimeout(resolve, 3));
   await Effect.runPromise(once);
-  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s", total_cost_usd: 2, time: "1999" }));
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session: "s", turns: 1, totalCostUsd: 2, time: "1999" } as unknown as Parameters<typeof s.recordUsage>[0]));
   const lines = fs.readFileSync(path.join(s.dir, "usage.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   assert.notEqual(lines[0].time, lines[1].time, "one effect run twice recorded the same time");
   assert.notEqual(lines[2].time, "1999", "the entry's own time overrode the store's");

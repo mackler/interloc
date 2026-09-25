@@ -144,7 +144,8 @@ export const QuestionsFile = Schema.Struct({
  */
 export const UsageEntry = Schema.Struct({
   time: Schema.String,
-  agent: Schema.String,
+  /** A closed set (finding 9): a line of another agent is invalid, not silently dropped. */
+  agent: Schema.Literals(["claude", "codex"]),
   session_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
   thread_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
   num_turns: Schema.optionalKey(NonNegativeInt),

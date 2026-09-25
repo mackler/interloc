@@ -2,12 +2,14 @@
 
 import { Effect } from "effect";
 import type { RunError } from "./errors.ts";
+import { parseInterviewMessage } from "./input.ts";
 import * as prompts from "./prompts.ts";
 import { planningCall, reviewLoop } from "./review.ts";
 import * as S from "./schema.ts";
 import type { QuestionList } from "./schema.ts";
 import { type Services, Store, Ui } from "./services.ts";
 import { questionSubject, requirementsSubject, writeQuestions } from "./subjects.ts";
+import { askNonEmpty } from "./ui.ts";
 
 /**
  * A conversation between the user and Claude Code in the program's terminal. It ends when Claude Code
@@ -27,21 +29,21 @@ export const interview = (opening: string, heading: string): Effect.Effect<void,
 
       if (turn.complete && turn.summary.trim() !== "") {
         yield* ui.say(`Summary proposed by Claude Code:\n\n${turn.summary}\n`);
-        const reply = yield* ui.askMessage("Enter = confirm the summary; any other text continues the conversation > ");
-        if (reply === "" || reply === "/done") {
+        const reply = parseInterviewMessage(yield* ui.askMessage("Enter = confirm the summary; any other text continues the conversation > "));
+        if (reply.kind !== "text") {
           yield* store.writeText(store.requirements, turn.summary.trimEnd() + "\n");
           yield* store.converse(`**User:** confirmed the summary.\n\n### Confirmed summary\n\n${turn.summary}\n\n`);
           return;
         }
-        yield* store.converse(`**User:** ${reply}\n\n`);
-        prompt = prompts.interviewNotConfirmed(reply);
+        yield* store.converse(`**User:** ${reply.text}\n\n`);
+        prompt = prompts.interviewNotConfirmed(reply.text);
         continue;
       }
 
-      let reply = "";
-      while (reply === "") reply = yield* ui.askMessage("You > ");
-      yield* store.converse(`**User:** ${reply}\n\n`);
-      prompt = reply === "/done" ? prompts.interviewDonePrompt : prompts.interviewUserMessage(reply);
+      const reply = parseInterviewMessage(yield* askNonEmpty((p) => ui.askMessage(p), "You > "));
+      if (reply.kind === "empty") continue;
+      yield* store.converse(`**User:** ${reply.kind === "done" ? "/done" : reply.text}\n\n`);
+      prompt = reply.kind === "done" ? prompts.interviewDonePrompt : prompts.interviewUserMessage(reply.text);
     }
   });
 

@@ -3,7 +3,9 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import { Effect, Layer } from "effect";
-import { decodeWithRepair } from "../src/review.ts";
+import { decodeWithRepair, planningCall } from "../src/review.ts";
+import { Planner } from "../src/services.ts";
+import { pathsOf, ScriptedPlanner } from "./helpers.ts";
 import * as S from "../src/schema.ts";
 import { Store, type StoreShape } from "../src/services.ts";
 import { makeStore, platformLayer } from "../src/store.ts";
@@ -28,3 +30,18 @@ for (const [what, reply] of [["a BigInt", { questions_for_user: 1n }], ["a cycle
     assert.match(fs.readFileSync(path.join(s.dir, "invalid-replies", "claude-1.json"), "utf8"), /reply not serializable/);
   });
 }
+
+// Plan step 3.4 (finding 25): the repair is reported in the result instead of being tracked in a mutable binding.
+test("planningCall reports whether a repair turn was needed", async () => {
+  const repo = tempRepo();
+  const s = await Effect.runPromise(makeStore(repo, []).pipe(Effect.provide(platformLayer)));
+  await Effect.runPromise(s.init("task"));
+  const planner = new ScriptedPlanner(pathsOf(repo), [{ output: { questions_for_user: "x" } }, { output: { questions_for_user: [] } }, { output: { questions_for_user: ["q"] } }], []);
+  const layer = Layer.mergeAll(Layer.succeed(Store, s), Layer.succeed(Planner, planner));
+  const repaired = await Effect.runPromise(planningCall("first", S.PlanWriteResult).pipe(Effect.provide(layer)));
+  assert.equal(repaired.repaired, true);
+  assert.deepEqual(repaired.output, { questions_for_user: [] });
+  const direct = await Effect.runPromise(planningCall("second", S.PlanWriteResult).pipe(Effect.provide(layer)));
+  assert.equal(direct.repaired, false);
+  assert.deepEqual(direct.output, { questions_for_user: ["q"] });
+});

@@ -34,3 +34,20 @@ export const chooseOption = (reply: string, count: number): number | null => {
   const index = Number(trimmed) - 1;
   return index < count ? index : null;
 };
+
+/** What a message of the interview means beyond quitting: nothing, the end of the interview, or text. */
+export const parseInterviewMessage = (message: string): { kind: "empty" } | { kind: "done" } | { kind: "text"; text: string } => {
+  const text = message.trim();
+  if (text === "") return { kind: "empty" };
+  if (text === "/done") return { kind: "done" };
+  return { kind: "text", text };
+};
+
+/** The fold of the interview's line protocol: one line is a message; `"""` on its own opens and closes a block. */
+export type LineFold = Readonly<{ block: boolean; lines: readonly string[]; complete: boolean }>;
+export const emptyFold: LineFold = { block: false, lines: [], complete: false };
+export const foldLine = (fold: LineFold, line: string): LineFold => {
+  if (fold.complete) return fold;
+  if (line.trim() === '"""') return fold.block ? { ...fold, complete: true } : { ...fold, block: true };
+  return { ...fold, lines: [...fold.lines, line], complete: !fold.block };
+};
