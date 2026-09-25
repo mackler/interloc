@@ -34,15 +34,16 @@ export const turn = (finalResponse: string, usage: unknown = { input_tokens: 10,
   ({ items: [], finalResponse, usage }) as unknown as RunResult;
 
 export type ThreadCall = { input: string; turnOptions: TurnOptions | undefined };
+/** An answer of `thread.run`: a turn, an error to reject with, or a function of the turn options (to observe the abort signal). */
+export type TurnAnswer = RunResult | Error | ((turnOptions: TurnOptions | undefined) => Promise<RunResult>);
 
 export class FakeSdk implements AgentSdk {
   readonly calls: Call[] = [];
   readonly threads: { options: ThreadOptions | undefined; calls: ThreadCall[] }[] = [];
   private readonly scripts: Script[];
-  /** Answers of `thread.run`: a turn, or an error to reject with. */
-  private readonly turns: (RunResult | Error)[];
+  private readonly turns: TurnAnswer[];
 
-  constructor(scripts: Script[] = [], turns: (RunResult | Error)[] = []) {
+  constructor(scripts: Script[] = [], turns: TurnAnswer[] = []) {
     this.scripts = [...scripts];
     this.turns = [...turns];
   }
@@ -67,6 +68,7 @@ export class FakeSdk implements AgentSdk {
         const answer = answers.shift();
         if (answer === undefined) throw new Error("no scripted Codex turn");
         if (answer instanceof Error) throw answer;
+        if (typeof answer === "function") return answer(turnOptions);
         return answer;
       },
     };

@@ -6,6 +6,7 @@ import type { Schema } from "effect";
 import type { ClaudeCallFailed, CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
 import { isRunError } from "./errors.ts";
 import type { Config, ExecOutcome, LogEntry, QuestionsFile } from "./schema.ts";
+import type { AgentSdk } from "./sdk.ts";
 import type { Snapshot } from "./state.ts";
 
 export type StoreError = FileSystemError | StateFileInvalid | GitError;
@@ -68,13 +69,16 @@ export class Store extends Context.Service<Store, StoreShape>()("plan-review/Sto
 /** The configuration of the run (schema Config). */
 export class RunConfig extends Context.Service<RunConfig, Config>()("plan-review/RunConfig") {}
 
+/** The two SDKs (src/sdk.ts): the live binding in main.ts, a fake in the tests. */
+export class Sdk extends Context.Service<Sdk, AgentSdk>()("plan-review/Sdk") {}
+
 /** Everything the procedure needs. */
 export type Services = Ui | Planner | Reviewer | Store | RunConfig;
 
 /**
  * Lifts a function that throws one of the program's typed errors into an Effect. `E` names the errors
- * the wrapped code can throw; a throw of anything else is a defect. Transitional: the wrappers of the
- * Promise classes use it until the classes are replaced by Effect implementations.
+ * the wrapped code can throw; a throw of anything else is a defect. Used where a synchronous decoder
+ * that throws the program's errors is called from an Effect (src/store.ts).
  */
 export const lift = <A, E extends RunError>(f: () => A): Effect.Effect<A, E> =>
   Effect.suspend(() => {
@@ -84,7 +88,3 @@ export const lift = <A, E extends RunError>(f: () => A): Effect.Effect<A, E> =>
       return isRunError(e) ? Effect.fail(e as E) : Effect.die(e);
     }
   });
-
-/** As `lift`, for a function that returns a Promise. */
-export const liftPromise = <A, E extends RunError>(f: () => Promise<A>): Effect.Effect<A, E> =>
-  Effect.tryPromise({ try: f, catch: (e: unknown) => e }).pipe(Effect.catch((e) => (isRunError(e) ? Effect.fail(e as E) : Effect.die(e))));

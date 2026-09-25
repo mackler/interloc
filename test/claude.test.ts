@@ -1,22 +1,29 @@
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
 import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { ClaudePlanner } from "../src/claude.ts";
+import { Effect, Fiber, Layer } from "effect";
+import { makeClaudePlanner } from "../src/claude.ts";
 import type { RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
-import { State } from "../src/state.ts";
+import { type PlannerShape, RunConfig, Sdk, Store, Ui } from "../src/services.ts";
+import { makeStore, platformLayer } from "../src/store.ts";
 import { assistantText, assistantTool, failure, FakeSdk, init, messages, success, type Script } from "./fakeSdk.ts";
 import { ScriptedUi, tempRepo } from "./helpers.ts";
 
-const planner = (scripts: Script[], answers: string[] = [], config: Partial<typeof S.Config.Type> = {}): { planner: ClaudePlanner; sdk: FakeSdk; ui: ScriptedUi; state: State } => {
-  const state = new State(tempRepo());
-  state.init("task");
+const run = Effect.runPromise;
+
+/** A Claude Code planner over a fake SDK, a scripted Ui and a store on a temporary repository. */
+const planner = async (scripts: Script[], answers: string[] = [], config: Partial<typeof S.Config.Type> = {}): Promise<{ planner: PlannerShape; sdk: FakeSdk; ui: ScriptedUi; dir: string; project: string }> => {
+  const store = await run(makeStore(tempRepo(), []).pipe(Effect.provide(platformLayer)));
+  await run(store.init("task"));
   const ui = new ScriptedUi(answers);
   const sdk = new FakeSdk(scripts);
-  return { planner: new ClaudePlanner(state, ui, { ...S.defaultConfig, ...config }, sdk), sdk, ui, state };
+  const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Ui, ui), Layer.succeed(Sdk, sdk), Layer.succeed(RunConfig, { ...S.defaultConfig, ...config }));
+  return { planner: await run(makeClaudePlanner.pipe(Effect.provide(deps))), sdk, ui, dir: store.dir, project: store.project };
 };
 
 // The schema of most planning calls in these tests; the output the fake returns matches it where the output is read.
@@ -37,39 +44,45 @@ const permission = (options: Options): CanUseTool => {
 const tag = (e: unknown): string => (e as RunError)._tag;
 // The third argument of canUseTool carries fields the adapter does not read.
 const callContext = (): Parameters<CanUseTool>[2] => ({ signal: new AbortController().signal }) as Parameters<CanUseTool>[2];
+/** Resolves when the call's abort signal fires. */
+const aborted = (options: Options): Promise<void> => {
+  const signal = options.abortController?.signal;
+  assert.ok(signal !== undefined, "the call has no abort controller");
+  return signal.aborted ? Promise.resolve() : new Promise((resolve) => signal.addEventListener("abort", () => resolve()));
+};
 
 test("a planning call returns the structured output and records usage", async () => {
-  const fake = planner([messages(init("session-7"), assistantTool("Read", { file_path: "/x" }), success({ questions_for_user: ["q?"] }, "done"))]);
-  const call = await fake.planner.planning("write the plan", schema);
+  const fake = await planner([messages(init("session-7"), assistantTool("Read", { file_path: "/x" }), success({ questions_for_user: ["q?"] }, "done"))]);
+  const call = await run(fake.planner.planning("write the plan", schema));
 
   assert.deepEqual(call.output, { questions_for_user: ["q?"] });
   assert.equal(call.resultText, "done");
   assert.equal(call.costUsd, 0.25);
-  assert.equal(fake.planner.sessionId(), "session-7");
-  const usage = fs.readFileSync(path.join(fake.state.dir, "usage.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(Effect.runSync(fake.planner.sessionId), "session-7");
+  const usage = fs.readFileSync(path.join(fake.dir, "usage.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(usage.length, 1);
   assert.deepEqual([usage[0].agent, usage[0].session_id, usage[0].num_turns, usage[0].total_cost_usd], ["claude", "session-7", 3, 0.25]);
 });
 
 test("a failed planning call fails with ClaudeCallFailed", async () => {
-  const fake = planner([messages(init(), failure("error_during_execution"))]);
-  await assert.rejects(fake.planner.planning("write the plan", schema), (e: unknown) => tag(e) === "ClaudeCallFailed");
+  const fake = await planner([messages(init(), failure("error_during_execution"))]);
+  await assert.rejects(run(fake.planner.planning("write the plan", schema)), (e: unknown) => tag(e) === "ClaudeCallFailed");
 });
 
 test("a successful planning call without structured output returns it as absent to the caller", async () => {
-  const fake = planner([messages(init(), success(null, "no schema output"))]);
-  const call = await fake.planner.planning("write the plan", schema);
+  const fake = await planner([messages(init(), success(null, "no schema output"))]);
+  const call = await run(fake.planner.planning("write the plan", schema));
   assert.equal(call.output ?? null, null);
   assert.equal(call.resultText, "no schema output");
 });
 
 test("the planning hook denies an edit outside plan-review/ and permits one inside", async () => {
-  const fake = planner([messages(init(), success({}))]);
-  await fake.planner.planning("write the plan", schema);
+  const fake = await planner([messages(init(), success({}))]);
+  await run(fake.planner.planning("write the plan", schema));
   const options = fake.sdk.calls[0].options;
 
-  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.state.dir, "plan.md") })), undefined);
-  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.state.project, "src/x.ts") })), "deny");
+  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.dir, "plan.md") })), undefined);
+  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.project, "src/x.ts") })), "deny");
   assert.equal(decision(await runHook(options, "Edit", { file_path: "../outside.txt" })), "deny");
 });
 
@@ -81,50 +94,50 @@ test("planning canUseTool relays AskUserQuestion to the user and returns the ans
     relayed.push(await permission(call.options)("AskUserQuestion", { questions }, callContext()));
     yield success({});
   })();
-  const fake = planner([script], ["2"]);
-  await fake.planner.planning("write the plan", schema);
+  const fake = await planner([script], ["2"]);
+  await run(fake.planner.planning("write the plan", schema));
 
   assert.deepEqual(relayed[0], { behavior: "allow", updatedInput: { questions, answers: { "A or B?": "B" } } });
-  assert.match(fs.readFileSync(path.join(fake.state.dir, "conversation.md"), "utf8"), /\*\*User answer:\*\* B/);
+  assert.match(fs.readFileSync(path.join(fake.dir, "conversation.md"), "utf8"), /\*\*User answer:\*\* B/);
 });
 
 test("a planning call denies every tool other than an edit or a question", async () => {
-  const fake = planner([messages(init(), success({}))]);
-  await fake.planner.planning("write the plan", schema);
+  const fake = await planner([messages(init(), success({}))]);
+  await run(fake.planner.planning("write the plan", schema));
   const result = await permission(fake.sdk.calls[0].options)("Bash", { command: "ls" }, callContext());
   assert.equal(result?.behavior, "deny");
 });
 
 test("the session id of the first call is resumed by the next call", async () => {
-  const fake = planner([messages(init("session-3"), success({})), messages(init("session-3"), success({}))]);
-  await fake.planner.planning("first", schema);
-  await fake.planner.planning("second", schema);
+  const fake = await planner([messages(init("session-3"), success({})), messages(init("session-3"), success({}))]);
+  await run(fake.planner.planning("first", schema));
+  await run(fake.planner.planning("second", schema));
   assert.equal(fake.sdk.calls[0].options.resume, undefined);
   assert.equal(fake.sdk.calls[1].options.resume, "session-3");
 });
 
 test("the configured model is passed, and no model key is set when claudeModel is null", async () => {
-  const withModel = planner([messages(init(), success({}))], [], { claudeModel: "opus" });
-  await withModel.planner.planning("write the plan", schema);
+  const withModel = await planner([messages(init(), success({}))], [], { claudeModel: "opus" });
+  await run(withModel.planner.planning("write the plan", schema));
   assert.equal(withModel.sdk.calls[0].options.model, "opus");
 
-  const without = planner([messages(init(), success({}))]);
-  await without.planner.planning("write the plan", schema);
+  const without = await planner([messages(init(), success({}))]);
+  await run(without.planner.planning("write the plan", schema));
   assert.ok(!("model" in without.sdk.calls[0].options), "model must be absent when claudeModel is null");
 });
 
 test("the planning call passes the agent JSON Schema of the given Effect schema as outputFormat, and the project directory", async () => {
-  const fake = planner([messages(init(), success({}))]);
-  await fake.planner.planning("write the plan", S.PlannerResponse);
+  const fake = await planner([messages(init(), success({}))]);
+  await run(fake.planner.planning("write the plan", S.PlannerResponse));
   const options = fake.sdk.calls[0].options;
   assert.deepEqual(options.outputFormat, { type: "json_schema", schema: agentJsonSchema(S.PlannerResponse) });
-  assert.equal(options.cwd, fake.state.project);
+  assert.equal(options.cwd, fake.project);
   assert.equal(options.permissionMode, "default");
 });
 
 test("the execution call passes the agent JSON Schema of ExecReport as outputFormat", async () => {
-  const fake = planner([messages(init(), success({ status: "finished", summary: "done", question: "", remaining_work: "" }))]);
-  await fake.planner.executing("implement the plan");
+  const fake = await planner([messages(init(), success({ status: "finished", summary: "done", question: "", remaining_work: "" }))]);
+  await run(fake.planner.executing("implement the plan"));
   assert.deepEqual(fake.sdk.calls[0].options.outputFormat, { type: "json_schema", schema: agentJsonSchema(S.ExecReport) });
 });
 
@@ -136,8 +149,8 @@ test("execution AskUserQuestion is a stop: needs_input with the answer, even wit
     denials.push(await permission(call.options)("AskUserQuestion", { questions }, callContext()));
     yield success(null);
   })();
-  const fake = planner([script], ["A"]);
-  const outcome = await fake.planner.executing("implement the plan");
+  const fake = await planner([script], ["A"]);
+  const outcome = await run(fake.planner.executing("implement the plan"));
 
   assert.equal(denials[0]?.behavior, "deny");
   assert.equal(outcome.status, "needs_input");
@@ -158,8 +171,8 @@ test("after a stop, the hook denies tools but permits the final structured outpu
     seen.push(decision(await runHook(call.options, "StructuredOutput")));
     yield success({ status: "needs_input", summary: "s", question: "", remaining_work: "w" });
   })();
-  const fake = planner([script], ["A"]);
-  await fake.planner.executing("implement the plan");
+  const fake = await planner([script], ["A"]);
+  await run(fake.planner.executing("implement the plan"));
   assert.deepEqual(seen, [undefined, "deny", "deny", undefined]);
 });
 
@@ -170,8 +183,8 @@ test("an invalid execution report after a recorded stop still yields needs_input
     await permission(call.options)("AskUserQuestion", { questions }, callContext());
     yield success({ status: "bogus", summary: 7 });
   })();
-  const fake = planner([script], ["A"]);
-  const outcome = await fake.planner.executing("implement the plan");
+  const fake = await planner([script], ["A"]);
+  const outcome = await run(fake.planner.executing("implement the plan"));
   assert.equal(outcome.status, "needs_input");
   assert.equal(outcome.userInput, "A or B? -> A");
   assert.equal(outcome.summary, "");
@@ -179,8 +192,8 @@ test("an invalid execution report after a recorded stop still yields needs_input
 });
 
 test("an invalid execution report without a stop yields aborted, and no repair prompt is sent", async () => {
-  const fake = planner([messages(init(), success({ status: "bogus" }, "text only"))]);
-  const outcome = await fake.planner.executing("implement the plan");
+  const fake = await planner([messages(init(), success({ status: "bogus" }, "text only"))]);
+  const outcome = await run(fake.planner.executing("implement the plan"));
   assert.equal(outcome.status, "aborted");
   assert.equal(outcome.summary, "text only");
   assert.match(outcome.question, /ended without a status report/);
@@ -188,8 +201,8 @@ test("an invalid execution report without a stop yields aborted, and no repair p
 });
 
 test("execution without a report and without a stop is aborted", async () => {
-  const fake = planner([messages(init(), assistantText("working"), success(null, "text only"))]);
-  const outcome = await fake.planner.executing("implement the plan");
+  const fake = await planner([messages(init(), assistantText("working"), success(null, "text only"))]);
+  const outcome = await run(fake.planner.executing("implement the plan"));
   assert.equal(outcome.status, "aborted");
   assert.equal(outcome.summary, "text only");
 });
@@ -202,8 +215,39 @@ test("an execution permission request asks the user; y allows, anything else den
     results.push((await permission(call.options)("Bash", { command: "ls" }, callContext()))?.behavior ?? "none");
     yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
   })();
-  const fake = planner([script], ["y", "n"]);
-  const outcome = await fake.planner.executing("implement the plan");
+  const fake = await planner([script], ["y", "n"]);
+  const outcome = await run(fake.planner.executing("implement the plan"));
   assert.deepEqual(results, ["allow", "deny"]);
   assert.equal(outcome.status, "finished");
+});
+
+test("interrupting a planning call aborts the Agent SDK call", async () => {
+  let sawAbort = false;
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await aborted(call.options);
+    sawAbort = true;
+    throw new Error("The operation was aborted");
+  })();
+  const fake = await planner([script]);
+  const fiber = Effect.runFork(fake.planner.planning("write the plan", schema));
+  while (fake.sdk.calls.length === 0) await sleep(5);
+  await sleep(10);
+  await run(Fiber.interrupt(fiber));
+  assert.equal(sawAbort, true, "the SDK call was not aborted");
+});
+
+test("a UserStopped inside canUseTool ends the call with UserStopped", async () => {
+  const script: Script = (call) => (async function* () {
+    yield init();
+    try {
+      await permission(call.options)("Bash", { command: "ls" }, callContext());
+    } catch {
+      // The adapter answers the SDK; the failure reaches the caller of the call.
+    }
+    if (call.options.abortController !== undefined) await aborted(call.options);
+    yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
+  })();
+  const fake = await planner([script], ["q"]);
+  await assert.rejects(run(fake.planner.executing("implement the plan")), (e: unknown) => tag(e) === "UserStopped");
 });

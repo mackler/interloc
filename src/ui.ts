@@ -1,21 +1,12 @@
-// Terminal input and output. The Ui service is a scoped resource on a pair of streams; a scripted
-// implementation of the Promise interface below serves the tests (and the adapters until stage 5.4).
+// Terminal input and output: the Ui service as a scoped resource on a pair of streams.
+// ask reads one line; the answer "q" ends the run. askMessage reads one message of the interview:
+// a single line is sent with Enter, and for several lines the user types """ on a line by itself,
+// then the text, then """ again; the message "/quit" ends the run.
 
 import { Effect, Layer, type Scope } from "effect";
 import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
-import { liftPromise, Ui as UiService, type UiShape } from "./services.ts";
-
-export interface Ui {
-  say(text: string): void;
-  /** Reads one line. The answer "q" ends the run. */
-  ask(prompt: string): Promise<string>;
-  /**
-   * Reads one message of the interview. A single line is sent with Enter. For several lines, the
-   * user types """ on a line by itself, then the text, then """ again. The message "/quit" ends the run.
-   */
-  askMessage(prompt: string): Promise<string>;
-}
+import { Ui as UiService, type UiShape } from "./services.ts";
 
 /**
  * The terminal Ui as a scoped resource: one readline interface on the given streams for the whole
@@ -101,18 +92,3 @@ export const terminalUi = (
 /** The Ui service on the process streams. */
 export const terminalUiLayer = (input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): Layer.Layer<UiService> =>
   Layer.effect(UiService, terminalUi(input, output));
-
-/** The Ui service over a Promise implementation (the scripted Ui of the tests; transitional, plan stage 5.4). */
-export const uiLayer = (ui: Ui): Layer.Layer<UiService> =>
-  Layer.succeed(UiService, {
-    say: (text) => Effect.sync(() => ui.say(text)),
-    ask: (prompt) => liftPromise<string, UserStopped>(() => ui.ask(prompt)),
-    askMessage: (prompt) => liftPromise<string, UserStopped>(() => ui.askMessage(prompt)),
-  });
-
-/** A Promise Ui over the service, for the adapters until they are Effect layers (transitional, plan step 5.4). */
-export const promiseUi = (ui: UiShape): Ui => ({
-  say: (text) => Effect.runSync(ui.say(text)),
-  ask: (prompt) => Effect.runPromise(ui.ask(prompt)),
-  askMessage: (prompt) => Effect.runPromise(ui.askMessage(prompt)),
-});

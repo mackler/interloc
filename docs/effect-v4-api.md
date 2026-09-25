@@ -37,6 +37,10 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Effect.runFork` | 16530 | `(effect: Effect<A, E, never>, options?: RunOptions) => Fiber<A, E>` |
 | `Effect.runPromise` | 16701 | `(effect: Effect<A, E>, options?: RunOptions) => Promise<A>` |
 | `Effect.runPromiseExit` | 16769 | `(effect, options?) => Promise<Exit<A, E>>` |
+| SDK callbacks (verified stage 5.4) | — | `canUseTool` and the hooks are Promise functions; they run their Effects with `Effect.runPromise(effect, { signal: controller.signal })`, where `controller` is the call's `AbortController`. No context is needed, because the adapter captured the services as values when it was built; `runPromiseWith` stays unused. A failure inside a callback is kept, the controller is aborted (so the SDK ends the call), and the call fails with it. |
+| `Ref.make` / `Ref.get` / `Ref.set` (verified stage 5.4) | Ref.d.ts:149 / 175 / 210 | the session id, the stop, and the Codex thread |
+| `Effect.onInterrupt` (verified stage 5.4) | 13618 | data-last `Effect.onInterrupt(() => Effect.sync(() => controller.abort()))` on the message loop: **observed** that the finalizer runs before `Fiber.interrupt` completes, so the fake SDK saw the abort |
+| `Effect.tryPromise` signal (verified stage 5.4) | 1242 | `try: (signal) => thread.run(prompt, { …, signal })`: **observed** aborted on interruption of the fiber |
 | `Effect.runPromiseWith` | 16736 | `(context: Context<R>) => (effect: Effect<A, E, R>, options?) => Promise<A>`. **Bridge for SDK callbacks** (canUseTool, hooks): capture `yield* Effect.context<R>()` when the layer is built, then run callback Effects with `Effect.runPromiseWith(ctx)(eff, { signal })`. v4 has no `Runtime.runPromise`. |
 | `Effect.suspend` | 1538 | `(effect: LazyArg<Effect<A, E, R>>) => Effect<A, E, R>`; used by `lift` to turn a throwing call into a failure or a defect |
 | `Effect.catch` (`catch_ as catch`) | 4143 | `(f: (e: E) => Effect<A2, E2, R2>)`: handles every failure (v3 `catchAll`); used by `liftPromise` |

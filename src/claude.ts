@@ -1,22 +1,23 @@
-// Claude Code through the Claude Agent SDK.
+// Claude Code through the Claude Agent SDK, as the Planner service.
 
-import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
-import { Schema } from "effect";
+import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHookInput, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
+import { Effect, Layer, Ref, Schema } from "effect";
 import * as path from "node:path";
-import type { Planner } from "./agents.ts";
-import { ClaudeCallFailed } from "./errors.ts";
+import { ClaudeCallFailed, isRunError, type UserStopped } from "./errors.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as S from "./schema.ts";
-import type { Config, ExecOutcome, ExecReport } from "./schema.ts";
-import type { AgentSdk } from "./sdk.ts";
-import type { State } from "./state.ts";
-import type { Ui } from "./ui.ts";
+import type { ExecReport } from "./schema.ts";
+import { Planner, type PlannerShape, RunConfig, Sdk, Store, type StoreError, Ui } from "./services.ts";
 
 const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
 type Question = { question: string; options: { label: string; description: string }[] };
 type Stop = { question: string; input: string };
 type CallResult = { structured: unknown; resultText: string; costUsd: number | null; error: string | null };
+/** What a callback of the SDK can fail with: the user stopping, or a record that could not be written. */
+type CallbackError = UserStopped | StoreError;
+/** Runs an Effect inside a callback of the SDK; on failure the call is aborted and `fallback` is answered. */
+type InCallback = <A>(effect: Effect.Effect<A, CallbackError>, fallback: A) => Promise<A>;
 
 const decodeExecReport = Schema.decodeUnknownSync(S.ExecReport);
 /** The status report of an execution call, or null if there is none or it does not match its schema. */
@@ -29,102 +30,38 @@ const execReport = (structured: unknown): ExecReport | null => {
   }
 };
 
-export class ClaudePlanner implements Planner {
-  private readonly state: State;
-  private readonly ui: Ui;
-  private readonly config: Config;
-  private readonly allowedDir: string;
-  private readonly sdk: AgentSdk;
-  private session: string | null = null;
-  private stop: Stop | null = null;
+/** The Planner service over the SDK, Ui, Store and RunConfig services. */
+export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | Store | RunConfig> = Effect.gen(function* () {
+  const sdk = yield* Sdk;
+  const ui = yield* Ui;
+  const store = yield* Store;
+  const config = yield* RunConfig;
+  const allowedDir = store.dir + path.sep;
+  const session = yield* Ref.make<string | null>(null);
+  const stop = yield* Ref.make<Stop | null>(null);
 
-  constructor(state: State, ui: Ui, config: Config, sdk: AgentSdk) {
-    this.state = state;
-    this.ui = ui;
-    this.config = config;
-    this.sdk = sdk;
-    this.allowedDir = state.dir + path.sep;
-  }
-
-  sessionId(): string | null {
-    return this.session;
-  }
-
-  async planning(prompt: string, schema: Schema.Top, progress = false): Promise<{ output: unknown; resultText: string; costUsd: number | null }> {
-    const result = await this.call(prompt, progress ? "tools" : "none", {
-      permissionMode: "default",
-      outputFormat: { type: "json_schema", schema: agentJsonSchema(schema) },
-      hooks: { PreToolUse: [{ matcher: EDIT_TOOLS.join("|"), hooks: [this.restrictEdits] }] },
-      canUseTool: this.planningPermission,
-    });
-    if (result.error !== null) throw new ClaudeCallFailed({ message: result.error });
-    return { output: result.structured, resultText: result.resultText, costUsd: result.costUsd };
-  }
-
-  async executing(prompt: string): Promise<ExecOutcome> {
-    this.stop = null;
-    const result = await this.call(prompt, "text", {
-      permissionMode: this.config.execPermissionMode,
-      outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
-      hooks: { PreToolUse: [{ hooks: [this.denyAfterStop] }] },
-      canUseTool: this.executionPermission,
-    });
-    // A recorded stop takes precedence over any report; an invalid report is treated as a missing one.
-    // Execution calls never get a repair turn (decision Q5).
-    const report = execReport(result.structured);
-    const stop = this.stop as Stop | null;
-    if (stop !== null) {
-      return { status: "needs_input", summary: report?.summary ?? "", question: stop.question, remainingWork: report?.remaining_work ?? "", userInput: stop.input };
-    }
-    if (result.error !== null || report === null) {
-      const reason = result.error ?? (result.structured === null || result.structured === undefined ? "no structured output" : "the status report does not match its schema");
-      return { status: "aborted", summary: result.resultText, question: `The execution call ended without a status report: ${reason}`, remainingWork: "", userInput: null };
-    }
-    return { status: report.status, summary: report.summary, question: report.question, remainingWork: report.remaining_work, userInput: null };
-  }
-
-  private async call(prompt: string, show: "none" | "tools" | "text", options: Options): Promise<CallResult> {
-    const full: Options = { ...options, cwd: this.state.project };
-    if (this.session !== null) full.resume = this.session;
-    if (this.config.claudeModel !== null) full.model = this.config.claudeModel;
-    const out: CallResult = { structured: null, resultText: "", costUsd: null, error: "the call produced no result message" };
-    try {
-      for await (const message of this.sdk.query({ prompt, options: full })) {
-        if (message.type === "system" && message.subtype === "init") {
-          this.session = message.session_id;
-        } else if (message.type === "assistant" && show !== "none") {
-          for (const block of message.message.content) {
-            if (show === "text" && block.type === "text" && block.text.trim() !== "") this.ui.say(`[claude] ${block.text.trim()}`);
-            if (show === "tools" && block.type === "tool_use" && block.name !== "StructuredOutput") {
-              const input = block.input as Record<string, unknown>;
-              this.ui.say(`  [claude: ${block.name} ${String(input?.file_path ?? input?.pattern ?? input?.command ?? "")}]`);
-            }
-          }
-        } else if (message.type === "result") {
-          out.costUsd = message.total_cost_usd;
-          this.state.recordUsage({ agent: "claude", session_id: this.session, num_turns: message.num_turns, total_cost_usd: message.total_cost_usd });
-          if (message.subtype === "success") {
-            out.structured = message.structured_output;
-            out.resultText = message.result;
-            out.error = null;
-          } else {
-            out.error = message.subtype;
-          }
-        }
+  const relayQuestions = (questions: Question[]): Effect.Effect<Record<string, string>, CallbackError> =>
+    Effect.gen(function* () {
+      const answers: Record<string, string> = {};
+      for (const q of questions) {
+        yield* ui.say(`\nQuestion from Claude Code: ${q.question}`);
+        for (const [i, o] of q.options.entries()) yield* ui.say(`  ${i + 1}. ${o.label} - ${o.description}`);
+        let reply = "";
+        while (reply === "") reply = yield* ui.ask("Number or free text (q = quit) > ");
+        const answer = q.options[Number.parseInt(reply, 10) - 1]?.label ?? reply;
+        answers[q.question] = answer;
+        yield* store.converse(`**Question from Claude Code:** ${q.question}\n\n**User answer:** ${answer}\n\n`);
       }
-    } catch (e) {
-      out.error = e instanceof Error ? e.message : String(e);
-    }
-    return out;
-  }
+      return answers;
+    });
 
   // Planning: deny every file edit whose target is outside plan-review/. A hook runs before the
   // permission evaluation, so the denial applies in every permission mode.
-  private restrictEdits: HookCallback = async (input) => {
+  const restrictEdits: HookCallback = async (input) => {
     const pre = input as PreToolUseHookInput;
     const toolInput = pre.tool_input as Record<string, unknown>;
-    const target = path.resolve(this.state.project, String(toolInput?.file_path ?? toolInput?.notebook_path ?? ""));
-    if (target.startsWith(this.allowedDir)) return {};
+    const target = path.resolve(store.project, String(toolInput?.file_path ?? toolInput?.notebook_path ?? ""));
+    if (target.startsWith(allowedDir)) return {};
     return {
       hookSpecificOutput: {
         hookEventName: pre.hook_event_name,
@@ -137,8 +74,8 @@ export class ClaudePlanner implements Planner {
   // Execution: after Claude Code has asked the user a question, deny every further tool call, so
   // that the turn ends and the plan is revised and reviewed before work continues.
   // The StructuredOutput tool carries the final status report, so it stays permitted.
-  private denyAfterStop: HookCallback = async (input) => {
-    if (this.stop === null) return {};
+  const denyAfterStop: HookCallback = async (input) => {
+    if ((await Effect.runPromise(Ref.get(stop))) === null) return {};
     const pre = input as PreToolUseHookInput;
     if (pre.tool_name === "StructuredOutput") return {};
     return {
@@ -150,47 +87,159 @@ export class ClaudePlanner implements Planner {
     };
   };
 
-  private planningPermission: CanUseTool = async (toolName, input): Promise<PermissionResult> => {
-    if (toolName === "AskUserQuestion") {
-      const questions = (input.questions ?? []) as Question[];
-      const answers = await this.relayQuestions(questions);
-      return { behavior: "allow", updatedInput: { questions, answers } };
-    }
-    if (EDIT_TOOLS.includes(toolName)) return { behavior: "allow", updatedInput: input };
-    return { behavior: "deny", message: "During a planning phase, only reading and writing under plan-review/ are permitted." };
-  };
+  const planningPermission =
+    (inCallback: InCallback): CanUseTool =>
+    async (toolName, input): Promise<PermissionResult> => {
+      if (toolName === "AskUserQuestion") {
+        const questions = (input.questions ?? []) as Question[];
+        const answers = await inCallback(relayQuestions(questions), {});
+        return { behavior: "allow", updatedInput: { questions, answers } };
+      }
+      if (EDIT_TOOLS.includes(toolName)) return { behavior: "allow", updatedInput: input };
+      return { behavior: "deny", message: "During a planning phase, only reading and writing under plan-review/ are permitted." };
+    };
 
-  private executionPermission: CanUseTool = async (toolName, input): Promise<PermissionResult> => {
-    if (toolName === "AskUserQuestion") {
-      const questions = (input.questions ?? []) as Question[];
-      this.ui.say("\nClaude Code has stopped execution with a question.");
-      const answers = await this.relayQuestions(questions);
-      this.stop = {
-        question: questions.map((q) => q.question).join(" / "),
-        input: Object.entries(answers).map(([q, a]) => `${q} -> ${a}`).join("; "),
-      };
-      return {
-        behavior: "deny",
-        message: "The user's answer is recorded in plan-review/user-decisions.md. Do not continue the implementation. Make no tool call other than the final structured output, and end your turn with status 'needs_input', a summary, and the remaining work. The plan will be revised and reviewed before work continues.",
-      };
-    }
-    this.ui.say(`\nClaude Code requests permission: ${toolName} ${JSON.stringify(input)}`);
-    const reply = await this.ui.ask("Allow? (y = yes, anything else = no, q = quit) > ");
-    if (reply.toLowerCase() === "y") return { behavior: "allow", updatedInput: input };
-    return { behavior: "deny", message: "The user denied this action." };
-  };
+  const executionPermission =
+    (inCallback: InCallback): CanUseTool =>
+    async (toolName, input): Promise<PermissionResult> => {
+      if (toolName === "AskUserQuestion") {
+        const questions = (input.questions ?? []) as Question[];
+        await inCallback(
+          Effect.gen(function* () {
+            yield* ui.say("\nClaude Code has stopped execution with a question.");
+            const answers = yield* relayQuestions(questions);
+            yield* Ref.set(stop, {
+              question: questions.map((q) => q.question).join(" / "),
+              input: Object.entries(answers).map(([q, a]) => `${q} -> ${a}`).join("; "),
+            });
+          }),
+          undefined,
+        );
+        return {
+          behavior: "deny",
+          message: "The user's answer is recorded in plan-review/user-decisions.md. Do not continue the implementation. Make no tool call other than the final structured output, and end your turn with status 'needs_input', a summary, and the remaining work. The plan will be revised and reviewed before work continues.",
+        };
+      }
+      const allowed = await inCallback(
+        Effect.gen(function* () {
+          yield* ui.say(`\nClaude Code requests permission: ${toolName} ${JSON.stringify(input)}`);
+          const reply = yield* ui.ask("Allow? (y = yes, anything else = no, q = quit) > ");
+          return reply.toLowerCase() === "y";
+        }),
+        false,
+      );
+      if (allowed) return { behavior: "allow", updatedInput: input };
+      return { behavior: "deny", message: "The user denied this action." };
+    };
 
-  private async relayQuestions(questions: Question[]): Promise<Record<string, string>> {
-    const answers: Record<string, string> = {};
-    for (const q of questions) {
-      this.ui.say(`\nQuestion from Claude Code: ${q.question}`);
-      q.options.forEach((o, i) => this.ui.say(`  ${i + 1}. ${o.label} - ${o.description}`));
-      let reply = "";
-      while (reply === "") reply = await this.ui.ask("Number or free text (q = quit) > ");
-      const answer = q.options[Number.parseInt(reply, 10) - 1]?.label ?? reply;
-      answers[q.question] = answer;
-      this.state.converse(`**Question from Claude Code:** ${q.question}\n\n**User answer:** ${answer}\n\n`);
-    }
-    return answers;
-  }
-}
+  /**
+   * One SDK call. The messages are consumed inside the Effect, so an interruption aborts the call
+   * through the SDK's AbortController. A callback runs its Effects through the runtime; if one fails,
+   * the failure is kept, the call is aborted, and the call fails with it.
+   */
+  const call = (prompt: string, show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallResult, CallbackError> =>
+    Effect.gen(function* () {
+      const controller = new AbortController();
+      let callbackFailure: CallbackError | null = null;
+      const inCallback: InCallback = (effect, fallback) =>
+        Effect.runPromise(effect, { signal: controller.signal }).catch((e: unknown) => {
+          if (!isRunError(e)) throw e;
+          callbackFailure ??= e as CallbackError;
+          controller.abort();
+          return fallback;
+        });
+      const full: Options = { ...options, cwd: store.project, abortController: controller, canUseTool: permission(inCallback) };
+      const resumed = yield* Ref.get(session);
+      if (resumed !== null) full.resume = resumed;
+      if (config.claudeModel !== null) full.model = config.claudeModel;
+
+      const out: CallResult = { structured: null, resultText: "", costUsd: null, error: "the call produced no result message" };
+      const iterator = sdk.query({ prompt, options: full })[Symbol.asyncIterator]();
+      /** The next message, or null at the end; a failure of the stream ends the call with its text. */
+      const next = (): Effect.Effect<SDKMessage | null> =>
+        Effect.tryPromise({ try: () => iterator.next(), catch: (e: unknown) => e }).pipe(
+          Effect.map((step) => (step.done ? null : step.value)),
+          Effect.catch((e) =>
+            Effect.sync(() => {
+              out.error = e instanceof Error ? e.message : String(e);
+              return null;
+            }),
+          ),
+        );
+      const consume = Effect.gen(function* () {
+        for (let message = yield* next(); message !== null; message = yield* next()) {
+          if (message.type === "system" && message.subtype === "init") {
+            yield* Ref.set(session, message.session_id);
+          } else if (message.type === "assistant" && show !== "none") {
+            for (const block of message.message.content) {
+              if (show === "text" && block.type === "text" && block.text.trim() !== "") yield* ui.say(`[claude] ${block.text.trim()}`);
+              if (show === "tools" && block.type === "tool_use" && block.name !== "StructuredOutput") {
+                const input = block.input as Record<string, unknown>;
+                yield* ui.say(`  [claude: ${block.name} ${String(input?.file_path ?? input?.pattern ?? input?.command ?? "")}]`);
+              }
+            }
+          } else if (message.type === "result") {
+            out.costUsd = message.total_cost_usd;
+            yield* store.recordUsage({ agent: "claude", session_id: yield* Ref.get(session), num_turns: message.num_turns, total_cost_usd: message.total_cost_usd });
+            if (message.subtype === "success") {
+              out.structured = message.structured_output;
+              out.resultText = message.result;
+              out.error = null;
+            } else {
+              out.error = message.subtype;
+            }
+          }
+        }
+      });
+      yield* consume.pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())));
+      if (callbackFailure !== null) return yield* Effect.fail(callbackFailure);
+      return out;
+    });
+
+  return {
+    planning: (prompt, schema, progress = false) =>
+      Effect.gen(function* () {
+        const result = yield* call(
+          prompt,
+          progress ? "tools" : "none",
+          {
+            permissionMode: "default",
+            outputFormat: { type: "json_schema", schema: agentJsonSchema(schema) },
+            hooks: { PreToolUse: [{ matcher: EDIT_TOOLS.join("|"), hooks: [restrictEdits] }] },
+          },
+          planningPermission,
+        );
+        if (result.error !== null) return yield* Effect.fail(new ClaudeCallFailed({ message: result.error }));
+        return { output: result.structured, resultText: result.resultText, costUsd: result.costUsd };
+      }),
+    executing: (prompt) =>
+      Effect.gen(function* () {
+        yield* Ref.set(stop, null);
+        const result = yield* call(
+          prompt,
+          "text",
+          {
+            permissionMode: config.execPermissionMode,
+            outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
+            hooks: { PreToolUse: [{ hooks: [denyAfterStop] }] },
+          },
+          executionPermission,
+        );
+        // A recorded stop takes precedence over any report; an invalid report is treated as a missing one.
+        // Execution calls never get a repair turn (decision Q5).
+        const report = execReport(result.structured);
+        const stopped = yield* Ref.get(stop);
+        if (stopped !== null) {
+          return { status: "needs_input" as const, summary: report?.summary ?? "", question: stopped.question, remainingWork: report?.remaining_work ?? "", userInput: stopped.input };
+        }
+        if (result.error !== null || report === null) {
+          const reason = result.error ?? (result.structured === null || result.structured === undefined ? "no structured output" : "the status report does not match its schema");
+          return { status: "aborted" as const, summary: result.resultText, question: `The execution call ended without a status report: ${reason}`, remainingWork: "", userInput: null };
+        }
+        return { status: report.status, summary: report.summary, question: report.question, remainingWork: report.remaining_work, userInput: null };
+      }),
+    sessionId: Ref.get(session),
+  };
+});
+
+export const claudePlannerLayer: Layer.Layer<Planner, never, Sdk | Ui | Store | RunConfig> = Layer.effect(Planner, makeClaudePlanner);

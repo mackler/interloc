@@ -1,44 +1,44 @@
-// Codex through the Codex SDK. One thread per planning phase.
+// Codex through the Codex SDK, as the Reviewer service. One thread per review loop.
 
-import type { Reviewer } from "./agents.ts";
+import { Effect, Layer, Ref } from "effect";
 import { CodexCallFailed } from "./errors.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as S from "./schema.ts";
-import type { Config } from "./schema.ts";
-import type { AgentSdk, SdkThread } from "./sdk.ts";
-import type { State } from "./state.ts";
+import type { SdkThread } from "./sdk.ts";
+import { Reviewer, type ReviewerShape, RunConfig, Sdk, Store } from "./services.ts";
 
-export class CodexReviewer implements Reviewer {
-  private readonly state: State;
-  private readonly config: Config;
-  private readonly sdk: AgentSdk;
-  private thread: SdkThread | null = null;
+/** The Reviewer service over the SDK, Store and RunConfig services. */
+export const makeCodexReviewer: Effect.Effect<ReviewerShape, never, Sdk | Store | RunConfig> = Effect.gen(function* () {
+  const sdk = yield* Sdk;
+  const store = yield* Store;
+  const config = yield* RunConfig;
+  const thread = yield* Ref.make<SdkThread | null>(null);
 
-  constructor(state: State, config: Config, sdk: AgentSdk) {
-    this.state = state;
-    this.config = config;
-    this.sdk = sdk;
-  }
+  return {
+    // Bubblewrap cannot start in the container, so Codex's own sandbox is off. The container and its
+    // firewall are the boundary, and the caller compares the project state after every turn.
+    newPhase: Effect.sync(() =>
+      sdk.startThread({
+        workingDirectory: store.project,
+        sandboxMode: "danger-full-access",
+        approvalPolicy: "never",
+        ...(config.codexModel !== null ? { model: config.codexModel } : {}),
+      }),
+    ).pipe(Effect.flatMap((started) => Ref.set(thread, started))),
 
-  // Bubblewrap cannot start in the container, so Codex's own sandbox is off. The container and its
-  // firewall are the boundary, and the caller compares the project state after every turn.
-  newPhase(): void {
-    this.thread = this.sdk.startThread({
-      workingDirectory: this.state.project,
-      sandboxMode: "danger-full-access",
-      approvalPolicy: "never",
-      ...(this.config.codexModel !== null ? { model: this.config.codexModel } : {}),
-    });
-  }
+    review: (prompt) =>
+      Effect.gen(function* () {
+        const current = yield* Ref.get(thread);
+        if (current === null) return yield* Effect.die(new Error("newPhase() was not called"));
+        // The signal of tryPromise is aborted when the fiber is interrupted; the SDK cancels the turn.
+        const turn = yield* Effect.tryPromise({
+          try: (signal) => current.run(prompt, { outputSchema: agentJsonSchema(S.Review), signal }),
+          catch: (e: unknown) => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) }),
+        });
+        yield* store.recordUsage({ agent: "codex", thread_id: current.id, usage: turn.usage });
+        return turn.finalResponse;
+      }),
+  };
+});
 
-  async review(prompt: string): Promise<string> {
-    if (this.thread === null) throw new Error("newPhase() was not called");
-    try {
-      const turn = await this.thread.run(prompt, { outputSchema: agentJsonSchema(S.Review) });
-      this.state.recordUsage({ agent: "codex", thread_id: this.thread.id, usage: turn.usage });
-      return turn.finalResponse;
-    } catch (e) {
-      throw new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) });
-    }
-  }
-}
+export const codexReviewerLayer: Layer.Layer<Reviewer, never, Sdk | Store | RunConfig> = Layer.effect(Reviewer, makeCodexReviewer);

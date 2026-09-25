@@ -5,16 +5,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import type { Schema } from "effect";
-import type { Planner, Reviewer } from "../src/agents.ts";
-import { plannerLayer, reviewerLayer } from "../src/agents.ts";
 import type { RunError } from "../src/errors.ts";
 import { describe, UserStopped } from "../src/errors.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
-import { RunConfig, type Services } from "../src/services.ts";
+import { Planner, type PlannerShape, Reviewer, type ReviewerShape, RunConfig, type Services, Ui, type UiShape } from "../src/services.ts";
 import { makeStore, platformLayer, storeLayer } from "../src/store.ts";
-import type { Ui } from "../src/ui.ts";
-import { uiLayer } from "../src/ui.ts";
 
 type Config = typeof S.Config.Type;
 type ExecOutcome = typeof S.ExecOutcome.Type;
@@ -37,31 +33,33 @@ export function tempRepo(): string {
   return dir;
 }
 
-export class ScriptedUi implements Ui {
+export class ScriptedUi implements UiShape {
   readonly said: string[] = [];
   readonly asked: string[] = [];
   private readonly answers: string[];
   constructor(answers: string[]) {
     this.answers = [...answers];
   }
-  say(text: string): void {
-    this.said.push(text);
+  say(text: string): Effect.Effect<void> {
+    return Effect.sync(() => void this.said.push(text));
   }
-  async ask(prompt: string): Promise<string> {
-    this.asked.push(prompt);
-    const answer = this.answers.shift();
-    if (answer === undefined) throw new Error(`no scripted answer for: ${prompt}`);
-    if (answer === "q") throw new UserStopped({ where: prompt });
-    return answer;
+  ask(prompt: string): Effect.Effect<string, UserStopped> {
+    return Effect.suspend(() => {
+      this.asked.push(prompt);
+      const answer = this.answers.shift();
+      if (answer === undefined) return Effect.die(new Error(`no scripted answer for: ${prompt}`));
+      if (answer === "q") return Effect.fail(new UserStopped({ where: prompt }));
+      return Effect.succeed(answer);
+    });
   }
-  askMessage(prompt: string): Promise<string> {
+  askMessage(prompt: string): Effect.Effect<string, UserStopped> {
     return this.ask(prompt);
   }
 }
 
 export type PlanningStep = { output: unknown; plan?: string; touchProject?: boolean };
 
-export class ScriptedPlanner implements Planner {
+export class ScriptedPlanner implements PlannerShape {
   readonly prompts: string[] = [];
   /** The Effect schema of each planning call, in order. */
   readonly schemas: Schema.Top[] = [];
@@ -73,24 +71,26 @@ export class ScriptedPlanner implements Planner {
     this.steps = [...steps];
     this.execs = [...execs];
   }
-  sessionId(): string {
-    return "test-session";
-  }
+  readonly sessionId = Effect.succeed("test-session");
   /** Returns the scripted output as it is: the caller decodes it, as with the real agent. */
-  async planning(prompt: string, schema: Schema.Top): Promise<{ output: unknown; resultText: string; costUsd: number | null }> {
-    this.prompts.push(prompt);
-    this.schemas.push(schema);
-    const step = this.steps.shift();
-    if (!step) throw new Error(`no scripted planning step for: ${prompt.slice(0, 60)}`);
-    if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
-    if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
-    return { output: step.output, resultText: "", costUsd: 0.1 };
+  planning(prompt: string, schema: Schema.Top): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }> {
+    return Effect.sync(() => {
+      this.prompts.push(prompt);
+      this.schemas.push(schema);
+      const step = this.steps.shift();
+      if (!step) throw new Error(`no scripted planning step for: ${prompt.slice(0, 60)}`);
+      if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
+      if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
+      return { output: step.output, resultText: "", costUsd: 0.1 };
+    });
   }
-  async executing(): Promise<ExecOutcome> {
-    const outcome = this.execs.shift();
-    if (!outcome) throw new Error("no scripted execution outcome");
-    fs.appendFileSync(path.join(this.state.project, "a.txt"), "implemented\n");
-    return outcome;
+  executing(): Effect.Effect<ExecOutcome> {
+    return Effect.sync(() => {
+      const outcome = this.execs.shift();
+      if (!outcome) throw new Error("no scripted execution outcome");
+      fs.appendFileSync(path.join(this.state.project, "a.txt"), "implemented\n");
+      return outcome;
+    });
   }
 }
 
@@ -100,7 +100,7 @@ export class ScriptedPlanner implements Planner {
  */
 export type ReviewStep = Review & { plan?: string; raw?: string };
 
-export class ScriptedReviewer implements Reviewer {
+export class ScriptedReviewer implements ReviewerShape {
   phases = 0;
   readonly prompts: string[] = [];
   /** The phase number at each review call, so that a test can see that two calls shared a thread. */
@@ -111,17 +111,17 @@ export class ScriptedReviewer implements Reviewer {
     this.state = state;
     this.reviews = [...reviews];
   }
-  newPhase(): void {
-    this.phases++;
-  }
+  readonly newPhase = Effect.sync(() => void this.phases++);
   /** Returns the reply text as Codex would: the caller decodes it. */
-  async review(prompt: string): Promise<string> {
-    this.prompts.push(prompt);
-    this.callPhases.push(this.phases);
-    const step = this.reviews.shift();
-    if (!step) throw new Error("no scripted review");
-    if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
-    return step.raw ?? JSON.stringify({ issues: step.issues });
+  review(prompt: string): Effect.Effect<string> {
+    return Effect.sync(() => {
+      this.prompts.push(prompt);
+      this.callPhases.push(this.phases);
+      const step = this.reviews.shift();
+      if (!step) throw new Error("no scripted review");
+      if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
+      return step.raw ?? JSON.stringify({ issues: step.issues });
+    });
   }
 }
 
@@ -158,7 +158,7 @@ export function testLayer(repo: string, options: TestOptions = {}): { layer: Lay
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? []);
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
   const store = Layer.provide(storeLayer(repo, config.ignorePaths), platformLayer);
-  const layer = Layer.mergeAll(store, uiLayer(ui), plannerLayer(planner), reviewerLayer(reviewer), Layer.succeed(RunConfig, config));
+  const layer = Layer.mergeAll(store, Layer.succeed(Ui, ui), Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer), Layer.succeed(RunConfig, config));
   const dir = path.join(paths.project, "plan-review");
   const loadLog = (name?: string): Promise<LogEntry[]> =>
     Effect.runPromise(makeStore(repo, config.ignorePaths).pipe(Effect.flatMap((s) => s.loadLog(name)), Effect.provide(platformLayer)));
