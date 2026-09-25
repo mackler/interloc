@@ -149,7 +149,11 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       recordFeedback: (heading, round, text) => append(feedbackFile, `## ${heading}, round ${round}\n${text}\n\n`),
       /** Appends one line to usage.jsonl: the usage that an agent reported for one call. */
       recordUsage: (entry) => append(usageFile, JSON.stringify({ time: new Date().toISOString(), ...entry }) + "\n"),
-      /** Number of calls and sum of the reported values per agent. */
+      /**
+       * Per agent: the number of calls, and the reported values. The Agent SDK's total_cost_usd is the
+       * running total of a session (a resumed session continues from its saved total), so the cost is
+       * the sum of each session's last value, not the sum of the calls.
+       */
       usageSummary: () =>
         Effect.gen(function* () {
           if (!(yield* exists(usageFile))) return "no usage recorded";
@@ -160,10 +164,13 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           );
           const claude = entries.filter((e) => e.agent === "claude");
           const codex = entries.filter((e) => e.agent === "codex");
-          const cost = claude.reduce((sum, e) => sum + (typeof e.total_cost_usd === "number" ? e.total_cost_usd : 0), 0);
+          const lastTotal = new Map<string, number>();
+          for (const e of claude) if (typeof e.total_cost_usd === "number") lastTotal.set(e.session_id ?? "", e.total_cost_usd);
+          const sessions = new Set(claude.map((e) => e.session_id ?? "")).size;
+          const cost = [...lastTotal.values()].reduce((sum, value) => sum + value, 0);
           const input = codex.reduce((sum, e) => sum + (e.usage?.input_tokens ?? 0), 0);
           const output = codex.reduce((sum, e) => sum + (e.usage?.output_tokens ?? 0), 0);
-          return `Claude Code: ${claude.length} calls, sum of reported total_cost_usd = ${cost.toFixed(2)} (an estimate by the client). Codex: ${codex.length} turns, ${input} input tokens, ${output} output tokens. Details: plan-review/usage.jsonl`;
+          return `Claude Code: ${claude.length} calls in ${sessions} sessions, total_cost_usd = ${cost.toFixed(2)} (the sessions' last reported running totals, an estimate by the client). Codex: ${codex.length} turns, ${input} input tokens, ${output} output tokens. Details: plan-review/usage.jsonl`;
         }),
       converse,
       planExists: () =>

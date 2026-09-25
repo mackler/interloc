@@ -99,7 +99,7 @@ test("the records: decisions, feedback, usage and the invalid-reply files", asyn
   assert.match(fs.readFileSync(path.join(s.dir, "user-decisions.md"), "utf8"), /Subject: issue A\nDecision: keep it/);
   assert.match(fs.readFileSync(path.join(s.dir, "conversation.md"), "utf8"), /\*\*User decision\*\* on issue A: keep it/);
   assert.match(fs.readFileSync(path.join(s.dir, "reviewer-feedback.md"), "utf8"), /## Planning phase 1, round 2\ntoo strict/);
-  assert.match(await Effect.runPromise(s.usageSummary()), /Claude Code: 1 calls, sum of reported total_cost_usd = 1\.50 .* Codex: 1 turns, 10 input tokens, 5 output tokens/);
+  assert.match(await Effect.runPromise(s.usageSummary()), /Claude Code: 1 calls in 1 sessions, total_cost_usd = 1\.50 .* Codex: 1 turns, 10 input tokens, 5 output tokens/);
   assert.equal(await Effect.runPromise(s.saveInvalidReply("codex", "x")), path.join("plan-review", "invalid-replies", "codex-1.json"));
   assert.equal(await Effect.runPromise(s.saveInvalidReply("codex", "y")), path.join("plan-review", "invalid-replies", "codex-2.json"));
   assert.equal(fs.readFileSync(path.join(s.dir, "invalid-replies", "codex-2.json"), "utf8"), "y");
@@ -171,4 +171,14 @@ test("the snapshot runs git through the command service", async () => {
     ["git", "-C", repo, "diff", "--name-only"],
     ["git", "-C", repo, "diff", "--", "a.txt"],
   ]);
+});
+
+test("usageSummary reports the running total of each Claude Code session, not the sum of the calls", async () => {
+  // The Agent SDK's total_cost_usd is cumulative for a session, and a resumed session continues from
+  // its saved total, so every call of one session reports the total so far (observed in the run of 25 Sep 2026).
+  const s = await initialised();
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-1", num_turns: 6, total_cost_usd: 0.5 }));
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-1", num_turns: 4, total_cost_usd: 1.25 }));
+  await Effect.runPromise(s.recordUsage({ agent: "claude", session_id: "s-2", num_turns: 2, total_cost_usd: 0.25 }));
+  assert.match(await Effect.runPromise(s.usageSummary()), /Claude Code: 3 calls in 2 sessions, total_cost_usd = 1\.50 \(the sessions' last reported running totals, an estimate by the client\)/);
 });

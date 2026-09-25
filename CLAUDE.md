@@ -78,12 +78,13 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
 - Claude Code writes to its state file on every call. In the developer's projects that file is `.devcontainer/claude.json`, a tracked file inside the project, so `config.json` lists it under `ignorePaths`.
 - Effect 4.0.0-rc.117 and `@effect/platform-node` 4.0.0-rc.117. Both agents accept the JSON Schema that `Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" })` generates from the seven agent schemas: `prototypes/proto-schema.ts` made 28 calls (7 schemas × raw/strict × Codex/Agent SDK), all accepted and all replies decoded; the raw and strict variants were byte-identical. The program sends the raw variant (`prototypes/proto-schema-output/CHOSEN`); the strict transform stays as a tested fallback.
 - `NodeRuntime.runMain` interrupts the main fiber on SIGINT or SIGTERM and then calls the teardown, which sets the exit code (read in the runner's implementation, `@effect/platform-node-shared/dist/NodeRuntime.js`). In terminal mode readline receives Ctrl+C itself; `src/ui.ts` passes it on as a real SIGINT.
+- 25 Sep 2026, first real run after the Effect rewrite (a documentation task on a scratch project, in the development container, which has both agents' credentials and the installed program at `/opt/plan-review`): question phase with an empty agreed list, one planning phase, Codex convergence in round 1, one execution phase, `finished`; three Claude Code calls, two Codex turns; no agent process left running.
+- `total_cost_usd` of the Agent SDK's result message is the running total of the session, and a resumed session continues from its saved total (the SDK's own description, confirmed in that run: 0.49, 1.06, 1.77 across the three calls of one session). `usage.jsonl` keeps the value of each call; the usage summary reports each session's last value.
 - PENDING (plan step 6.3): the manual Ctrl+C check with real agents — during a Codex review, during a Claude Code call, and at a prompt — each ending with the INTERRUPTED output, exit code 130 and no remaining `claude`/`codex` process. Record the result here.
 
 ## Not yet known or not yet built
 
-- Whether `total_cost_usd` is per call or cumulative per session. `usage.jsonl` records the values of each call.
-- The exchange between the agents (rejections, clarifications, pauses) and the repair turn have run only in scripted tests, not against the real agents. PENDING (plan step 7.3): one real run after the Effect rewrite.
+- The exchange between the agents (rejections, clarifications, pauses) and the repair turn have run only in scripted tests, not against the real agents: every real review so far returned zero issues in round 1.
 - Resuming an interrupted run is not implemented. The developer wants it later.
 - Threads that the orchestrator starts are stored in the same `~/.codex` volume as the developer's interactive Codex sessions; the effect on `codex resume --last` is unverified.
 

@@ -201,6 +201,11 @@ needed); repair turns in execution sessions (a recorded stop must take precedenc
 report is treated as a missing one); `runPromiseWith` with a captured context for the SDK callbacks
 (the adapters capture the services as values, so `runPromise` with the call's abort signal suffices).
 
+The first real run after the rewrite (25 Sep 2026, a README task on a scratch project in the
+development container) went through all phases and finished. It settled an open question: the Agent
+SDK's `total_cost_usd` is the running total of the session (0.49, 1.06, 1.77 across the three calls),
+so the usage summary, which had summed the calls, was changed to report each session's last value.
+
 Observed about Effect 4 during the work and recorded in the ledger: `Effect.exit` does not capture
 an interruption from outside, so the INTERRUPTED output is printed by `onInterrupt` finalizers and
 the exit code comes from the runner's teardown; `runPromise` rejects with the typed error object
