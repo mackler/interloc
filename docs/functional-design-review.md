@@ -228,3 +228,56 @@ For a class, show three contrasting examples: `issueLog` demonstrates mostly pur
 Reviewed all production modules in `src/`, the test architecture and relevant examples, the three prototype scripts, and the documented design history. Shell/container launch scaffolding and generated historical run records are not application-domain FP examples. Findings distinguish confirmed behavior from conditional concurrency risks and design tradeoffs; this is a static review with targeted local checks, not a claim of exhaustive behavioral verification.
 
 `npm test` passed: **115 tests, 0 failures** (including TypeScript checking). Small read-only checks confirmed conflicting duplicate-disposition accounting, duplicate current log entries, acceptance of a negative fractional limit, an undetected new diff-map entry, a missing schema reference returning `undefined`, and prefix-based numeric parsing. No real agents were called. This Markdown report is the only repository change.
+
+**Disposition (applied 25 Sep 2026)**
+
+Every finding was applied in the order of recommendation F, by the plan this program made for itself (`plan-review/plan.md` of that run) and carried out by hand after the run halted on a Codex usage limit. Test first throughout; each commit message records the failures observed before the change. Commits: stage 0 `a33c9a9`, stage 1 `8cff739`, stage 2 `2df7977`, stage 3 `3e84f05`, stage 4 `99a4b70`, stage 5 `aed0285`, the approved wiring files `c1cbe48`. Product decisions were taken in the question phase of that run (Q1–Q8 of its `requirements.md`). "Kept" marks a part deliberately not done, with the reason.
+
+| Finding | Outcome | Commits |
+|---|---|---|
+| 1 | Done: appearing and disappearing entries are reported (1.1); the snapshot is git's porcelain v2 output with the working-tree entry of every listed path (file hash, link target, directory, missing; decision Q1) and laws over generated snapshots. Kept: gitignored files stay unobserved (Q1) | `8cff739`, `2df7977` |
+| 2 | Done: one exclusion predicate for `plan-review/` and `ignorePaths`, NUL-delimited output, porcelain v2 records, renames | `8cff739`, `2df7977` |
+| 3 | Done: `RoundInvalid` halts for duplicate review ids (before the convergence shortcut) and for duplicate, missing or extra dispositions; validated review and round; overlap order of decision Q2; laws | `8cff739`, `2df7977` |
+| 4 | Done: `appendRound` takes the validated round; readonly collections; nothing throws | `2df7977` |
+| 5 | Done: safe integers with ranges, bounded extra-round parsing, nonnegative costs, non-empty record identifiers. Kept: phase 0 as the phase of the question and requirements logs (the subject is the log file) | `8cff739`, `2df7977` |
+| 6 | Done: log entries are a union tagged by `source` with closed action sets; version-2 files (logs, usage, questions, `round-<n>.json` as `validated` / `no_response` / `invalid`), version-1 pairs reconstructed against their pre-round history, `src/convert.ts` (decision Q5) | `99a4b70`, `c1cbe48` |
+| 7 | Done: `IssueId` brand, empty required ids rejected, the `""` wire sentinels normalised to `null`, references validated against the history (decision Q3), a generated-id collision is invalid. Kept: session ids and hashes are not branded (recommendation B's "selectively"); paths are branded where 4.7 and 5.1 need them | `2df7977`, `99a4b70` |
+| 8 | Done: interview turns, execution reports and the question list become variants after decoding; no coverage check (decision Q4); a default that names no proposed answer is null with a note; duplicate ids halt with `QuestionListInvalid` | `99a4b70` |
+| 9 | Done: per-agent usage records, the unknown-session policy of decision Q8, a structured summary | `3e84f05`, `99a4b70` |
+| 10 | Done: `Result`-returning decoders, `lift` removed, the callback failure in a typed `Deferred`, `haltMessage` validates the payload of a tag (`decodeRunError`). `isRunError` deleted rather than split: after the `Deferred` no value crosses a Promise boundary inside the program | `99a4b70` |
+| 11 | Done: typed start-up failures; `startPhase` returns a `ReviewSession` bound to its thread, held by the loop | `8cff739`, `99a4b70` |
+| 12 | Done: `Subject<R, D>` with two operations typed by their schemas | `99a4b70` |
+| 13 | Done: the review loop is `advance(state, event)` plus an interpreter (decision Q7); bounded event traces against an independent model | `3e84f05` |
+| 14 | Done: observations `{ round, stage, hash }` name the right round | `8cff739`, `3e84f05` |
+| 15 | Done: one `DecisionEvent`, from which the record lines and the log entry derive; a decision on a reraised issue reaches the log | `3e84f05` |
+| 16 | Done: JSON records written to a temporary name and renamed into place; `checkpoint.json` names the last committed transition and its reader verifies the named records (decision Q6). Kept: resume itself (the task's limit) | `aed0285` |
+| 17 | Done: the `AskUserQuestion` input and the edit target are decoded; malformed data is a typed failure of the call | `99a4b70` |
+| 18 | Done: only a whole in-range integer chooses an option; answers keyed by question index; duplicate question texts noted at the edge | `8cff739`, `2df7977` |
+| 19 | Done: pure reduction of the message list (`partial` explicit) and pure outcome interpretation; the adapter keeps the stream, cancellation and persistence | `99a4b70` |
+| 20 | Done: the stop is per execution call; the terminal dialogue is serialized with a `Semaphore` | `99a4b70` |
+| 21 | Done: edit targets resolved through symlinks before the check; `ProjectPath` / `RecordPath` brands; race policy recorded (hook time, then the snapshot comparison). Container arrangement and Codex sandbox mode unchanged | `99a4b70` |
+| 22 | Done: time and serialization inside the effect, the store owns the timestamp, the Clock service is the source of time | `8cff739`, `aed0285` |
+| 23 | Done: invalid-reply files created exclusively with the number retried; a second archive in the same clock instant gets a suffix | `aed0285` |
+| 24 | Done: `strictJsonSchema` is total (`Result<Json, UnsupportedSchema>`: dangling, cyclic, sibling and depth rejections) with laws on generated acyclic graphs; the raw path the agents receive is unchanged | `99a4b70` |
+| 25 | Done: `planningCall` reports its repair, command variants, `askNonEmpty`. Kept: the sequential loops of `run.ts` (the review's own caveat) | `3e84f05` |
+| 26 | Done: readonly views for the exchanged records, checked at compile time. Kept: no runtime freezing in production (the review's caveat) | `2df7977`, `99a4b70` |
+| 27 | Done: the usage fold extracted; the Store offers one operation per artifact of the catalog and no path-taking write; config and platform split out; rendering in `src/render.ts` | `3e84f05`, `aed0285` |
+| 28 | Done: the artifact catalog (`src/artifacts.ts`) and the interview in its own module; `test/modules.test.ts` keeps the value-import graph acyclic. Kept: a structured plan-step format (natural-language plans are a product feature) | `aed0285` |
+| 29 | Done: `liveSdk()` is a factory. Kept: local builders, terminal callbacks and the composition root as the boundaries they are | `c1cbe48` |
+| 30 | Done: every row of the table in recommendation E has a property test (below); scenario and fixture tests kept | `a33c9a9` – `aed0285` |
+| 31 | Done: shared command parsing between the fake and the live Ui, typed script steps, cleanup of temporary directories, readiness signals instead of sleeps where the double can expose one. Kept: the broad casts of `test/fakeSdk.ts` (the fake carries only what the adapters read) | `8cff739`, `2df7977` |
+| 32 | Done: `prototypes/classify.ts` counts a call as accepted only when its reply decoded; the run record and the other prototypes are unchanged | `aed0285` |
+
+The properties of recommendation E, with `fast-check` 4.10.2 (numRuns 150–200, seed 20260925; generators build valid values directly and invalid boundary data separately):
+
+| Row | Property test |
+|---|---|
+| Round validation / log transitions | `test/round.property.test.ts` |
+| Issue detection / counting | `test/round.property.test.ts` (detection and counting laws; renaming) |
+| Review transitions | `test/reviewState.property.test.ts` |
+| Snapshot comparison / git decoding | `test/snapshot.property.test.ts` |
+| Schema / domain validation | `test/schema.property.test.ts`, `test/schemaNormalize.property.test.ts` |
+| Terminal choice parsing | `test/input.property.test.ts` |
+| Usage fold | `test/usage.property.test.ts` |
+| JSON Schema fallback | `test/jsonSchema.property.test.ts` |
+| Decision / record projection | `test/checkpoint.property.test.ts` |
