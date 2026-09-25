@@ -150,6 +150,63 @@ checking types. The Agent SDK was pinned from `latest` to 0.3.278 and the Codex 
 to 0.155.1, the versions on which the established facts were verified. The developer wants to keep both SDKs current, so CLAUDE.md asks
 for a version check at the start of every session and describes a deliberate upgrade.
 
+## Effect v4 (24 and 25 Sep 2026)
+
+The developer chose to rewrite the program with the Effect library
+(github.com/Effect-TS/effect), full adoption on version 4 (release candidate 117 at the time, chosen
+over the stable 3.x so that no 3-to-4 migration follows), and required a strict test-first procedure:
+every step's test is written and seen to fail before its code, and the observed failure is recorded
+in the commit message. The plan was written by Claude Code and reviewed by Codex through this very
+program (a run of about $96 of Claude Code usage that halted on a Codex usage limit in planning
+phase 10; the plan was carried out by hand from `plan-review/plan.md` afterwards). Decisions taken
+in the question phase of that run:
+
+- Q1 pre-release policy: go ahead only if Effect 4 is at least a release candidate, and pin that
+  exact version (a beta would have stopped the plan at stage 0); Q2 `@effect/platform-node` added for the Node layers and the runner, both packages
+  pinned to the same exact version; Q3 Ctrl+C ends like a halt with exit code 130 after both SDK
+  calls are aborted and readline is closed; Q4 an invalid `config.json` stops the program before any
+  agent call and names the file and the field; Q5 an invalid structured reply gets one repair turn in
+  the same session or thread and a second one stops the run, with the replies kept on disk, and
+  execution reports excluded; Q6 the SDKs are injected as a service so that the adapters are tested
+  with fakes; Q7 a prototype proves that both agents accept the generated JSON Schema before any
+  production schema is written; Q8 the same version policy as for the SDKs.
+
+What the rewrite produced, stage by stage (one commit per stage or sub-step):
+
+0. The pins, the API ledger `docs/effect-v4-api.md` (every Effect name with its declaration; v4
+   differs from v3 and from most material online), and the acceptance proof: 28 calls, all accepted,
+   the raw and strict JSON Schema variants byte-identical, so the raw variant is sent.
+1. `src/schema.ts`: one Effect Schema per kind of data, generating the JSON Schema that the legacy
+   hand-written schemas had, compared byte for byte against the proof.
+2. `src/errors.ts`: fifteen tagged errors and `describe` in place of the single `Halt` class; raw
+   `fs`, `JSON.parse` and git errors became typed.
+3. The `AgentSdk` interface and a fake, so that the adapters' logic (message loop, hooks, stops,
+   session resume) got its first tests. Learned here: a scaffold that still imported the real SDK
+   started a real Claude Code process during a test run; the plan's rule R8 (no scaffolding may
+   reach a real agent) came from that incident.
+4. Types from the schemas; validation of the config, the state files and the agent replies, with
+   the repair turn.
+5. The five services, the procedure as `Effect.gen`, the store on Effect's FileSystem, Path and
+   child-process services (git runs through the spawner, whose `string` does not fail on a non-zero
+   exit, so the store checks the exit code), the terminal as one readline interface held for the
+   whole run (which keeps pasted lines between prompts, and which must pass Ctrl+C on because
+   readline swallows it in terminal mode), and the adapters as layers with abort signals and
+   callback failures that surface as typed errors.
+6. `src/program.ts` with the endings and the exit codes; `src/main.ts` reduced to the wiring and
+   `NodeRuntime.runMain`.
+
+Rejected during the design: a hand-written JSON Schema as the fallback if the agents had refused the
+generated one (a pure, tested transform of the generated schema was chosen instead, and was not
+needed); repair turns in execution sessions (a recorded stop must take precedence, and an invalid
+report is treated as a missing one); `runPromiseWith` with a captured context for the SDK callbacks
+(the adapters capture the services as values, so `runPromise` with the call's abort signal suffices).
+
+Observed about Effect 4 during the work and recorded in the ledger: `Effect.exit` does not capture
+an interruption from outside, so the INTERRUPTED output is printed by `onInterrupt` finalizers and
+the exit code comes from the runner's teardown; `runPromise` rejects with the typed error object
+itself; `Schema.Decoder<T>` is the type that both `toJsonSchemaDocument` and `decodeUnknownSync`
+accept.
+
 ## Rejected or deferred
 
 - `--permission-mode plan` and `plansDirectory` for the planning phases: the location of the
