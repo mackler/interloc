@@ -154,14 +154,19 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       if (config.claudeModel !== null) full.model = config.claudeModel;
 
       const out: CallResult = { structured: null, resultText: "", costUsd: null, error: "the call produced no result message" };
-      const iterator = sdk.query({ prompt, options: full })[Symbol.asyncIterator]();
+      const failed = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+      // Starting the call can throw synchronously (for example when the SDK cannot start its CLI);
+      // that is a call error like a failure of the stream, not a defect.
+      const started = yield* Effect.try({ try: () => sdk.query({ prompt, options: full })[Symbol.asyncIterator](), catch: failed }).pipe(Effect.catch((text) => Effect.sync(() => ((out.error = text), null))));
+      if (started === null) return out;
+      const iterator = started;
       /** The next message, or null at the end; a failure of the stream ends the call with its text. */
       const next = (): Effect.Effect<SDKMessage | null> =>
         Effect.tryPromise({ try: () => iterator.next(), catch: (e: unknown) => e }).pipe(
           Effect.map((step) => (step.done ? null : step.value)),
           Effect.catch((e) =>
             Effect.sync(() => {
-              out.error = e instanceof Error ? e.message : String(e);
+              out.error = failed(e);
               return null;
             }),
           ),

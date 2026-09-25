@@ -271,3 +271,17 @@ test("a failure while recording usage aborts the SDK call, closes its stream, an
   assert.equal(closed, true, "the SDK stream was not closed");
   assert.equal(fake.sdk.calls[0].options.abortController?.signal.aborted, true, "the SDK call was not aborted");
 });
+
+test("an SDK that fails to start is a call error: ClaudeCallFailed for planning, aborted for execution", async () => {
+  // Found by a Codex review: a synchronous throw of sdk.query (for example a missing CLI binary)
+  // became a defect that bypassed the HALTED output and the aborted outcome.
+  const failing: Script = () => {
+    throw new Error("spawn claude ENOENT");
+  };
+  const planning = await planner([failing]);
+  await assert.rejects(run(planning.planner.planning("write the plan", schema)), (e: unknown) => tag(e) === "ClaudeCallFailed" && /spawn claude ENOENT/.test(String((e as { message: string }).message)));
+  const executing = await planner([failing]);
+  const outcome = await run(executing.planner.executing("implement the plan"));
+  assert.equal(outcome.status, "aborted");
+  assert.match(outcome.question, /spawn claude ENOENT/);
+});
