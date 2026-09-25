@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Schema } from "effect";
-import { LogEntryV1 } from "../src/records.ts";
 import * as S from "../src/schema.ts";
 import type * as legacy from "./fixtures/legacy-types.ts";
 
@@ -28,7 +27,6 @@ const questionEntry: legacy.QuestionEntry = { id: "Q1", question: "q?", reason: 
 const interviewTurn: legacy.InterviewTurn = { message_to_user: "m", answered_ids: ["Q1"], complete: false, summary: "" };
 const execReport: legacy.ExecReport = { status: "finished", summary: "s", question: "", remaining_work: "" };
 const execOutcome: legacy.ExecOutcome = { status: "needs_input", summary: "s", question: "q", remainingWork: "w", userInput: null };
-const logEntryV1: legacy.LogEntry = { id: "A", phase: 1, round: 2, source: "review", problem: "p", action: "accepted", rationale: "r" };
 // Version 2 (Q5): three shapes tagged by source.
 const reviewEntry = { id: "A", phase: 1, round: 2, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r", duplicate_of: null, reverses: null, superseded: false };
 const selfEntry = { id: "P1-S2-1", phase: 1, round: 2, source: "self_correction", problem: "p", action: "plan_error", rationale: "r", superseded: false };
@@ -52,7 +50,6 @@ test("each schema decodes a valid sample and its type matches the legacy type", 
   assert.deepEqual(decode(S.LogEntry, reviewEntry), reviewEntry);
   assert.deepEqual(decode(S.LogEntry, selfEntry), selfEntry);
   assert.deepEqual(decode(S.LogEntry, userEntry), userEntry);
-  assert.deepEqual(decode(LogEntryV1, logEntryV1), logEntryV1);
   assert.deepEqual(decode(S.Config, config), config);
   assert.deepEqual(decode(S.QuestionsFile, { version: 2, task: "t", questions: [questionEntry] }).task, "t");
   assert.equal(decode(S.UsageRecord, usage).agent, "claude");
@@ -70,7 +67,6 @@ test("each schema decodes a valid sample and its type matches the legacy type", 
   sameType<Equals<DeepMutable<typeof S.InterviewTurn.Type>, DeepMutable<legacy.InterviewTurn>>>();
   sameType<Equals<DeepMutable<typeof S.ExecReport.Type>, DeepMutable<legacy.ExecReport>>>();
   sameType<Equals<DeepMutable<typeof S.ExecOutcome.Type>, DeepMutable<legacy.ExecOutcome>>>();
-  sameType<Equals<DeepMutable<typeof LogEntryV1.Type>, DeepMutable<legacy.LogEntry>>>();
   sameType<Equals<DeepMutable<typeof S.Config.Type>, DeepMutable<legacy.Config>>>();
 });
 

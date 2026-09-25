@@ -204,7 +204,7 @@ service class is `ChildProcessSpawner.ChildProcessSpawner`); the Node layers fro
 | Name | File:line | Notes |
 |---|---|---|
 | `FileSystem.FileSystem` | effect/dist/FileSystem.d.ts:363 | service; methods `exists`, `makeDirectory`, `readDirectory`, `readFileString`, `writeFileString(path, data, { flag?: "a" … })`, `rename`, `stat`, `remove`, `chmod`; errors are `PlatformError` |
-| `Path.Path` | effect/dist/Path.d.ts:250 | service; `join`, `resolve`, `sep`, `relative(from, to)` (line 93; the converter's report, review stage 4.5) |
+| `Path.Path` | effect/dist/Path.d.ts:250 | service; `join`, `resolve`, `sep`, `relative(from, to)` (line 93; used by the converter of review stage 4.5, since removed) |
 | `FileSystem.realPath` | FileSystem.d.ts:204 | `(path) => Effect<string, PlatformError>`; the planning hook uses Node's `fs.promises.realpath` directly (review stage 4.7), since the hook is a Promise callback of the SDK without the service |
 | `NodeFileSystem.layer` | @effect/platform-node/dist/NodeFileSystem.d.ts:9 | `Layer<FileSystem>` |
 | `NodePath.layer` | @effect/platform-node/dist/NodePath.d.ts:10 | `Layer<Path>` |

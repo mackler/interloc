@@ -8,17 +8,6 @@ import type { Action, LogEntry, PlannerResponse, Review } from "./schema.ts";
 import type { IssueId } from "./schema.ts";
 export type { IssueId };
 
-/**
- * The log as it was before round (phase, round) was appended (Q5's follow-up: a version-1 round is
- * reconstructed against its pre-round history). Entries are in file order, which is chronological; the
- * entries with an earlier (phase, round) are kept, and `superseded` is recomputed within them: an entry is
- * superseded exactly when a later kept entry has its id.
- */
-export const historyBefore = (log: readonly LogEntry[], phase: number, round: number): readonly LogEntry[] => {
-  const kept = log.filter((e) => e.phase < phase || (e.phase === phase && e.round < round));
-  return kept.map((e, i) => ({ ...e, superseded: kept.slice(i + 1).some((later) => later.id === e.id) }));
-};
-
 export type ValidatedIssue = Readonly<{ id: IssueId; severity: Review["issues"][number]["severity"]; location: string; problem: string; evidence: string }>;
 export type ValidatedReview = Readonly<{ issues: readonly ValidatedIssue[] }>;
 

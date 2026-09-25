@@ -64,8 +64,8 @@ test("an unwritable plan-review directory fails with FileSystemError", async (t)
 test("an issue log entry with an unknown action source fails with StateFileInvalid", async () => {
   const s = await initialised();
   const entry = { id: "A", phase: 1, round: 1, source: "robot", problem: "p", action: "accepted", rationale: "r" };
-  fs.writeFileSync(path.join(s.dir, "issue-log.json"), JSON.stringify([entry]));
-  await fails(s.loadLog({ plan: 1 }), "StateFileInvalid", /issue-log\.json/, /source/);
+  fs.writeFileSync(path.join(s.dir, "issue-log.json"), JSON.stringify({ version: 2, entries: [entry] }));
+  await fails(s.loadLog({ plan: 1 }), "StateFileInvalid", /issue-log\.json/, /entries\[0\]/);
 });
 
 test("questions.json without questions fails with StateFileInvalid", async () => {
@@ -77,7 +77,7 @@ test("questions.json without questions fails with StateFileInvalid", async () =>
 test("loadQuestions returns the agreed list", async () => {
   const s = await initialised();
   const question = { id: "Q1", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: "A" };
-  fs.writeFileSync(s.questions, JSON.stringify({ task: "t", questions: [question] }));
+  fs.writeFileSync(s.questions, JSON.stringify({ version: 2, task: "t", questions: [question] }));
   assert.deepEqual((await Effect.runPromise(s.loadQuestions())).questions, [question]);
 });
 
@@ -343,16 +343,12 @@ test("lift, the throw-based bridge into Effect, is gone (compile-time)", () => {
 });
 
 // Q5: the files the store writes are version 2; a version-1 file of an earlier run is still read.
-test("saveLog writes a version-2 log file, and loadLog reads a version-1 array as well", async () => {
+test("saveLog writes a version-2 log file; a log file of the old shape (a bare array) is StateFileInvalid", async () => {
   const s = await initialised();
   assert.deepEqual(JSON.parse(fs.readFileSync(path.join(s.dir, "issue-log.json"), "utf8")), { version: 2, entries: [] });
-  const v1 = { id: "A", phase: 1, round: 1, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r" };
-  fs.writeFileSync(path.join(s.dir, "issue-log.json"), JSON.stringify([v1]));
-  const loaded = await Effect.runPromise(s.loadLog({ plan: 1 }));
-  assert.equal(loaded.length, 1);
-  assert.equal(loaded[0].superseded, false);
-  await Effect.runPromise(s.saveLog({ plan: 1 }, loaded));
-  assert.equal(JSON.parse(fs.readFileSync(path.join(s.dir, "issue-log.json"), "utf8")).version, 2);
+  const old = { id: "A", phase: 1, round: 1, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r" };
+  fs.writeFileSync(path.join(s.dir, "issue-log.json"), JSON.stringify([old]));
+  await fails(s.loadLog({ plan: 1 }), "StateFileInvalid", /issue-log\.json/);
 });
 
 test("recordUsage writes version-2 lines per agent", async () => {

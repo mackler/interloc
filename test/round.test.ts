@@ -4,7 +4,7 @@ import { Result } from "effect";
 import type { RoundInvalid } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
 import * as log from "../src/issueLog.ts";
-import { historyBefore, type IssueId, validateReview, validateRound, type ValidatedReview } from "../src/round.ts";
+import { type IssueId, validateReview, validateRound, type ValidatedReview } from "../src/round.ts";
 import type { LogEntry, PlannerResponse, Review } from "../src/schema.ts";
 import { issue, respond } from "./helpers.ts";
 
@@ -96,18 +96,4 @@ test("the detections use the normalised references", () => {
   assert.equal(log.acceptedCount(round), 0);
   const id = "N" as IssueId;
   void id;
-});
-
-// Q5's follow-up: a version-1 round is reconstructed against the log as it was before the round.
-test("historyBefore keeps the entries of earlier rounds only, in order, and recomputes superseded within them", () => {
-  const a1 = entry("A", "rejected", { phase: 1, round: 1, superseded: true });
-  const a2 = entry("A", "accepted", { phase: 1, round: 2 });
-  const b = entry("B", "accepted", { phase: 2, round: 1 });
-  const s = entry("P2-S1-1", "plan_error", { phase: 2, round: 1, source: "self_correction" });
-  const log = [a1, a2, b, s];
-  assert.deepEqual(historyBefore(log, 2, 1), [a1, a2]);
-  assert.deepEqual(historyBefore(log, 1, 2), [{ ...a1, superseded: false }]);
-  assert.deepEqual(historyBefore(log, 1, 1), []);
-  assert.deepEqual(historyBefore(log, 3, 1), log);
-  assert.deepEqual(historyBefore(log, 2, 2), log);
 });

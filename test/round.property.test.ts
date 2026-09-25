@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { Result } from "effect";
 import fc from "fast-check";
 import * as log from "../src/issueLog.ts";
-import { historyBefore, type IssueId, validateReview, validateRound } from "../src/round.ts";
+import { type IssueId, validateReview, validateRound } from "../src/round.ts";
 import type { Action, LogEntry, PlannerResponse, Review } from "../src/schema.ts";
 
 // Properties of round validation, the log transitions, detection and counting: rows 1 and 2 of the table in
@@ -153,28 +153,6 @@ test("property: a bijective renaming of ids commutes with the detections", () =>
       assert.deepEqual(log.reversals(b.success), log.reversals(a.success).map(([x, y]) => [rename(x), rename(y)]));
       assert.deepEqual(log.secondClarifications(renamedHistory, b.success), log.secondClarifications(round.history, a.success).map((id) => rename(id)));
       assert.equal(log.acceptedCount(b.success), log.acceptedCount(a.success));
-    }),
-    RUNS,
-  );
-});
-
-test("property: for a log built by a sequence of valid rounds and decisions, historyBefore(log, p, n) is the log as it was before round (p, n)", () => {
-  fc.assert(
-    fc.property(fc.array(fc.tuple(arbRound, fc.option(fc.tuple(arbId, fc.string()), { nil: null })), { maxLength: 4 }), (steps) => {
-      let history: readonly LogEntry[] = [];
-      const before: (readonly LogEntry[])[] = [];
-      let phase = 1;
-      for (const [round, decision] of steps) {
-        const validated = validateReview(round.review);
-        if (!Result.isSuccess(validated)) return;
-        const result = validateRound(validated.success, round.response, history, phase, 1);
-        if (!Result.isSuccess(result)) return;
-        before.push(history);
-        history = log.appendRound(history, result.success);
-        if (decision !== null) history = log.appendUserDecision(history, decision[0] as IssueId, decision[1], phase, 1);
-        phase++;
-      }
-      before.forEach((expected, i) => assert.deepEqual(historyBefore(history, i + 1, 1), expected));
     }),
     RUNS,
   );

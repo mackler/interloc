@@ -294,6 +294,10 @@ thread's context growing with every round). Resume is not implemented, so the re
   at any one persistence step of a scripted run, the checkpoint never names incomplete records. The
   `liveSdk()` factory of finding 29 and `src/convert.ts` of stage 4 were written after the developer
   approved their texts (25 Sep 2026).
+- Same day, on the developer's instruction: the readers of the old record shape, the reconstruction of
+  old rounds (`historyBefore`, `readRound`), the converter and its fixture were removed. Only the
+  version-2 shape is read; the old records of earlier runs stay as they are and are not readable by
+  the program. The version marker stays, so that a later change of shape can be told apart.
 
 ## Rejected or deferred
 

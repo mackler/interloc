@@ -1,6 +1,0 @@
-{"time":"2026-09-21T22:44:31.660Z","agent":"claude","session_id":"fb1a9a64-a690-4d1b-adbe-046314de7640","num_turns":12,"total_cost_usd":1.078743}
-{"time":"2026-09-21T22:45:15.913Z","agent":"codex","thread_id":"01a0c624-7833-7631-b7a2-c12c35642a74","usage":{"input_tokens":139089,"cached_input_tokens":92672,"cache_write_input_tokens":0,"output_tokens":929,"reasoning_output_tokens":203}}
-{"time":"2026-09-21T22:46:01.745Z","agent":"claude","session_id":"fb1a9a64-a690-4d1b-adbe-046314de7640","num_turns":4,"total_cost_usd":2.0307150000000003}
-{"time":"2026-09-21T22:46:16.064Z","agent":"codex","thread_id":"01a0c624-7833-7631-b7a2-c12c35642a74","usage":{"input_tokens":236746,"cached_input_tokens":184320,"cache_write_input_tokens":0,"output_tokens":1053,"reasoning_output_tokens":231}}
-{"time":"2026-09-21T22:46:25.088Z","agent":"claude","session_id":"fb1a9a64-a690-4d1b-adbe-046314de7640","num_turns":3,"total_cost_usd":2.9842885}
-{"time":"2026-09-21T22:47:51.125Z","agent":"claude","session_id":"fb1a9a64-a690-4d1b-adbe-046314de7640","num_turns":2,"total_cost_usd":3.0489115}
