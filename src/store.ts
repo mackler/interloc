@@ -14,9 +14,6 @@ import { renderDecision, renderFeedback, subjectHeading } from "./render.ts";
 import { type ProjectPath, type RecordPath, Store, type StoreError, type StoreShape } from "./services.ts";
 import { decodeStatusV2, excluded, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
 
-// main.ts imports `platformLayer` from here until its text is next approved (step 5.3); the definition is src/platform.ts.
-export { type Platform, platformLayer } from "./platform.ts";
-
 /** The store of one project. `ignorePaths` are the paths the change detection ignores (config). */
 export const makeStore = (projectDir: string, ignorePaths: readonly string[]): Effect.Effect<StoreShape, never, Platform> =>
   Effect.gen(function* () {

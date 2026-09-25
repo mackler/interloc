@@ -7,7 +7,8 @@ import { claudePlannerLayer } from "../src/claude.ts";
 import { codexReviewerLayer } from "../src/codex.ts";
 import { defaultConfig } from "../src/schema.ts";
 import { Planner, Reviewer, RunConfig, Sdk, type Services, Store, Ui } from "../src/services.ts";
-import { platformLayer, storeLayer } from "../src/store.ts";
+import { platformLayer } from "../src/platform.ts";
+import { storeLayer } from "../src/store.ts";
 import { FakeSdk, init, messages, success, turn, type Script } from "./fakeSdk.ts";
 import { finished, pathsOf, runFails, runTask, ScriptedPlanner, ScriptedReviewer, ScriptedUi, tempRepo, testLayer } from "./helpers.ts";
 

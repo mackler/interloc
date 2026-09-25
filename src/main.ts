@@ -9,13 +9,13 @@ import { claudePlannerLayer } from "./claude.ts";
 import { codexReviewerLayer } from "./codex.ts";
 import { exitCodeOf, program, type Wiring } from "./program.ts";
 import { liveSdk } from "./sdkLive.ts";
-import { platformLayer } from "./store.ts";
+import { platformLayer } from "./platform.ts";
 import { terminalUi } from "./ui.ts";
 
 const live: Wiring = {
   ui: terminalUi(process.stdin, process.stdout),
   platform: platformLayer,
-  sdk: liveSdk,
+  sdk: liveSdk(),
   agents: Layer.mergeAll(claudePlannerLayer, codexReviewerLayer),
   sharedConfig: fileURLToPath(new URL("../config.json", import.meta.url)),
   cwd: process.cwd(),

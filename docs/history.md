@@ -292,8 +292,8 @@ thread's context growing with every round). Resume is not implemented, so the re
   counts a call as accepted only when its reply decoded (`prototypes/classify.ts`; finding 32). Properties:
   a decision's log entry and transcript lines agree and rendering is pure; with a write failure injected
   at any one persistence step of a scripted run, the checkpoint never names incomplete records. The
-  `liveSdk()` factory of finding 29 waits for the developer's approval of the `src/sdkLive.ts` and
-  `src/main.ts` texts, like `src/convert.ts` of stage 4.
+  `liveSdk()` factory of finding 29 and `src/convert.ts` of stage 4 were written after the developer
+  approved their texts (25 Sep 2026).
 
 ## Rejected or deferred
 
