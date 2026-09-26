@@ -281,3 +281,10 @@ The properties of recommendation E, with `fast-check` 4.10.2 (numRuns 150–200,
 | Usage fold | `test/usage.property.test.ts` |
 | JSON Schema fallback | `test/jsonSchema.property.test.ts` |
 | Decision / record projection | `test/checkpoint.property.test.ts` |
+
+Note (26 Sep 2026, finding 9 of `docs/gui-review.md`): the exclusion property that the web GUI added to
+`test/snapshot.property.test.ts` compared `excludedIndexPaths` with `excluded`, so it could not test the policy the
+two share. It was deleted and replaced there by a property against an independent statement of the path policy
+(`plan-review/` at the root only, look-alike names, literal glob characters, entry prefixes). In
+`test/reviewState.property.test.ts` the driver now takes the script of the round each command belongs to, and a
+work review's first exit, its round and its pauses are checked against an independent model of behaviour 7.

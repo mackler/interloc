@@ -1,7 +1,8 @@
 // The server of the end-to-end tests (plan step 5.1): the real web server and run manager over the scripted
 // agents of test/helpers.ts, in a temporary repository, so that no agent is reached. SCENARIO chooses the script
 // of every run: "converge" (one accepted issue, then convergence), "decision" (a question from Claude Code),
-// "stop" (a planning call that waits until it is interrupted). PORT is the port.
+// "stop" (a planning call that waits until it is interrupted), and those of finding 10 of docs/gui-review.md:
+// "interview", "workCorrection", "tabs", "drop", "long". PORT is the port.
 
 import { Effect } from "effect";
 import { HttpServer } from "effect/unstable/http";
@@ -15,6 +16,8 @@ import { makeWebServer } from "../src/webServer.ts";
 import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from "../test/helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
+const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, answered_ids: [], complete, summary });
+const LONG = 60;
 export const SCENARIOS: Record<string, TestOptions> = {
   converge: {
     steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "1. [ ] the step, amended\n" }],
@@ -27,6 +30,54 @@ export const SCENARIOS: Record<string, TestOptions> = {
     execs: [finished],
   },
   stop: { steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }, { hang: true }], reviews: [{ issues: [issue("P1-R1-1")] }] },
+  // Finding 10 of docs/gui-review.md: the scenarios the review names.
+  // The question phase: a question list, an interview message, /done, a proposed summary and its confirmation.
+  interview: {
+    config: { questionPhase: true },
+    steps: [
+      { output: { questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "") },
+      { output: turn("Anything else?", false, "") },
+      { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.") },
+      { output: noQuestions, plan: "1. [ ] the step\n" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // A work correction: work review 1 raises an issue that Claude Code accepts, so planning, execution and the work
+  // review run a second time, and the second work review converges.
+  workCorrection: {
+    steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }, { output: respond([["W1-R1-1", "accepted"]]) }, { output: noQuestions, plan: "1. [x] the step\n2. [ ] the fix\n" }],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1", "The step misses its test.")] }, { issues: [] }, { issues: [] }],
+    execs: [finished, finished],
+  },
+  // Two decisions in a row, for two tabs and a dropped connection.
+  tabs: {
+    steps: [{ output: { questions_for_user: ["Which database should the service use?", "Which cache should the service use?"] }, plan: "1. [ ] the step\n" }],
+    reviews: [{ issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  drop: {
+    steps: [{ output: { questions_for_user: ["Which database should the service use?"] }, plan: "1. [ ] the step\n" }],
+    reviews: [{ issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // A long transcript: 60 accepted rounds, then two rounds without an acceptance and the idle pause, which waits.
+  long: {
+    config: { maxRounds: 100, maxIdleRounds: 2 },
+    steps: [
+      { output: noQuestions, plan: "v0\n" },
+      ...Array.from({ length: LONG }, (_, i) => ({ output: respond([[`P1-R${i + 1}-1`, "accepted"]]), plan: `v${i + 1}\n`, resultText: `Round ${i + 1}: the plan now covers point ${i + 1} in detail. `.repeat(4) })),
+      { output: respond([[`P1-R${LONG + 1}-1`, "rejected"]]) },
+      { output: respond([[`P1-R${LONG + 2}-1`, "rejected"]]) },
+    ],
+    reviews: [
+      ...Array.from({ length: LONG + 2 }, (_, i) => ({ issues: [issue(`P1-R${i + 1}-1`, `Point ${i + 1} of the plan is not specific enough to implement without guessing.`)] })),
+      { issues: [] },
+      { issues: [] },
+    ],
+    execs: [finished],
+  },
 };
 
 const scenario = SCENARIOS[process.env.SCENARIO ?? "converge"] ?? SCENARIOS.converge;

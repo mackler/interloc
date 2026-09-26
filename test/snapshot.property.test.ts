@@ -171,12 +171,45 @@ test("property: generated file operations are detected between two snapshots exa
   );
 });
 
-test("property: excludedIndexPaths agrees with excluded for every path", () => {
-  const segment = fc.stringMatching(/^[a-z*?[\]._-]{1,6}$/);
-  const relPath = fc.array(segment, { minLength: 1, maxLength: 3 }).map((s) => s.join("/"));
+// Finding 9 of docs/gui-review.md: the exclusion policy tested against an independent statement of it, written here
+// from the documented rules (CLAUDE.md, the project snapshot; src/snapshot.ts), not from `excluded`. A path is
+// excluded when it lies under the directory plan-review/ at the root, or when its segments begin with the segments of
+// an ignorePaths entry (a trailing "/" makes no difference). Glob characters are literal; plan-review/ below the root
+// and a name that merely starts with "plan-review" are not excluded. Paths are root-relative: since stage C the
+// project is the worktree's top-level directory.
+const policy = (p: string, ignore: readonly string[]): boolean => {
+  const segments = p.split("/");
+  const startsWith = (prefix: readonly string[]) => prefix.length <= segments.length && prefix.every((s, i) => segments[i] === s);
+  if (segments.length > 1 && segments[0] === "plan-review") return true;
+  return ignore.some((entry) => startsWith(entry.replace(/\/$/, "").split("/")));
+};
+const segment = fc.oneof(fc.stringMatching(/^[a-z*?[\]._-]{1,6}$/), fc.constantFrom("plan-review", "plan-reviewx", "sub", "src"));
+const relPath = fc.array(segment, { minLength: 1, maxLength: 4 }).map((s) => s.join("/"));
+const ignoreEntry = fc.oneof(relPath, relPath.map((p) => p + "/"));
+
+test("property: excluded and excludedIndexPaths follow the independent path policy", () => {
   fc.assert(
-    fc.property(fc.array(relPath, { maxLength: 12 }), fc.array(fc.oneof(relPath, relPath.map((p) => p + "/")), { maxLength: 4 }), (paths, ignore) => {
-      assert.deepEqual(excludedIndexPaths(paths, ignore), paths.filter((p) => excluded(p, ignore)));
+    fc.property(fc.array(relPath, { maxLength: 12 }), fc.array(ignoreEntry, { maxLength: 4 }), (paths, ignore) => {
+      for (const p of paths) assert.equal(excluded(p, ignore), policy(p, ignore), `${p} with ${JSON.stringify(ignore)}`);
+      assert.deepEqual(excludedIndexPaths(paths, ignore), paths.filter((p) => policy(p, ignore)));
     }),
+    { numRuns: 300, seed: 20260926 },
   );
+});
+
+test("the policy's boundary examples: nested and look-alike records, literal globs, prefixes", () => {
+  const cases: [string, readonly string[], boolean][] = [
+    ["plan-review/plan.md", [], true],
+    ["sub/plan-review/plan.md", [], false],
+    ["plan-reviewx/y", [], false],
+    ["a*b/c", ["a*b"], true],
+    ["axb/c", ["a*b"], false],
+    [".devcontainer/claude.json", [".devcontainer/claude.json"], true],
+    ["src/x.ts", ["src/"], true],
+    ["srcx/x.ts", ["src"], false],
+  ];
+  for (const [p, ignore, expected] of cases) {
+    assert.equal(policy(p, ignore), expected, `policy: ${p}`);
+    assert.equal(excluded(p, ignore), expected, `excluded: ${p}`);
+  }
 });

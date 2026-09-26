@@ -49,7 +49,7 @@ recommendations of `docs/functional-design-review.md` are the reference for what
 | `src/main.ts` | Entry point: the live wiring and the platform runner (`NodeRuntime.runMain`) applied to the program; untested, like `src/sdkLive.ts` and `src/web.ts` |
 | `src/web.ts` | The web GUI's entry point, `node src/web.ts [port]` (default 8090): the web server over the live wiring per run, under the platform runner; refuses to start without `web/dist/index.html`; untested wiring |
 | `src/webArgs.ts` | The pure parts of `src/web.ts`: `parsePort`, the usage and the missing-build message |
-| `src/webServer.ts` | `makeWebServer` → `{ handler, closeAll }` (`closeAll` sends each tab `closing` and closes its socket; src/web.ts registers it after `serveEffect`). The HTTP handler: `requestTarget` (a malformed URL or percent-encoding is a 400, never a defect), the built page from `web/dist`, and one WebSocket per tab (hello, the replay, then the live events without those the replay holds; the page's start, answer, stop and list) |
+| `src/webServer.ts` | `makeWebServer` → `{ handler, closeAll }` (`closeAll` sends each tab `closing` and closes its socket; src/web.ts registers it after `serveEffect`). The HTTP handler: `requestTarget` (a malformed URL or percent-encoding is a 400, never a defect), the built page from `web/dist`, and one WebSocket per tab (hello, the replay, then the live events without those the replay holds; the page's start, answer, stop and list); each tab's forwarding queue is bounded (`subscribeBounded`, 1,000 events), and a tab that falls that far behind is told and closed and recovers by replay |
 | `src/runManager.ts` | One run at a time for the web GUI: start (the project must be a worktree's top-level directory; the run reserved with its fiber in one uninterruptible step), answer and stop checked against the server's incarnation and the current run's id, `makePublisher` (record and offer as one serialized, uninterruptible step), the events of the current and the last run, broadcast with their per-run seq |
 | `src/webUi.ts` | The `Ui` of a run in the page: every call becomes a `RunEvent`; a prompt waits for the first answer of any tab, interpreted as in the terminal; an answer is taken, published and delivered in one uninterruptible step |
 | `src/protocol.ts` | The messages between the page and the server as Effect schemas (pure, also imported by the browser); `inSnapshot`, the replay boundary per replayed run; the incarnation (one start of the server) in `hello`, `answer` and `stop`; `closing` |
@@ -95,9 +95,10 @@ recommendations of `docs/functional-design-review.md` are the reference for what
 | `web/src/storage.ts` | The remembered project directory: an edge over `localStorage` whose acquisition, read and write failures are typed results; Start never depends on it |
 | `web/src/components/*.svelte` | The components over m3-svelte: `App`, `TopBar`, `StartForm`, `DirectoryDialog`, `TimelineRail`, `ChatPanel`, `Message`, `PromptWidget`, `ActivityLine`; `web/src/theme.css` (M3 styles, the tonal-spot scheme, the density function) |
 | `web/src/*.test.ts` | Vitest: the reducer (with a fast-check property), the socket over a fake WebSocket, the Markdown, the components mounted in jsdom (`test-setup.ts` supplies `matchMedia` and the dialog methods jsdom lacks) |
-| `e2e/server.ts`, `e2e/run.spec.ts`, `playwright.config.ts` | The end-to-end tests: the real web server and run manager over the scripted agents of `test/helpers.ts` in a temporary repository, one server per scenario (`converge`, `decision`, `stop`), and four Playwright tests in Chromium |
+| `e2e/server.ts`, `e2e/run.spec.ts`, `e2e/fixtures.ts`, `playwright.config.ts` | The end-to-end tests: the real web server and run manager over the scripted agents of `test/helpers.ts` in a temporary repository, one server per scenario (`converge`, `decision`, `stop`, `interview`, `workCorrection`, `tabs`, `drop`, `long`), and twelve Playwright tests in Chromium; the fixture fails a test on an uncaught error or a console error in any page of its context (finding 10 of `docs/gui-review.md`) |
 | `docs/ui-review.md` | The review of the page against Nielsen's ten heuristics and Material Design 3 |
 | `test/store.test.ts` | The work review's records in the store over a temporary repository: the baseline tree, `changes.diff`, the two hashes of the work subject |
+| `test/replayCapacity.test.ts` | The measurement of finding 13: a run of 10,000 events through the manager and its replay to one client over the real server, bounded by the criterion of decision Q4 (1 s, 50 MB) |
 | `test/workReview.test.ts` | Scenario tests of the work review: convergence, revise after an accepted issue or a self-correction, the three decision exits with `readCheckpoint`, the round limit without "p", the guards, stops before the work review |
 | `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer` (the services, scripted), `testLayer`, `testWiring`, temporary git repository |
 | `test/fakeSdk.ts` | A fake of the two SDKs for the adapter tests |
@@ -169,6 +170,13 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect), 26 Sep 2026 (the web GUI and th
   `conversation.md`, and the server stayed up: the next task started from the page and archived the
   previous run's records. So an aborted call of either SDK records no usage, as the terminal check of
   25 Sep found.
+
+- 26 Sep 2026, the replay capacity (finding 13 of `docs/gui-review.md`, decision Q4; `test/replayCapacity.test.ts`,
+  scripted, in the development container): a run of 10,030 events (tool activity, program lines, one review with
+  three issues in ten) retained about 4 MB, took about 230 ms to publish in full, copying of the run's event array
+  included, and its replay (1.55 MB of JSON) reached one client in 45–51 ms. The criterion of Q4 (a replay over 1 s,
+  or more than 50 MB retained) is not approached, so chunked transcript storage was not built; the criterion is the
+  test's regression bound.
 
 ## Not yet known or not yet built
 

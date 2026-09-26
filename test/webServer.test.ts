@@ -8,7 +8,7 @@ import { HttpServer } from "effect/unstable/http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { platformLayer } from "../src/platform.ts";
 import type { ClientMessage, RunEvent, ServerMessage } from "../src/protocol.ts";
-import { makeRunManager, type RunManager } from "../src/runManager.ts";
+import { type Broadcast, makeRunManager, type RunManager } from "../src/runManager.ts";
 import { makeWebServer, requestTarget } from "../src/webServer.ts";
 import { finished, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
 
@@ -348,4 +348,46 @@ test("the closing finalizer registered before serveEffect runs after the HTTP sh
   const { client, done } = await serving(true);
   assert.ok(Exit.isFailure(await done), "the server finished although the finalizer order was wrong");
   client.close();
+});
+
+// Finding 13 of docs/gui-review.md: a tab that falls behind by the bound is told, disconnected and recovers by replay.
+test("a tab that falls behind by its queue's bound is told, its socket is closed, and a reconnect gets the whole replay", async () => {
+  const listeners: ((b: Broadcast) => Effect.Effect<void>)[] = [];
+  const events: RunEvent[] = [{ _tag: "Started", project: "/p", task: "t", time: "x" }, ...Array.from({ length: 20 }, (_, i): RunEvent => ({ _tag: "Said", text: `line ${i}` }))];
+  const fake: RunManager = {
+    cwd: "/p",
+    incarnation: "test",
+    subscribe: (listener) => Effect.acquireRelease(Effect.sync(() => void listeners.push(listener)), () => Effect.sync(() => void listeners.splice(listeners.indexOf(listener), 1))).pipe(Effect.asVoid),
+    replay: Effect.succeed([{ id: 1, events }]),
+    current: Effect.succeed(1),
+    start: () => Effect.succeed({ refused: "not in this test" }),
+    stop: () => Effect.succeed(null),
+    answer: () => Effect.succeed(null),
+  };
+  await run(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const web = yield* makeWebServer(fake, dist(), 3);
+        yield* HttpServer.serveEffect(web.handler);
+        yield* Effect.addFinalizer(() => web.closeAll);
+        const address = (yield* HttpServer.HttpServer).address;
+        const port = address._tag === "UnixPathAddress" ? 0 : address.port;
+        yield* Effect.promise(async () => {
+          const slow = await watch(port);
+          await until("the subscription", () => listeners.length === 1);
+          // A burst of events, faster than the tab's forwarding: its queue holds 3. The session may end during it.
+          const listener = listeners[0];
+          await run(Effect.forEach(Array.from({ length: 20 }, (_, i) => i + 21), (seq) => listener({ run: 1, seq, event: { _tag: "Said", text: `later ${seq}` } }), { discard: true }));
+          await until("the close", () => slow.closedAt() !== null);
+          assert.ok(refusals(slow).some((r) => /too far behind/.test(r)), `refusals: ${refusals(slow)}`);
+          await until("the listener's removal", () => listeners.length === 0);
+          const again = await connect(port);
+          await until("the replay", () => again.messages.some((m) => m.type === "replay"));
+          const replay = again.messages.find((m) => m.type === "replay");
+          assert.equal(replay?.type === "replay" ? replay.runs[0].events.length : 0, events.length);
+          again.close();
+        });
+      }),
+    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
 });

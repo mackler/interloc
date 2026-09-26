@@ -4,13 +4,14 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
-import { Deferred, Effect, Fiber, Layer, Ref, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Layer, Queue, Ref, Scope } from "effect";
 import { claudePlannerLayer } from "../src/claude.ts";
 import { codexReviewerLayer } from "../src/codex.ts";
 import { platformLayer } from "../src/platform.ts";
 import { program } from "../src/program.ts";
 import type { RunEvent } from "../src/protocol.ts";
 import { type Broadcast, type Listener, makePublisher, makeRunManager, type Refusal, type RunManager } from "../src/runManager.ts";
+import { subscribeBounded } from "../src/webServer.ts";
 import { numberedChoices } from "../src/userPrompts.ts";
 import { FakeSdk, init, messages, success, turn } from "./fakeSdk.ts";
 import { finished, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
@@ -281,4 +282,19 @@ test("a stop and an answer with the current run's numbers but another incarnatio
   assert.equal(await run(h.manager.answer(h.manager.incarnation, id, asked.prompt, "")), null);
   await ended(h, id);
   assert.equal(endCode(h, id), 0);
+});
+
+// Finding 13 of docs/gui-review.md: a tab that falls behind is marked overflowed at the bound; the run never waits for it.
+test("a subscriber that never reads overflows at its bound, and the run and the other subscribers do not wait for it", async () => {
+  const repo = tempRepo();
+  const h = await harness(repo, [converging]);
+  const scope = await run(Scope.make());
+  const slow = await run(subscribeBounded(h.manager, 3).pipe(Scope.provide(scope)));
+  const id = await started(h, repo);
+  await ended(h, id);
+  assert.equal(endCode(h, id), 0, "the run did not end");
+  assert.ok(await run(Deferred.isDone(slow.overflowed)), "the slow subscriber was not marked overflowed");
+  assert.equal(await run(Queue.size(slow.queue)), 3, "the queue grew beyond its bound");
+  assert.ok(eventsOf(h, id).length > 3, "the other subscriber missed events");
+  await run(Scope.close(scope, Exit.void));
 });

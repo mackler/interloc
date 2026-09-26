@@ -25,7 +25,7 @@ export type WebServer = Readonly<{ handler: Effect.Effect<HttpServerResponse.Htt
 /** One open tab: the signal that the server is closing, and the signal that the tab's session has ended. */
 type Open = Readonly<{ closing: Deferred.Deferred<void>; done: Deferred.Deferred<void> }>;
 
-export const makeWebServer = (manager: RunManager, distDir: string): Effect.Effect<WebServer> =>
+export const makeWebServer = (manager: RunManager, distDir: string, queueBound: number = QUEUE_BOUND): Effect.Effect<WebServer> =>
   Effect.gen(function* () {
     const open = yield* Ref.make<ReadonlySet<Open>>(new Set());
     const closeAll = Ref.get(open).pipe(
@@ -38,11 +38,27 @@ export const makeWebServer = (manager: RunManager, distDir: string): Effect.Effe
         ),
       ),
     );
-    return { handler: handlerOf(manager, distDir, open), closeAll };
+    return { handler: handlerOf(manager, distDir, open, queueBound), closeAll };
+  });
+
+/** The bound of a tab's forwarding queue (finding 13 of docs/gui-review.md; requirements, open point 1). */
+export const QUEUE_BOUND = 1000;
+
+/**
+ * A tab's subscription to the broadcast (finding 13): events go to a queue of at most `bound`; `overflowed` is
+ * completed when the tab has fallen that far behind, so that the session closes it and the tab recovers by replay.
+ */
+export const subscribeBounded = (manager: Pick<RunManager, "subscribe">, bound: number): Effect.Effect<Readonly<{ queue: Queue.Queue<Broadcast>; overflowed: Deferred.Deferred<void> }>, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    // A dropping queue: its offer never suspends, so the run and the other tabs never wait for a slow tab.
+    const queue = yield* Queue.dropping<Broadcast>(bound);
+    const overflowed = yield* Deferred.make<void>();
+    yield* manager.subscribe((event) => Queue.offer(queue, event).pipe(Effect.flatMap((taken) => (taken ? Effect.void : Deferred.succeed(overflowed, undefined).pipe(Effect.asVoid)))));
+    return { queue, overflowed };
   });
 
 /** The handler of every request. */
-const handlerOf = (manager: RunManager, distDir: string, open: Ref.Ref<ReadonlySet<Open>>): Effect.Effect<HttpServerResponse.HttpServerResponse, never, WebServerServices> =>
+const handlerOf = (manager: RunManager, distDir: string, open: Ref.Ref<ReadonlySet<Open>>, queueBound: number): Effect.Effect<HttpServerResponse.HttpServerResponse, never, WebServerServices> =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const fs = yield* FileSystem.FileSystem;
@@ -54,7 +70,7 @@ const handlerOf = (manager: RunManager, distDir: string, open: Ref.Ref<ReadonlyS
     if (pathname === "/ws") {
       const socket = yield* request.upgrade.pipe(Effect.option);
       if (socket._tag === "None") return HttpServerResponse.text("a WebSocket upgrade was expected", { status: 400 });
-      yield* session(manager, socket.value, fs, path, open);
+      yield* session(manager, socket.value, fs, path, open, queueBound);
       return HttpServerResponse.empty();
     }
     // The page: index.html at /, and the build's files; a path that leaves the build is not found.
@@ -72,7 +88,7 @@ const handlerOf = (manager: RunManager, distDir: string, open: Ref.Ref<ReadonlyS
  * then hello and replay are written, and every buffered and later event except those the snapshot holds
  * (inSnapshot, a boundary per replayed run). The frames of the page are handled in order until the socket closes.
  */
-const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.FileSystem, path: Path.Path, open: Ref.Ref<ReadonlySet<Open>>): Effect.Effect<void, never, Scope.Scope> =>
+const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.FileSystem, path: Path.Path, open: Ref.Ref<ReadonlySet<Open>>, queueBound: number): Effect.Effect<void, never, Scope.Scope> =>
   Effect.scoped(
     Effect.gen(function* () {
       // Registered for closeAll; `done` is completed however the session ends.
@@ -87,8 +103,7 @@ const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.File
       if (reader._tag === "None") return;
       const writer = yield* socket.writer;
       const send = (message: ServerMessage) => writer.write(JSON.stringify(message)).pipe(Effect.ignore);
-      const buffered = yield* Queue.unbounded<Broadcast>();
-      yield* manager.subscribe((event) => Queue.offer(buffered, event).pipe(Effect.asVoid));
+      const { queue: buffered, overflowed } = yield* subscribeBounded(manager, queueBound);
       const runs = yield* manager.replay;
       yield* send({ type: "hello", cwd: manager.cwd, current: yield* manager.current, incarnation: manager.incarnation });
       yield* send({ type: "replay", runs });
@@ -129,7 +144,12 @@ const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.File
         Effect.andThen(send({ type: "closing" })),
         Effect.andThen(writer.write(new Socket.CloseEvent(1001, "the server is shutting down")).pipe(Effect.ignore)),
       );
-      yield* Effect.race(read, closed);
+      // A tab too far behind (finding 13): told, then closed; its reconnection gets the whole run from the replay.
+      const behind = Deferred.await(overflowed).pipe(
+        Effect.andThen(send({ type: "refused", reason: "this tab fell too far behind the run; reconnecting to receive it again" })),
+        Effect.andThen(writer.write(new Socket.CloseEvent(1013, "too far behind")).pipe(Effect.ignore)),
+      );
+      yield* Effect.raceAll([read, closed, behind]);
     }),
   );
 

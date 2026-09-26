@@ -18,9 +18,10 @@ type Script = { issueCount: number; actions: readonly Action[]; selfCorrection: 
 const arbScript: fc.Arbitrary<Script> = fc.record(
   {
     issueCount: fc.integer({ min: 0, max: 3 }),
-    actions: fc.array(fc.constantFrom(...ACTIONS), { minLength: 3, maxLength: 3 }),
-    selfCorrection: fc.boolean(),
-    hash: fc.constantFrom("h1", "h2", "h3"),
+    // Weighted towards rounds without a correction, so that traces reach later rounds and the hash pauses (finding 9).
+    actions: fc.array(fc.oneof({ arbitrary: fc.constantFrom(...ACTIONS), weight: 1 }, { arbitrary: fc.constantFrom<Action>("rejected", "no_change_needed"), weight: 2 }), { minLength: 3, maxLength: 3 }),
+    selfCorrection: fc.oneof({ arbitrary: fc.constant(false), weight: 4 }, { arbitrary: fc.constant(true), weight: 1 }),
+    hash: fc.constantFrom("h0", "h1", "h2", "h3"),
     decide: fc.boolean(),
     limitAnswer: fc.constantFrom("p", "0", "2"),
   },
@@ -41,9 +42,11 @@ const drive = (scripts: readonly Script[], use: ReviewSetup = setup) => {
     assert.ok(producing.length <= 1 && (producing.length === 0 || t.commands[t.commands.length - 1] === producing[0]), "a batch with a misplaced event command");
     const command: ReviewCommand | undefined = producing[0];
     if (command === undefined) throw new Error("a batch without an event command");
-    // The script of the round in progress; at the limit prompt, the script of the round that would start,
-    // or "0" (stop) once the scripts are used up, so that every trace ends.
-    const script = scripts[Math.min(Math.max(currentRound - 1, 0), scripts.length - 1)];
+    // Finding 9 of docs/gui-review.md: each command takes the script of the round it belongs to. The reviewer and
+    // the planner name their round; the pauses and the observation belong to the round in progress; the limit
+    // prompt takes the script of the round that would start, or "0" (stop) once the scripts are used up.
+    const scriptOf = (round: number) => scripts[Math.min(Math.max(round - 1, 0), scripts.length - 1)];
+    const script = scriptOf(command.kind === "CallReviewer" || command.kind === "CallPlanner" ? command.round : currentRound);
     let event: ReviewEvent | null = null;
     switch (command.kind) {
       case "Halt":
@@ -159,4 +162,100 @@ test("property: a work review ends at the first correction due or decision, logs
     }),
     RUNS,
   );
+});
+
+// Finding 9 of docs/gui-review.md: the first exit of a work review, against an independent model of behaviour 7.
+// The order of the checks after a response is that of src/reviewState.ts: the pauses of the response (none is
+// reachable here, see below), the log and leaveOnAcceptance, then the observation: accepted-without-change (not
+// reachable: an accepted issue leaves first), the unexplained change, the identical content, the idle pause; the round
+// limit when the next round would begin. A non-empty decision at any pause leaves with revise (leaveOnDecision).
+type Exit = Readonly<{ exit: "converged" | "revise" | "RoundLimitStop"; round: number; pauses: readonly string[] }>;
+const model = (scripts: readonly Script[], use: ReviewSetup): Exit => {
+  const scriptOf = (round: number) => scripts[Math.min(round - 1, scripts.length - 1)];
+  const seen: string[] = ["h0"];
+  const pauses: string[] = [];
+  let limit = use.maxRounds;
+  let idle = 0;
+  for (let round = 1; round <= 60; round++) {
+    while (round > limit) {
+      pauses.push("limit");
+      const answer = round - 1 < scripts.length ? scripts[round - 1].limitAnswer : "0";
+      if (answer !== "2") return { exit: "RoundLimitStop", round: round - 1, pauses };
+      limit += 2;
+    }
+    const script = scriptOf(round);
+    if (script.issueCount === 0) return { exit: "converged", round, pauses };
+    const accepted = script.actions.slice(0, script.issueCount).some((a) => a === "accepted" || a === "partially_accepted");
+    if (accepted || script.selfCorrection) return { exit: "revise", round, pauses };
+    const last = seen[seen.length - 1];
+    if (script.hash !== last) {
+      pauses.push("unexplained");
+      if (script.decide) return { exit: "revise", round, pauses };
+    }
+    if (script.hash !== last && seen.includes(script.hash)) {
+      pauses.push("identical");
+      if (script.decide) return { exit: "revise", round, pauses };
+    }
+    seen.push(script.hash);
+    idle += 1;
+    if (idle >= use.maxIdleRounds) {
+      pauses.push("idle");
+      if (script.decide) return { exit: "revise", round, pauses };
+      idle = 0;
+    }
+  }
+  throw new Error("the model did not end");
+};
+/** The pauses that the generated rounds cannot reach: their ids are unique per round, and no reference is set. */
+const UNREACHABLE = /raised again|a second time|considers wrong|against the accepted correction|a repetition of|question from Claude Code/;
+const pausesOf = (trace: readonly ReviewCommand[]): string[] =>
+  trace.flatMap((c) => {
+    if (c.kind === "AskLimit") return ["limit"];
+    if (c.kind !== "AskDecision") return [];
+    return [/unexplained change/.test(c.subject) ? "unexplained" : /alternating versions/.test(c.subject) ? "identical" : /produced no amendment/.test(c.subject) ? "idle" : c.subject];
+  });
+
+test("property: a work review's first exit, its round and its pauses equal the independent model's", () => {
+  fc.assert(
+    fc.property(fc.array(arbScript, { minLength: 1, maxLength: 8 }), (scripts) => {
+      const { finished, state, trace } = drive(scripts, workSetup);
+      const expected = model(scripts, workSetup);
+      assert.equal(finished, expected.exit);
+      assert.equal(state.round, expected.round, "the exit's round");
+      assert.deepEqual(pausesOf(trace), expected.pauses);
+      for (const c of trace) if (c.kind === "AskDecision") assert.doesNotMatch(c.subject, UNREACHABLE, "a pause the generator cannot reach occurred");
+    }),
+    RUNS,
+  );
+});
+
+test("property: after a correction due, nothing follows the round's logged checkpoint but the exit", () => {
+  fc.assert(
+    fc.property(fc.array(arbScript, { minLength: 1, maxLength: 8 }), (scripts) => {
+      const { finished, state, trace } = drive(scripts, workSetup);
+      const script = scripts[Math.min(state.round - 1, scripts.length - 1)];
+      const due = script.issueCount > 0 && (script.selfCorrection || script.actions.slice(0, script.issueCount).some((a) => a === "accepted" || a === "partially_accepted"));
+      if (!due || finished !== "revise") return;
+      const logged = trace.findIndex((c) => c.kind === "Checkpoint" && c.point.stage === "logged" && c.point.round === state.round);
+      assert.ok(logged >= 0, "no logged checkpoint in the round of the correction");
+      const after = trace.slice(logged + 1).map((c) => c.kind);
+      assert.deepEqual(after.filter((k) => k !== "Notify"), ["Finish"], `after the logged checkpoint: ${after}`);
+    }),
+    RUNS,
+  );
+});
+
+test("the generated work reviews reach round 2, every reachable pause and every exit, and never halt with RoundInvalid", () => {
+  const samples = fc.sample(fc.array(arbScript, { minLength: 1, maxLength: 8 }), { numRuns: 400, seed: 20260926 });
+  const reached = new Map<string, number>();
+  const count = (k: string) => reached.set(k, (reached.get(k) ?? 0) + 1);
+  for (const scripts of samples) {
+    const { finished, state, trace } = drive(scripts, workSetup);
+    assert.notEqual(finished, "RoundInvalid", "the driver generated an invalid round");
+    count(`exit:${finished}`);
+    if (state.round >= 2) count("round 2");
+    for (const p of new Set(pausesOf(trace))) count(p);
+  }
+  for (const k of ["exit:converged", "exit:revise", "exit:RoundLimitStop", "unexplained", "identical", "idle", "limit"]) assert.ok((reached.get(k) ?? 0) > 0, `never reached: ${k}`);
+  assert.ok((reached.get("round 2") ?? 0) >= samples.length / 5, `only ${reached.get("round 2")} of ${samples.length} traces reached round 2`);
 });
