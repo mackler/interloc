@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, RunEvent, ServerMessage } from "../../src/protocol.ts";
-import { pagePromptText } from "../../src/prompts.ts";
+import { interviewHelp, pagePromptText } from "../../src/prompts.ts";
 import { interviewSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
@@ -25,6 +25,8 @@ export type RunView = Readonly<{
   left: readonly Message[];
   right: readonly Message[];
   pending: Widget | null;
+  /** The prompts answered so far, in order (finding 5): what a draft is reconciled against, live and after a replay. */
+  answered: readonly number[];
   activity: string;
   busy: boolean;
   timeline: readonly TimelineEntry[];
@@ -69,6 +71,7 @@ export const emptyRun = (id: number): RunView => ({
   left: [],
   right: [],
   pending: null,
+  answered: [],
   activity: "",
   busy: false,
   timeline: [],
@@ -124,6 +127,9 @@ const notifiedEvent = (run: RunView, event: UiEvent): RunView => {
       const body = event.summary === null ? event.message : `${event.message}\n\n**Summary proposed by Claude Code:**\n\n${event.summary}`;
       return { ...withLeft(run, message(run, "program", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
     }
+    case "InterviewOpened":
+      // The page's own help (finding 8): no terminal """ convention, which the page does not implement.
+      return withLeft(run, message(run, "program", interviewHelp(event.heading, "page"), "text"));
     case "QuestionAsked":
       return { ...run, questionOptions: event.options.map((o, i) => ({ label: o.label, sends: String(i + 1) })) };
     case "AgentCallStarted": {
@@ -156,7 +162,7 @@ export const foldEvent = (run: RunView, event: RunEvent): RunView => {
       }
       case "Answered": {
         const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? r.pending.choices.find((c) => c.sends === event.text) : undefined;
-        return { ...withLeft(r, message(r, "user", chosen?.label ?? event.text, "text")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending };
+        return { ...withLeft(r, message(r, "user", chosen?.label ?? event.text, "text")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt] };
       }
       case "Notified":
         return notifiedEvent(r, event.event);

@@ -117,9 +117,9 @@ describe("PromptWidget", () => {
   test("a choice sends its catalog text on one click; typed text is sent with Enter", () => {
     const sent: [number, string][] = [];
     const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: (p: number, t: string) => void sent.push([p, t]) });
-    const buttons = [...root.querySelectorAll("button")].map((b) => b.textContent?.trim());
+    const buttons = [...root.querySelectorAll(".choices button")].map((b) => b.textContent?.trim());
     expect(buttons).toEqual(["No decision", "Quit"]);
-    (root.querySelectorAll("button")[0] as HTMLButtonElement).click();
+    (root.querySelectorAll(".choices button")[0] as HTMLButtonElement).click();
     const input = one(root, "input[name=answer]") as HTMLInputElement;
     type(input, "keep the rejection");
     input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -136,6 +136,43 @@ describe("PromptWidget", () => {
     expect(root.querySelector("textarea[name=answer]")).not.toBe(null);
     const permission = show(PromptWidget, { widget: widget(prompts.permissionPrompt), onAnswer: () => undefined });
     expect(permission.querySelector("[name=answer]")).toBe(null);
+  });
+
+  // Finding 6 of docs/gui-review.md: an input method's Enter is not an answer; a visible Send and a persistent label.
+  const key = (el: Element, init: KeyboardEventInit) => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true, ...init }));
+    flushSync();
+  };
+  test("Enter while an input method is composing sends nothing, on the line field and the message field", () => {
+    const sent: string[] = [];
+    const line = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const input = one(line, "input[name=answer]") as HTMLInputElement;
+    type(input, "unfinished composition");
+    key(input, { isComposing: true });
+    const message = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const area = one(message, "textarea[name=answer]") as HTMLTextAreaElement;
+    type(area, "unfinished too");
+    key(area, { isComposing: true });
+    key(area, { shiftKey: true });
+    expect(sent).toEqual([]);
+    key(input, {});
+    key(area, {});
+    expect(sent).toEqual(["unfinished composition", "unfinished too"]);
+  });
+
+  test("a Send button sends the field's text and is disabled while the field is empty; the field keeps its label", () => {
+    const sent: string[] = [];
+    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const send = one(root, "button[name=send]") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    type(one(root, "input[name=answer]") as HTMLInputElement, "keep it");
+    expect(send.disabled).toBe(false);
+    send.click();
+    flushSync();
+    expect(sent).toEqual(["keep it"]);
+    expect(root.querySelector("label")?.textContent).toBe("Your answer");
+    const message = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt), onAnswer: () => undefined });
+    expect(message.querySelector("label")?.textContent).toBe("Your message");
   });
 
   test("without a pending prompt nothing can be sent", () => {
@@ -193,5 +230,60 @@ describe("TopBar", () => {
     expect(idle.textContent).toMatch(/reconnecting/);
     const ended = show(TopBar, { run: { ...run, ended: 0 }, connection: "open", onStop: () => undefined });
     expect((one(ended, "button[name=stop]") as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+// Finding 5 of docs/gui-review.md: the page mounted whole over a fake WebSocket; a draft does not survive its prompt.
+describe("App and the draft", () => {
+  class FakeWebSocket {
+    static last: FakeWebSocket | null = null;
+    sent: string[] = [];
+    onopen: ((e: unknown) => void) | null = null;
+    onmessage: ((e: { data: unknown }) => void) | null = null;
+    onclose: ((e: unknown) => void) | null = null;
+    onerror: ((e: unknown) => void) | null = null;
+    constructor(_url: string) {
+      FakeWebSocket.last = this;
+    }
+    send(data: string) {
+      this.sent.push(data);
+    }
+    close() {}
+    receive(m: unknown) {
+      this.onmessage?.({ data: JSON.stringify(m) });
+      flushSync();
+    }
+  }
+  const started = { _tag: "Started", project: "/p", task: "t", time: "x" };
+  const asked = (prompt: number) => ({ _tag: "Asked", prompt, ...promptOf(prompts.decisionPrompt(`issue ${prompt}`)) });
+  const openPage = async () => {
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    const { default: App } = await import("./components/App.svelte");
+    const root = show(App, {});
+    const ws = FakeWebSocket.last!;
+    ws.receive({ type: "hello", cwd: "/p", current: 1, incarnation: "a" });
+    return { root, ws };
+  };
+  const field = (root: ParentNode) => one(root, "[name=answer]") as HTMLInputElement;
+  afterEach(() => vi.unstubAllGlobals());
+
+  test("another tab's answer withdraws the draft with a notice; the next prompt's field is empty", async () => {
+    const { root, ws } = await openPage();
+    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    type(field(root), "draft for question one");
+    ws.receive({ type: "event", run: 1, seq: 2, event: { _tag: "Answered", prompt: 1, text: "" } });
+    ws.receive({ type: "event", run: 1, seq: 3, event: asked(2) });
+    expect(field(root).value).toBe("");
+    expect(root.textContent).toMatch(/answered in another tab; your unsent text was discarded: «draft for question one»/);
+  });
+
+  test("after a reconnection whose replay answered the prompt, the draft is withdrawn with a notice", async () => {
+    const { root, ws } = await openPage();
+    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    type(field(root), "draft for question one");
+    ws.receive({ type: "hello", cwd: "/p", current: 1, incarnation: "a" });
+    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1), { _tag: "Answered", prompt: 1, text: "" }, asked(2)] }] });
+    expect(field(root).value).toBe("");
+    expect(root.textContent).toMatch(/your unsent text was discarded: «draft for question one»/);
   });
 });

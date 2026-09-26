@@ -197,3 +197,25 @@ describe("the server closing", () => {
     expect(next.notices.at(-1)).toBe("The server has ended. The page reconnects when it is started again.");
   });
 });
+
+// Finding 5 of docs/gui-review.md: the view keeps the prompts that were answered, live and after a replay alike.
+describe("answered prompts", () => {
+  test("answered lists the prompts of the Answered events in order, equal between the live fold and the replay", () => {
+    const events: RunEvent[] = [started, asked(1, prompts.decisionPrompt("x")), { _tag: "Answered", prompt: 1, text: "" }, asked(2, prompts.decisionPrompt("y")), { _tag: "Answered", prompt: 2, text: "a" }, asked(3, prompts.decisionPrompt("z"))];
+    const liveRun = fold(live(events)).run;
+    expect(liveRun?.answered).toEqual([1, 2]);
+    expect(replayed(events).run?.answered).toEqual(liveRun?.answered);
+  });
+});
+
+// Finding 8 of docs/gui-review.md: the page renders the interview's help without the terminal's """ convention.
+describe("the interview's opening help", () => {
+  test("the page message names /done, /quit and Shift+Enter, and has no triple quotes", () => {
+    const s = fold(live([started, notified({ _tag: "InterviewOpened", heading: "Interview" })]));
+    const body = s.run?.left.at(-1)?.body ?? "";
+    expect(body).toBe(prompts.interviewHelp("Interview", "page"));
+    expect(body).toMatch(/Shift\+Enter/);
+    expect(body).toMatch(/\/done/);
+    expect(body).not.toMatch(/"""/);
+  });
+});

@@ -20,7 +20,8 @@ export const interview = (opening: string, heading: string): Effect.Effect<void,
   Effect.gen(function* () {
     const store = yield* Store;
     const ui = yield* Ui;
-    yield* ui.say(`\n${heading}. Commands: /done = end the interview; /quit = end the run; """ on its own line starts and ends a message of several lines.`);
+    // Each interface renders its own help (finding 8 of docs/gui-review.md): the terminal its """ convention, the page Shift+Enter.
+    yield* ui.notify({ _tag: "InterviewOpened", heading });
     yield* store.converse(`## ${heading}\n\n`);
     let prompt = opening;
     for (;;) {

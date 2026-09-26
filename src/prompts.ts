@@ -316,3 +316,10 @@ export function pagePromptText(kind: string, text: string): string {
       return text.replace(/\s*>\s*$/, "").trim();
   }
 }
+
+/** The interview's opening help (finding 8 of docs/gui-review.md), for the terminal or the page. */
+export function interviewHelp(heading: string, ui: "terminal" | "page"): string {
+  return ui === "terminal"
+    ? `\n${heading}. Commands: /done = end the interview; /quit = end the run; """ on its own line starts and ends a message of several lines.`
+    : `${heading}. /done ends the interview, /quit ends the run; Shift+Enter starts a new line.`;
+}

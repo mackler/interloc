@@ -61,6 +61,7 @@ export const UiEventSchema = Schema.Union([
   tagged("AgentCallEnded", { agent: AgentSchema, ok: Schema.Boolean }),
   tagged("QuestionAsked", { question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) }),
   tagged("InterviewTurn", { heading: Str, message: Str, summary: Schema.NullOr(Str) }),
+  tagged("InterviewOpened", { heading: Str }),
 ]);
 
 const ChoiceSchema = Schema.Struct({ label: Str, sends: Str });

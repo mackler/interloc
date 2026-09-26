@@ -1,4 +1,4 @@
-// The structured events of a run for a user interface (decision Q5): the terminal ignores them, the scripted Ui
+// The structured events of a run for a user interface (decision Q5): the terminal ignores them but InterviewOpened, the scripted Ui
 // records them, the web Ui turns them into the page's panels, activity line and progress. Pure; types only from src/.
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
@@ -22,7 +22,9 @@ export type UiEvent =
   | Readonly<{ _tag: "ToolUsed"; agent: Agent; tool: string; target: string }>
   | Readonly<{ _tag: "AgentCallEnded"; agent: Agent; ok: boolean }>
   | Readonly<{ _tag: "QuestionAsked"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
-  | Readonly<{ _tag: "InterviewTurn"; heading: string; message: string; summary: string | null }>;
+  | Readonly<{ _tag: "InterviewTurn"; heading: string; message: string; summary: string | null }>
+  /** The interview begins; each interface renders its own help (finding 8 of docs/gui-review.md). */
+  | Readonly<{ _tag: "InterviewOpened"; heading: string }>;
 
 const AGENT_LABEL: Record<Agent, string> = { claude: "Claude Code", codex: "Codex" };
 /** The name of a phase as the progress display shows it. */
@@ -69,5 +71,7 @@ export const describeEvent = (event: UiEvent): string => {
       return `question: ${event.question} (${plural(event.options.length, "option")})`;
     case "InterviewTurn":
       return `${event.heading}: ${event.message}`;
+    case "InterviewOpened":
+      return `${event.heading} opened`;
   }
 };

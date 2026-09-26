@@ -3,6 +3,7 @@
   // only the newest run, in progress or ended, and offers a new task when it has ended].
   import { Button } from "m3-svelte";
   import type { ClientMessage } from "../../../src/protocol.ts";
+  import { type Draft, draftFor, pendingKey, reconcile } from "../draft.ts";
   import { connect, type Connection } from "../socket.ts";
   import { initialState, notice, reduce, type ViewState } from "../state.ts";
   import ActivityLine from "./ActivityLine.svelte";
@@ -20,6 +21,8 @@
   // After a run has ended, the form is shown again once the user asks for a new task.
   let formWanted = $state(false);
   let noticesSeen = $state(0);
+  // The unsent text of the pending prompt (finding 5), reconciled with the view after every message, live or replayed.
+  let draft = $state<Draft | null>(null);
 
   const send = (m: ClientMessage) => connection?.send(m);
   $effect(() => {
@@ -27,6 +30,9 @@
     connection = connect(url, {
       onMessage: (m) => {
         view = reduce(view, m);
+        const reconciled = reconcile(draft, view);
+        draft = reconciled.draft;
+        if (reconciled.notice !== null) view = notice(view, reconciled.notice);
         if (m.type === "event" && m.event._tag === "Started") formWanted = false;
         if (view.needsReconnect) connection?.reconnect();
       },
@@ -60,7 +66,10 @@
       <TimelineRail timeline={run.timeline} busy={run.busy} />
       <div class="left">
         <ChatPanel title="You and plan-review" messages={run.left} empty="The run has started." />
-        <PromptWidget widget={run.pending} onAnswer={(prompt, text) => send({ type: "answer", incarnation: view.incarnation ?? "", run: run.id, prompt, text })} />
+        <PromptWidget
+          widget={run.pending}
+          bind:text={() => draftFor(draft, pendingKey(view)), (text) => { const key = pendingKey(view); draft = key === null ? null : { key, text }; }}
+          onAnswer={(prompt, text) => send({ type: "answer", incarnation: view.incarnation ?? "", run: run.id, prompt, text })} />
         {#if latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
         {#if run.ended !== null}
           <div class="ended">

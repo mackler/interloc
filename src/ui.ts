@@ -7,6 +7,7 @@ import { Effect, Layer, type Scope, Semaphore } from "effect";
 import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
 import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
+import { interviewHelp } from "./prompts.ts";
 import { Ui as UiService, type UiShape } from "./services.ts";
 
 /**
@@ -63,7 +64,8 @@ export const terminalUi = (
 
     return {
       say: (text) => Effect.sync(() => void output.write(text + "\n")),
-      notify: () => Effect.void,
+      // The terminal prints only the interview's opening help (finding 8 of docs/gui-review.md); other events print nothing.
+      notify: (event) => (event._tag === "InterviewOpened" ? Effect.sync(() => void output.write(interviewHelp(event.heading, "terminal") + "\n")) : Effect.void),
       ask: (prompt) =>
         Effect.gen(function* () {
           yield* showPrompt(prompt);

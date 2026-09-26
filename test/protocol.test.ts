@@ -37,6 +37,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("AgentCallEnded" as const), agent, ok: fc.boolean() }),
   fc.record({ _tag: fc.constant("QuestionAsked" as const), question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }) }),
   fc.record({ _tag: fc.constant("InterviewTurn" as const), heading: text, message: text, summary: fc.option(text, { nil: null }) }),
+  fc.record({ _tag: fc.constant("InterviewOpened" as const), heading: text }),
 );
 const promptTexts = [prompts.decisionPrompt("x"), prompts.limitPrompt(3, "go"), prompts.permissionPrompt, prompts.interviewMessagePrompt, "unknown > "];
 const runEvent: fc.Arbitrary<RunEvent> = fc.oneof(

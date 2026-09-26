@@ -21,6 +21,7 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   AgentCallEnded: [{ _tag: "AgentCallEnded", agent: "claude", ok: false }, /Claude Code call ended: failed/],
   QuestionAsked: [{ _tag: "QuestionAsked", question: "Which?", options: [{ label: "A", description: "" }] }, /question: Which\? \(1 option\)/],
   InterviewTurn: [{ _tag: "InterviewTurn", heading: "Interview", message: "Hello", summary: null }, /Interview: Hello/],
+  InterviewOpened: [{ _tag: "InterviewOpened", heading: "Interview" }, /Interview opened/],
 };
 
 for (const [tag, [event, expected]] of Object.entries(examples)) {

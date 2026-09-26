@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { Effect, Fiber } from "effect";
 import type { RunError } from "../src/errors.ts";
 import type { UiShape } from "../src/services.ts";
+import * as prompts from "../src/prompts.ts";
 import { terminalUi } from "../src/ui.ts";
 
 type Streams = { input: PassThrough; output: PassThrough; written: () => string };
@@ -123,4 +124,12 @@ test("notify writes nothing to the terminal", async () => {
   const io = streams();
   await withUi(io, (ui) => ui.notify({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }));
   assert.equal(io.written(), "");
+});
+
+// Finding 8 of docs/gui-review.md: the terminal renders the interview's opening help, with its """ convention.
+test("notify renders the interview's opening help in the terminal, with the multiline convention", async () => {
+  const io = streams();
+  await withUi(io, (ui) => ui.notify({ _tag: "InterviewOpened", heading: "Interview" }));
+  assert.ok(io.written().includes(prompts.interviewHelp("Interview", "terminal")));
+  assert.match(io.written(), /""" on its own line/);
 });

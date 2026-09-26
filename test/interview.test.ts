@@ -89,3 +89,17 @@ test("the question phase notifies its beginning and end and every interview turn
   assert.ok(probe.ui.said.includes("\nAnything to add?\n"));
   assert.ok(probe.ui.said.includes("Summary proposed by Claude Code:\n\n# Requirements\n\nNone.\n"));
 });
+
+// Finding 8 of docs/gui-review.md: the interview's opening help is a structured event, rendered per interface.
+test("the interview's opening is an InterviewOpened event, not a terminal-only say", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["hi", ""],
+    steps: [{ output: { questions: [] } }, { output: turn("Done.", true, "# Requirements\n\nNone.") }, { output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: { questionPhase: true },
+  });
+  await runTask(layer);
+  assert.ok(probe.ui.notified.some((e) => e._tag === "InterviewOpened"), "no InterviewOpened event");
+  assert.ok(!probe.ui.said.some((line) => line.includes('"""')), "the terminal's multiline convention was said to every interface");
+});
