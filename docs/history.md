@@ -350,3 +350,6 @@ last run in memory).
 - Resuming an interrupted run: wanted by the developer, not yet designed.
 - An `ndt`-style launcher shared across projects: possible later; not needed for one development
   clone.
+- Forcing a two-round Codex review to observe a thread's context under `runStreamed`: four real loops
+  converged in round 1 with no issue, `countMinor` is already true, and no honest lever was left. Recorded
+  as not established rather than provoked artificially (26 Sep 2026).

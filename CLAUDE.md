@@ -134,12 +134,12 @@ followed by hand.
 
 ## Facts established by runs in the developer's containers
 
-Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
+Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect), 26 Sep 2026 (the web GUI and the work review).
 
 - Agent SDK 0.3.283 (bundles Claude Code 2.1.283; upgraded from 0.3.278 on 26 Sep 2026 because Opus 5.5 requires Claude Code 2.1.280 or newer — the SDK's bundled Claude Code, not the container's `claude`, is what a run uses) uses the container's existing login; no API key. The prototype `prototypes/proto.ts` passed on 0.3.283 (26 Sep 2026: login credentials, hook denial, `AskUserQuestion` and permission requests in `canUseTool`); the real run of the upgrade procedure is the next run.
 - `AskUserQuestion` reaches `canUseTool` under `auto` mode. Resuming one session with a different permission mode per call works.
 - Structured output is delivered through a tool named `StructuredOutput`; a hook that denies all tools also denies the final report.
-- Codex SDK 0.155.1: one thread keeps context across turns, and each turn accepts its own `outputSchema`. (Established with `thread.run`; the adapter now uses `thread.runStreamed`, and the fact is to be re-verified in the real run of the web GUI's stage 6.)
+- Codex SDK 0.155.1: one thread keeps context across turns, and each turn accepts its own `outputSchema`. Established with `thread.run`. The adapter now uses `thread.runStreamed`, under which four real turns (26 Sep 2026) each accepted their `outputSchema` and decoded, but every one was the first turn of its own thread, so the context half of the fact is not re-established; see "Not yet known".
 - Claude Code writes to its state file on every call. In the developer's projects that file is `.devcontainer/claude.json`, a tracked file inside the project, so `config.json` lists it under `ignorePaths`.
 - Effect 4.0.0-rc.117 and `@effect/platform-node` 4.0.0-rc.117. Both agents accept the JSON Schema that `Schema.toJsonSchemaDocument(schema, { onExcessProperty: "error" })` generates from the seven agent schemas: `prototypes/proto-schema.ts` made 28 calls (7 schemas × raw/strict × Codex/Agent SDK), all accepted and all replies decoded; the raw and strict variants were byte-identical. The program sends the raw variant (`prototypes/proto-schema-output/CHOSEN`); the strict transform stays as a tested fallback.
 - `NodeRuntime.runMain` interrupts the main fiber on SIGINT or SIGTERM and then calls the teardown, which sets the exit code (read in the runner's implementation, `@effect/platform-node-shared/dist/NodeRuntime.js`). In terminal mode readline receives Ctrl+C itself; `src/ui.ts` passes it on as a real SIGINT.
@@ -147,16 +147,38 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
 - `total_cost_usd` of the Agent SDK's result message is the running total of the session, and a resumed session continues from its saved total (the SDK's own description, confirmed in that run: 0.49, 1.06, 1.77 across the three calls of one session). `usage.jsonl` keeps the value of each call; the usage summary reports each session's last value.
 - The project snapshot (decision Q1 of the functional design review, 25 Sep 2026): `git status --porcelain=v2 -z --untracked-files=all`, every listed path with its record and its working-tree entry — a regular file's content hash, a symbolic link's target (the link itself), a directory, or missing. It detects edits of untracked files, staged replacements, renames and retargeted links; gitignored files are unobserved. `plan-review/` and `ignorePaths` are excluded by one predicate.
 - 25 Sep 2026, the interruption check (plan step 6.3, three runs in the development container): Ctrl+C at the `Enter = start planning` prompt, during a Codex review, and during the Claude Code planning call each ended with `INTERRUPTED by the user. State is preserved in …`, the session id and usage lines, `**Interrupted by the user.**` in `conversation.md`, exit code 130, and no `claude` or `codex` process left running. An aborted Codex turn or Claude Code call leaves no `usage.jsonl` line, because usage is recorded only from a completed result.
+- 26 Sep 2026, the first real runs of the web GUI and the work review: four runs in the development
+  container on a scratch git project, Claude Code Opus 5.5 and Codex `gpt-6-astra`, the question phase off.
+  The work review runs after the execution phase, in a thread of its own, and writes `work-review-1/` with
+  `changes.diff`, `review-1.json` and `round-1.json`, an empty `work-review-log.json` when no issue is
+  raised, and the checkpoint `work-review-1` / round 1 / `reviewed`. Both complete runs converged in round 1
+  with no issue. `changes.diff` was 725 bytes for a two-file task and 3,844 bytes for a small command-line
+  tool; the work review's Codex turn cost 62,718 and 70,547 input tokens against the plan review's 61,688
+  and 82,789, so the diff is negligible beside the context Codex builds from the repository, and a work
+  review costs about what a plan review costs.
+- 26 Sep 2026, the page: served from the container on the published port 8090 and opened from the host's
+  browser, with the start form pre-filled from the server's working directory, the two panels, the progress
+  rail, the model lines and the activity line. Two windows on the same address showed one run alike and
+  either could act on it. Stop in the window that had not started the task ended it in both, twice: during a
+  Codex review it left `plan.md` and `planning-1/cc-0.json` written, no `review-1.json`, a Claude line in
+  `usage.jsonl` and no Codex line; during the Claude Code planning call it left no plan, no `planning-1/`
+  and no `usage.jsonl`, and the usage summary read 0 calls although the session id was already known from
+  the init message. Both left the checkpoint at `run` / `started` and `**Interrupted by the user.**` in
+  `conversation.md`, and the server stayed up: the next task started from the page and archived the
+  previous run's records. So an aborted call of either SDK records no usage, as the terminal check of
+  25 Sep found.
 
 ## Not yet known or not yet built
 
 - The exchange between the agents has run for real once (25 Sep 2026, the plan for the functional design review: 6, 4 and 1 issues in three rounds, all accepted); rejections, clarifications, the pause conditions and the repair turn have run only in scripted tests. That run also showed Codex's turns growing with the thread (147k to 1.35M input tokens over seven turns) until its usage limit halted the run.
 - Resuming an interrupted run is not implemented. The developer wants it later; `plan-review/checkpoint.json` identifies the last committed transition, and `readCheckpoint` in `src/records.ts` verifies that the records it names exist and decode.
-- The web GUI and the work review have run only in the tests (scripted agents, the fake SDK, and Playwright
-  against the server over scripted agents). Not yet observed in a real run: `runStreamed` keeping a Codex
-  thread's context and accepting `outputSchema` per turn, the size of `changes.diff` and of the work
-  review's turns, the page from the host's browser through the published port 8090 (after the container is
-  recreated with the new `ports` line), and a Stop and a second task in the page.
+- Whether `runStreamed` keeps a Codex thread's context across the turns of one review loop is not
+  established. Four real loops on 26 Sep 2026 (two plan reviews, two work reviews) each converged in round 1,
+  so no thread ever took a second turn; the adapter holds one thread per loop by construction
+  (`src/codex.ts`), and the four turns carried four distinct thread ids, one per loop, as intended. The
+  question needs a review loop that runs two rounds, which needs Codex to raise an issue, and it raised none
+  on small greenfield tasks with `countMinor` already true. The same run would settle the remaining half of
+  the `outputSchema` fact above.
 - Threads that the orchestrator starts are stored in the same `~/.codex` volume as the developer's interactive Codex sessions; the effect on `codex resume --last` is unverified.
 
 ## Pinned versions
