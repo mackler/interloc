@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Artifact, pathOf, phaseOf, recordPath, reviewedFile, subjectDir, subjectOf } from "../src/artifacts.ts";
+import { type Artifact, LOG_SUBJECTS, pathOf, phaseOf, recordPath, reviewedFile, subjectDir, subjectOf } from "../src/artifacts.ts";
 
 // Finding 28: one catalog of the records; every path the program writes or names comes from `pathOf`.
 test("pathOf gives every record its path under plan-review/", () => {
@@ -35,4 +35,18 @@ test("subjects: directory names, phases, reviewed files, and the inverse of the 
   assert.deepEqual([phaseOf("questions"), phaseOf("requirements"), phaseOf({ plan: 7 })], [0, 0, 7]);
   assert.deepEqual([reviewedFile("questions"), reviewedFile("requirements"), reviewedFile({ plan: 1 })], [{ kind: "questions" }, { kind: "requirements" }, { kind: "plan" }]);
   assert.deepEqual([subjectOf("question-review"), subjectOf("requirements-review"), subjectOf("planning-12"), subjectOf("planning-0"), subjectOf("execution-1"), subjectOf("planning-x")], ["questions", "requirements", { plan: 12 }, null, null, null]);
+});
+
+// Plan step 2.1: the work review is a fourth subject with its own directory per phase and one log.
+test("the work review subject: directory, phase, log, reviewed file, baseline and change record", () => {
+  assert.equal(subjectDir({ work: 2 }), "work-review-2");
+  assert.deepEqual(subjectOf("work-review-3"), { work: 3 });
+  assert.equal(subjectOf("work-review-0"), null);
+  assert.equal(phaseOf({ work: 4 }), 4);
+  assert.equal(pathOf({ kind: "log", subject: { work: 2 } }), "work-review-log.json");
+  assert.equal(pathOf({ kind: "review", subject: { work: 1 }, round: 2 }), "work-review-1/review-2.json");
+  assert.equal(pathOf({ kind: "baseline" }), "baseline.json");
+  assert.equal(pathOf({ kind: "changes", phase: 3 }), "work-review-3/changes.diff");
+  assert.deepEqual(reviewedFile({ work: 3 }), { kind: "changes", phase: 3 });
+  assert.ok(LOG_SUBJECTS.some((s) => typeof s === "object" && "work" in s), "LOG_SUBJECTS lacks the work review log");
 });

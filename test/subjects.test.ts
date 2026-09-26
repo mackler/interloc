@@ -5,7 +5,7 @@ import { Effect, Layer } from "effect";
 import type { Subject } from "../src/review.ts";
 import * as S from "../src/schema.ts";
 import { Store } from "../src/services.ts";
-import { questionSubject } from "../src/subjects.ts";
+import { planSubject, questionSubject, requirementsSubject, workSubject } from "../src/subjects.ts";
 import { platformLayer } from "../src/platform.ts";
 import { makeStore } from "../src/store.ts";
 import { tempRepo } from "./helpers.ts";
@@ -21,7 +21,10 @@ test("the type of a subject's handler follows the type of its schema (compile-ti
     // @ts-expect-error the handler must take the decoded type of the operation's schema
     applyDecisions: { prompt: "p", schema: S.QuestionList, after: (output: S.ExecOutcome) => Effect.sync(() => void output) },
     amend: null,
-    proceedLabel: "go",
+    proceed: "go",
+    leaveOnAcceptance: false,
+    leaveOnDecision: false,
+    prepare: null,
   };
   void wrong;
 });
@@ -37,4 +40,20 @@ test("the question subject's handlers receive the decoded list and write questio
   assert.deepEqual(JSON.parse(fs.readFileSync(store.questions, "utf8")).questions.map((q: { id: string }) => q.id), ["Q1"]);
   await withStore(subject.respond.after({ dispositions: [], self_corrections: [], reviewer_feedback: "", questions_for_user: [], questions: [] }));
   assert.deepEqual(JSON.parse(fs.readFileSync(store.questions, "utf8")).questions, []);
+});
+
+// Plan step 2.7: the work subject carries the work review's policies; the other subjects keep today's behaviour.
+test("the work subject: its id, file, prompts and policies", () => {
+  const work = workSubject(2, true);
+  assert.deepEqual(work.id, { work: 2 });
+  assert.equal(work.heading, "Work review 2");
+  assert.equal(work.fileLabel, "changes.diff");
+  assert.match(work.reviewPrompt(1), /work-review-2\/changes\.diff/);
+  assert.match(work.respond.prompt(1), /work-review-2\/review-1\.json/);
+  assert.deepEqual([work.proceed, work.leaveOnAcceptance, work.leaveOnDecision, work.amend], [null, true, true, null]);
+  assert.notEqual(work.prepare, null);
+  for (const other of [planSubject(1, true), questionSubject("t"), requirementsSubject()]) {
+    assert.equal(typeof other.proceed, "string");
+    assert.deepEqual([other.leaveOnAcceptance, other.leaveOnDecision, other.prepare], [false, false, null]);
+  }
 });

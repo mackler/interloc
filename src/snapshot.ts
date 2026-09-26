@@ -78,3 +78,6 @@ export const excluded = (path: string, ignorePaths: readonly string[]): boolean 
     const prefix = p.endsWith("/") ? p.slice(0, -1) : p;
     return path === prefix || path.startsWith(`${prefix}/`);
   });
+
+/** The paths of an index listing that a work-review tree leaves out: those `excluded` selects, taken literally (plan 2.3). */
+export const excludedIndexPaths = (paths: readonly string[], ignorePaths: readonly string[]): readonly string[] => paths.filter((p) => excluded(p, ignorePaths));

@@ -220,3 +220,44 @@ export const interviewMessagePrompt = "You > ";
 export const confirmSummaryPrompt = "Enter = confirm the summary; any other text continues the conversation > ";
 /** The choice after an empty agreed question list (behaviour 2). */
 export const startOrTalkPrompt = "\nClaude Code and Codex agree that no question is needed. Enter = start planning; any other text opens a conversation with Claude Code > ";
+
+// ---- work review ----------------------------------------------------------------------------------
+
+/** What the work review of phase k ended with: convergence, or leaving for a planning phase in a round. */
+export type WorkReviewEnd = "converged" | Readonly<{ revisedInRound: number }>;
+
+export function workReviewPrompt(phase: number, round: number, withRequirements: boolean): string {
+  const prefix = `W${phase}`;
+  const log = pathOf({ kind: "log", subject: { work: phase } });
+  const changes = pathOf({ kind: "changes", phase });
+  if (round > 1)
+    return `plan-review/${changes} has been rewritten from the current project for this round.
+${laterRound(changes, log, prefix, round)}`;
+  const requirements = withRequirements
+    ? "plan-review/requirements.md contains the user's confirmed answers and decisions. Raise an issue when the work contradicts it or omits something it requires of a completed step.\n"
+    : "";
+  return `Review the work done in the project since the run began. plan-review/${changes} is the diff of the project against its state at the start of the run (new files in full, committed changes included); read it and the project itself. Do not modify any file.
+Review the work against plan-review/plan.md. Steps that the plan marks as completed are implemented; review their work against the plan. Steps not marked completed in plan-review/plan.md are not yet implemented, and missing work of those steps is not an issue.
+${requirements}Raise an issue for work that does not implement a completed step, contradicts the plan or the requirements, or introduces a defect.
+Put the file path, with a line number where it helps, in the location field.
+${logRules(log, prefix, round)}`;
+}
+
+export function workRespondPrompt(phase: number, round: number): string {
+  return `plan-review/${pathOf({ kind: "review", subject: { work: phase }, round })} contains a review of the work done in the project (the diff in plan-review/${pathOf({ kind: "changes", phase })}).
+${respondRules("the correction will be made in a later execution phase after the plan has been revised; do not modify any file")}
+Every correction, including one that a self-correction calls for, is made in a later execution phase; state in the rationale what the correction requires.
+Do not modify any file.`;
+}
+
+export function revisePlanAfterExecutionPrompt(phase: number, end: Readonly<{ stopped: boolean; workReview: WorkReviewEnd }>): string {
+  const stop = end.stopped ? "\nExecution stopped. The last entry of plan-review/user-decisions.md contains the user's input for this stop." : "";
+  const review =
+    end.workReview === "converged"
+      ? `\nWork review ${phase} found no issue in the work so far.`
+      : `\nWork review ${phase} ended in round ${end.workReview.revisedInRound} with accepted issues or a user decision: plan-review/${pathOf({ kind: "round", subject: { work: phase }, round: end.workReview.revisedInRound })}, plan-review/${pathOf({ kind: "log", subject: { work: phase } })} and the last entries of plan-review/user-decisions.md.`;
+  return `Execution phase ${phase} has ended.${stop}${review}
+Revise plan-review/plan.md: keep the completed steps and their markers, add steps that correct the accepted issues and follow the decisions, and change, add, or remove remaining steps as the current state of the codebase requires.
+If no change to the plan is required, leave the file unchanged. Do not modify any other file. Do not implement anything.
+Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.`;
+}

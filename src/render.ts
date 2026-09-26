@@ -12,7 +12,8 @@ export type RenderableQuestions = Readonly<{
 }>;
 
 /** "Question review", "Requirements review", "Planning phase k": the heading of a subject's rounds. */
-export const subjectHeading = (subject: SubjectId): string => (subject === "questions" ? "Question review" : subject === "requirements" ? "Requirements review" : `Planning phase ${subject.plan}`);
+export const subjectHeading = (subject: SubjectId): string =>
+  subject === "questions" ? "Question review" : subject === "requirements" ? "Requirements review" : "plan" in subject ? `Planning phase ${subject.plan}` : `Work review ${subject.work}`;
 
 export function renderRound(heading: string, round: number, review: Review, response: PlannerResponse): string {
   return `## ${heading}, round ${round}\n\n${renderReview(review)}${renderResponse(response)}`;

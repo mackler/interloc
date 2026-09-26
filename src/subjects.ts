@@ -32,7 +32,10 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output) },
     applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output) },
     amend: null,
-    proceedLabel: "proceed to the interview with the question list as it is",
+    proceed: "proceed to the interview with the question list as it is",
+    leaveOnAcceptance: false,
+    leaveOnDecision: false,
+    prepare: null,
   };
 }
 
@@ -51,7 +54,10 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
       if (ids.length === 0) return Effect.succeed(undefined);
       return interview(prompts.interviewGapsPrompt(recordPath({ kind: "review", subject: id, round }), ids), "Second interview");
     },
-    proceedLabel: "proceed to planning with the requirements as they are",
+    proceed: "proceed to planning with the requirements as they are",
+    leaveOnAcceptance: false,
+    leaveOnDecision: false,
+    prepare: null,
   };
 }
 
@@ -65,6 +71,35 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
     respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlannerResponse, after: null },
     applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
     amend: null,
-    proceedLabel: "proceed to execution with the plan as it is",
+    proceed: "proceed to execution with the plan as it is",
+    leaveOnAcceptance: false,
+    leaveOnDecision: false,
+    prepare: null,
+  };
+}
+
+/**
+ * The work of execution phase k (the work review, plan 2.7): Codex reviews changes.diff and the project; an accepted
+ * issue or a user decision leaves for a planning phase; there is no proceed choice; changes.diff is rewritten before
+ * every round's review.
+ */
+export function workSubject(phase: number, withRequirements: boolean): Subject<PlannerResponse, PlanWriteResult> {
+  const id: SubjectId = { work: phase };
+  return {
+    id,
+    heading: subjectHeading(id),
+    fileLabel: "changes.diff",
+    reviewPrompt: (round) => prompts.workReviewPrompt(phase, round, withRequirements),
+    respond: { prompt: (round) => prompts.workRespondPrompt(phase, round), schema: S.PlannerResponse, after: null },
+    // Never issued: leaveOnDecision ends the loop instead of a planning call (G-R1-1); typed as the plan's.
+    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
+    amend: null,
+    proceed: null,
+    leaveOnAcceptance: true,
+    leaveOnDecision: true,
+    prepare: Effect.gen(function* () {
+      const store = yield* Store;
+      yield* store.changeRecord(phase);
+    }),
   };
 }

@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { Effect } from "effect";
 import fc from "fast-check";
-import { compareSnapshots, decodeStatusV2, excluded, type Snapshot, type SnapshotEntry, type StatusRecord, type WorkingTreeEntry } from "../src/snapshot.ts";
+import { compareSnapshots, decodeStatusV2, excluded, excludedIndexPaths, type Snapshot, type SnapshotEntry, type StatusRecord, type WorkingTreeEntry } from "../src/snapshot.ts";
 import { platformLayer } from "../src/platform.ts";
 import { makeStore } from "../src/store.ts";
 import { tempRepo } from "./helpers.ts";
@@ -168,5 +168,15 @@ test("property: generated file operations are detected between two snapshots exa
       assert.equal(changes.length > 0, oracle(repo) !== oracleBefore, `changes: ${JSON.stringify(changes)}\nops: ${JSON.stringify(second)}`);
     }),
     { numRuns: 25, seed: 20260925 },
+  );
+});
+
+test("property: excludedIndexPaths agrees with excluded for every path", () => {
+  const segment = fc.stringMatching(/^[a-z*?[\]._-]{1,6}$/);
+  const relPath = fc.array(segment, { minLength: 1, maxLength: 3 }).map((s) => s.join("/"));
+  fc.assert(
+    fc.property(fc.array(relPath, { maxLength: 12 }), fc.array(fc.oneof(relPath, relPath.map((p) => p + "/")), { maxLength: 4 }), (paths, ignore) => {
+      assert.deepEqual(excludedIndexPaths(paths, ignore), paths.filter((p) => excluded(p, ignore)));
+    }),
   );
 });

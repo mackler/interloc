@@ -10,7 +10,7 @@ const noQuestions = { questions_for_user: [] };
 test("one accepted issue, then convergence, then finished", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" }],
-    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   });
   assert.equal(await runTask(layer), 1);
@@ -31,7 +31,7 @@ test("a rejected issue raised again produces one prompt", async () => {
       { output: respond([["A", "accepted"], ["B", "rejected"]]), plan: "v2" },
       { output: respond([["B", "rejected"]]) },
     ],
-    reviews: [{ issues: [issue("A"), issue("B")] }, { issues: [issue("B")] }, { issues: [] }],
+    reviews: [{ issues: [issue("A"), issue("B")] }, { issues: [issue("B")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   });
   await runTask(layer);
@@ -47,11 +47,12 @@ test("a rejected issue raised again produces one prompt", async () => {
 test("a stop with a question starts a second planning phase with a new Codex thread", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1" }, { output: noQuestions, plan: "v2" }],
-    reviews: [{ issues: [] }, { issues: [] }],
+    // Plan review 1, work review 1, plan review 2, work review 2.
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [{ status: "needs_input", summary: "step 1", question: "A or B?", remainingWork: "steps 2-3", userInput: "B" }, finished],
   });
   assert.equal(await runTask(layer), 2);
-  assert.equal(probe.reviewer.phases, 2);
+  assert.equal(probe.reviewer.phases, 4);
   assert.ok(fs.existsSync(path.join(probe.dir, "planning-2", "cc-0.json")));
   assert.match(fs.readFileSync(path.join(probe.dir, "user-decisions.md"), "utf8"), /stop in execution phase 1 \(needs_input\): A or B\?\nDecision: B/);
   assert.deepEqual(probe.ui.asked, []);
@@ -61,7 +62,7 @@ test("a stop without a question asks the user for input", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["retry with smaller steps"],
     steps: [{ output: noQuestions, plan: "v1" }, { output: noQuestions }],
-    reviews: [{ issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [{ status: "aborted", summary: "", question: "no status", remainingWork: "", userInput: null }, finished],
   });
   assert.equal(await runTask(layer), 2);
@@ -76,7 +77,7 @@ test("a planning call that changes the project halts the run", async () => {
 test("a change to an ignored path does not halt the run", async () => {
   const { layer } = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1", touchProject: true }],
-    reviews: [{ issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
     config: { ignorePaths: ["a.txt"] },
   });
@@ -95,7 +96,7 @@ test("the round limit offers to proceed to execution", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["p"],
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
-    reviews: [{ issues: [issue("A")] }],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }],
     execs: [finished],
     config: { maxRounds: 1 },
   });
@@ -117,7 +118,7 @@ test("a reversal and a disputed self-correction each produce a prompt and a deci
       { output: reversal, plan: "v3" },
       { output: noQuestions, plan: "v4" },
     ],
-    reviews: [{ issues: [issue("A")] }, { issues: [issue("C")] }, { issues: [] }],
+    reviews: [{ issues: [issue("A")] }, { issues: [issue("C")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   });
   await runTask(layer);
@@ -130,7 +131,7 @@ test("a reversal and a disputed self-correction each produce a prompt and a deci
 
 test("a second run archives the files of the first", async () => {
   const repo = tempRepo();
-  const mk = () => testLayer(repo, { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }], execs: [finished] });
+  const mk = () => testLayer(repo, { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] });
   await runTask(mk().layer, "first");
   fs.writeFileSync(path.join(repo, "plan-review", "config.json"), "{}");
   execFileSync("git", ["-C", repo, "checkout", "-q", "a.txt"]);
@@ -208,7 +209,7 @@ test("the identical-content message names the round after which the content was 
       reject("C", "v5"),
       reject("D", "v4"),
     ],
-    reviews: [{ issues: [issue("A")] }, { issues: [issue("B")] }, { issues: [issue("C")] }, { issues: [issue("D")] }, { issues: [] }],
+    reviews: [{ issues: [issue("A")] }, { issues: [issue("B")] }, { issues: [issue("C")] }, { issues: [issue("D")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { maxIdleRounds: 1, maxRounds: 6 },
   });
@@ -249,7 +250,7 @@ test("a review with two minor issues of the same id halts instead of converging 
   const minor = (id: string) => ({ ...issue(id), severity: "minor" as const });
   const { layer } = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1" }],
-    reviews: [{ issues: [minor("A"), minor("A")] }],
+    reviews: [{ issues: [minor("A"), minor("A")] }, { issues: [] }],
     execs: [finished],
     config: { countMinor: false },
   });
@@ -277,7 +278,7 @@ test("at the round limit, an integer beyond the safe range is an invalid answer 
   const three = testLayer(tempRepo(), {
     answers: ["3"],
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
-    reviews: [{ issues: [issue("A")] }, { issues: [] }],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { maxRounds: 1 },
   });
@@ -295,11 +296,12 @@ test("the checkpoint names the last committed transition: the execution phase af
   };
   const finishedRun = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" }],
-    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   });
   await runTask(finishedRun.layer);
-  assert.deepEqual(point(finishedRun.probe.dir), { subject: "execution", phase: 1, round: 0, stage: "executed" });
+  // The last committed transition of a finished run is the converged round of its last work review.
+  assert.deepEqual(point(finishedRun.probe.dir), { subject: "work-review-1", phase: 1, round: 1, stage: "reviewed" });
 
   const halted = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
@@ -313,13 +315,13 @@ test("the checkpoint names the last committed transition: the execution phase af
 test("the run announces the Codex model it was configured with, or the login's default", async () => {
   const configured = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1" }],
-    reviews: [{ issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
     config: { codexModel: "gpt-test" },
   });
   await runTask(configured.layer);
   assert.ok(configured.probe.ui.said.includes("Codex model: gpt-test"), configured.probe.ui.said.slice(0, 3).join(" | "));
-  const byDefault = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }], execs: [finished] });
+  const byDefault = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] });
   await runTask(byDefault.layer);
   assert.ok(byDefault.probe.ui.said.includes("Codex model: the default of the Codex login"));
 });
@@ -328,7 +330,7 @@ test("the run announces the Codex model it was configured with, or the login's d
 test("the run notifies the phases, the plan write and the execution outcome in order", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     steps: [{ output: noQuestions, plan: "v1", resultText: "plan written" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" }],
-    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   });
   await runTask(layer);
@@ -343,6 +345,9 @@ test("the run notifies the phases, the plan write and the execution outcome in o
       { _tag: "PhaseBegan", phase: { kind: "execution", n: 1 } },
       { _tag: "ExecutionEnded", phase: 1, outcome: finished },
       { _tag: "PhaseEnded", phase: { kind: "execution", n: 1 }, result: "finished" },
+      { _tag: "PhaseBegan", phase: { kind: "work", n: 1 } },
+      { _tag: "LoopFinished", subject: { work: 1 }, result: "converged" },
+      { _tag: "PhaseEnded", phase: { kind: "work", n: 1 }, result: "converged" },
     ],
   );
 });

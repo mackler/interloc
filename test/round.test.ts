@@ -32,31 +32,31 @@ test("validateReview: unique non-empty ids pass; a duplicate or an empty id is R
 });
 
 test("validateRound: the finding-3 counterexample (A rejected, then A accepted) is RoundInvalid naming A", () => {
-  invalid(validateRound(validated(review(issue("A"))), respond([["A", "rejected"], ["A", "accepted"]]), [], 1, 1), /more than one disposition for: A/);
+  invalid(validateRound(validated(review(issue("A"))), respond([["A", "rejected"], ["A", "accepted"]]), [], 1, 1, "P"), /more than one disposition for: A/);
 });
 
 test("validateRound: a missing, an unknown and an empty disposition id are RoundInvalid", () => {
   const r = validated(review(issue("A"), issue("B")));
-  invalid(validateRound(r, respond([["A", "accepted"]]), [], 1, 1), /no disposition for: B/);
-  invalid(validateRound(r, respond([["A", "accepted"], ["B", "accepted"], ["C", "rejected"]]), [], 1, 1), /not in the review: C/);
-  invalid(validateRound(r, respond([["A", "accepted"], ["", "accepted"]]), [], 1, 1), /empty/);
+  invalid(validateRound(r, respond([["A", "accepted"]]), [], 1, 1, "P"), /no disposition for: B/);
+  invalid(validateRound(r, respond([["A", "accepted"], ["B", "accepted"], ["C", "rejected"]]), [], 1, 1, "P"), /not in the review: C/);
+  invalid(validateRound(r, respond([["A", "accepted"], ["", "accepted"]]), [], 1, 1, "P"), /empty/);
 });
 
 test("validateRound: references are normalised (Q3): sentinels become null, unknown and not-accepted references are dropped with a note", () => {
   const r = validated(review(issue("C")));
   const history = [entry("A", "accepted"), entry("B", "rejected")];
-  const plain = ok(validateRound(r, respond([["C", "rejected"]]), history, 1, 2));
+  const plain = ok(validateRound(r, respond([["C", "rejected"]]), history, 1, 2, "P"));
   assert.deepEqual(plain.dispositions.map((d) => [d.duplicateOf, d.reverses]), [[null, null]]);
   assert.deepEqual(plain.notes, []);
 
   const response = respond([["C", "rejected"]]);
   const withRefs: PlannerResponse = { ...response, dispositions: [{ ...response.dispositions[0], duplicate_of: "Z", reverses: "B" }] };
-  const round = ok(validateRound(r, withRefs, history, 1, 2));
+  const round = ok(validateRound(r, withRefs, history, 1, 2, "P"));
   assert.deepEqual(round.dispositions.map((d) => [d.duplicateOf, d.reverses]), [[null, null]]);
   assert.deepEqual(round.notes.map((n) => [n.id, n.field, n.named, n.reason]), [["C", "duplicate_of", "Z", "unknown"], ["C", "reverses", "B", "not_accepted"]]);
 
   const accepted: PlannerResponse = { ...response, dispositions: [{ ...response.dispositions[0], duplicate_of: "B", reverses: "A" }] };
-  const kept = ok(validateRound(r, accepted, history, 1, 2));
+  const kept = ok(validateRound(r, accepted, history, 1, 2, "P"));
   assert.deepEqual(kept.dispositions.map((d) => [d.duplicateOf, d.reverses]), [["B", "A"]]);
   assert.deepEqual(kept.notes, []);
 });
@@ -64,16 +64,16 @@ test("validateRound: references are normalised (Q3): sentinels become null, unkn
 test("validateRound: an empty self-correction id is replaced by a generated id; a generated id that exists in the log is RoundInvalid", () => {
   const r = validated(review(issue("A")));
   const response = respond([["A", "accepted"]], { self_corrections: [{ id: "", new_action: "plan_error", explanation: "x" }, { id: "B", new_action: "accepted", explanation: "y" }] });
-  const round = ok(validateRound(r, response, [entry("B", "rejected")], 2, 3));
+  const round = ok(validateRound(r, response, [entry("B", "rejected")], 2, 3, "P"));
   assert.deepEqual(round.selfCorrections.map((s) => [s.id, s.generated]), [["P2-S3-1", true], ["B", false]]);
-  invalid(validateRound(r, response, [entry("B", "rejected"), entry("P2-S3-1", "plan_error")], 2, 3), /P2-S3-1/);
+  invalid(validateRound(r, response, [entry("B", "rejected"), entry("P2-S3-1", "plan_error")], 2, 3, "P"), /P2-S3-1/);
 });
 
 test("appendRound takes the validated round, leaves its inputs unchanged, and applies the Q2 overlap order", () => {
   const r = validated(review(issue("X")));
   const response = respond([["X", "accepted"]], { self_corrections: [{ id: "X", new_action: "rejected", explanation: "disputed" }, { id: "", new_action: "plan_error", explanation: "other" }] });
   const before: readonly LogEntry[] = Object.freeze([entry("X", "rejected", { round: 1 })]);
-  const round = ok(validateRound(r, response, before, 1, 2));
+  const round = ok(validateRound(r, response, before, 1, 2, "P"));
   const after = log.appendRound(before, round);
   assert.deepEqual(before, [entry("X", "rejected", { round: 1 })]);
   const currentX = after.filter((e) => e.id === "X" && e.superseded !== true);
@@ -90,10 +90,19 @@ test("the detections use the normalised references", () => {
   const r = validated(review(issue("N")));
   const history = [entry("O", "rejected"), entry("A", "accepted")];
   const response = respond([["N", "rejected"]]);
-  const round = ok(validateRound(r, { ...response, dispositions: [{ ...response.dispositions[0], duplicate_of: "O", reverses: "A" }] }, history, 1, 2));
+  const round = ok(validateRound(r, { ...response, dispositions: [{ ...response.dispositions[0], duplicate_of: "O", reverses: "A" }] }, history, 1, 2, "P"));
   assert.deepEqual(log.repeatedUnderNewId(history, round), [["N", "O"]]);
   assert.deepEqual(log.reversals(round), [["N", "A"]]);
   assert.equal(log.acceptedCount(round), 0);
   const id = "N" as IssueId;
   void id;
+});
+
+// Plan step 2.5: generated self-correction ids carry the subject's prefix, so they never look like another subject's.
+test("validateRound generates self-correction ids with the given prefix", () => {
+  const response = respond([["A", "rejected"]], { self_corrections: [{ id: "", new_action: "plan_error" as const, explanation: "x" }] });
+  for (const prefix of ["P", "W", "Q", "G"]) {
+    const round = ok(validateRound(validated(review(issue("A"))), response, [], 2, 3, prefix));
+    assert.equal(round.selfCorrections[0].id, `${prefix}2-S3-1`);
+  }
 });

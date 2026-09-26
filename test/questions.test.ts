@@ -36,7 +36,7 @@ test("question list is amended in review, the interview runs, the summary is con
       { output: turn("Complete.", ["Q1", "Q2"], "# Requirements\n\nQ1: A\nQ2: B because of X") },
       { output: noQuestions, plan: "v1" },                                                // initial plan
     ],
-    reviews: [{ issues: [issue("Q-R1-1", "Q2 is missing")] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [issue("Q-R1-1", "Q2 is missing")] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: withQuestions,
   });
@@ -48,7 +48,7 @@ test("question list is amended in review, the interview runs, the summary is con
   assert.deepEqual(questions.questions.map((x: QuestionEntry) => x.id), ["Q1", "Q2"]);
   assert.match(read(probe.dir, "requirements.md"), /Q2: B because of X/);
   assert.equal((await probe.loadLog("questions"))[0].action, "accepted");
-  assert.equal(probe.reviewer.phases, 3); // question review, requirements review, plan review
+  assert.equal(probe.reviewer.phases, 4); // question review, requirements review, plan review, work review
   assert.ok(probe.planner.prompts.some((p) => p.includes("User: B, because of X")));
   assert.match(probe.planner.prompts.at(-1) ?? "", /requirements\.md contains the user's confirmed answers/);
   const conversation = read(probe.dir, "conversation.md");
@@ -61,21 +61,21 @@ test("an empty agreed list offers the conversation; Enter starts planning", asyn
   const { layer, probe } = testLayer(tempRepo(), {
     answers: [""],
     steps: [{ output: { questions: [] } }, { output: noQuestions, plan: "v1" }],
-    reviews: [{ issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: withQuestions,
   });
   await runTask(layer);
   assert.match(probe.ui.asked[0], /no question is needed/);
   assert.match(read(probe.dir, "requirements.md"), /No question was needed/);
-  assert.equal(probe.reviewer.phases, 2); // no requirements review without a conversation
+  assert.equal(probe.reviewer.phases, 3); // question, plan and work review: no requirements review without a conversation
 });
 
 test("an empty agreed list with a first message opens a conversation", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["use the existing logger", ""],
     steps: [{ output: { questions: [] } }, { output: turn("Noted.", [], "# Requirements\n\nUse the existing logger.") }, { output: noQuestions, plan: "v1" }],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: withQuestions,
   });
@@ -94,7 +94,7 @@ test("an unconfirmed summary continues the conversation", async () => {
       { output: turn("Corrected.", ["Q1"], "Q1: B") },
       { output: noQuestions, plan: "v1" },
     ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: withQuestions,
   });
@@ -115,7 +115,7 @@ test("a gap that Claude Code accepts produces a second interview and a revised r
       { output: turn("Complete.", ["G-R1-1"], "Q1: A\nRetries: 3") },
       { output: noQuestions, plan: "v1" },
     ],
-    reviews: [{ issues: [] }, { issues: [issue("G-R1-1", "retry count absent")] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [issue("G-R1-1", "retry count absent")] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: withQuestions,
   });
@@ -129,7 +129,7 @@ test("/done ends the interview early", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["/done", ""],
     steps: [{ output: { questions: [q("Q1")] } }, { output: turn("Q1?", []) }, { output: turn("Ended.", [], "Open points: Q1 -> default A") }, { output: noQuestions, plan: "v1" }],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: withQuestions,
   });

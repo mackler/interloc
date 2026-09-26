@@ -20,7 +20,7 @@ const kept = (dir: string, name: string): string => fs.readFileSync(path.join(di
 const config = { ...defaultConfig, questionPhase: false };
 
 test("an invalid planner reply gets one repair turn and the corrected reply is used", async () => {
-  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: { dispositions: "x" } }, { output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }], execs: [finished] });
+  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: { dispositions: "x" } }, { output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] });
   assert.equal(await runTask(layer), 1);
   assert.equal(probe.planner.prompts.length, 2);
   assert.match(probe.planner.prompts[1], REPAIR);
@@ -36,17 +36,18 @@ test("a second invalid planner reply stops the run with AgentReplyInvalid naming
 });
 
 test("an invalid Codex review gets one repair turn in the same thread", async () => {
-  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [], raw: '{"findings":[]}' }, { issues: [] }], execs: [finished] });
+  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [], raw: '{"findings":[]}' }, { issues: [] }, { issues: [] }], execs: [finished] });
   assert.equal(await runTask(layer), 1);
-  assert.equal(probe.reviewer.prompts.length, 2);
+  // The review, its repair turn in the same thread, then the work review in a thread of its own.
+  assert.equal(probe.reviewer.prompts.length, 3);
   assert.match(probe.reviewer.prompts[1], REPAIR);
   assert.match(probe.reviewer.prompts[1], /issues/);
-  assert.deepEqual(probe.reviewer.callPhases, [1, 1]);
+  assert.deepEqual(probe.reviewer.callPhases, [1, 1, 2]);
   assert.equal(kept(probe.dir, "codex-1.json"), '{"findings":[]}');
 });
 
 test("a Codex reply that is not JSON is treated as invalid, not as a crash", async () => {
-  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [], raw: "not json" }, { issues: [] }], execs: [finished] });
+  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [], raw: "not json" }, { issues: [] }, { issues: [] }], execs: [finished] });
   assert.equal(await runTask(layer), 1);
   assert.match(probe.reviewer.prompts[1], REPAIR);
   assert.match(probe.reviewer.prompts[1], /JSON/);
@@ -67,7 +68,7 @@ test("an interview turn is validated the same way", async () => {
       { output: { message_to_user: "Noted.", answered_ids: [], complete: true, summary: "# Requirements\n\nhello" } },
       { output: noQuestions, plan: "v1" },
     ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { questionPhase: true },
   });
@@ -92,10 +93,11 @@ const withCodex = (repo: string, sdk: FakeSdk, planner: ScriptedPlanner): Layer.
 
 test("a Codex reply without an issues array gets one repair turn in the same thread and the corrected review is used", async () => {
   const repo = tempRepo();
-  const sdk = new FakeSdk([], [turn('{"x":1}'), turn('{"issues":[]}')]);
+  const sdk = new FakeSdk([], [turn('{"x":1}'), turn('{"issues":[]}'), turn('{"issues":[]}')]);
   const layer = withCodex(repo, sdk, new ScriptedPlanner(pathsOf(repo), [{ output: noQuestions, plan: "v1" }], [finished]));
   assert.equal(await runTask(layer), 1);
-  assert.equal(sdk.threads.length, 1);
+  // The plan review with its repair turn, then the work review's own thread.
+  assert.equal(sdk.threads.length, 2);
   assert.equal(sdk.threads[0].calls.length, 2);
   assert.match(sdk.threads[0].calls[1].input, REPAIR);
   assert.equal(kept(dirOf(repo), "codex-1.json"), '{"x":1}');
@@ -127,7 +129,7 @@ test("a Claude Code planning call without structured output gets one repair turn
   const repo = tempRepo();
   const paths = pathsOf(repo);
   const sdk = new FakeSdk([planWithoutOutput(paths.plan), messages(init("s-1"), success(noQuestions)), messages(init("s-1"), success(report))]);
-  const layer = withClaude(repo, sdk, new ScriptedReviewer(paths, [{ issues: [] }]));
+  const layer = withClaude(repo, sdk, new ScriptedReviewer(paths, [{ issues: [] }, { issues: [] }]));
   assert.equal(await runTask(layer), 1);
   assert.equal(sdk.calls.length, 3);
   assert.match(sdk.calls[1].prompt, REPAIR);

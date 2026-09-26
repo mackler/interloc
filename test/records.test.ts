@@ -58,13 +58,14 @@ test("readQuestions reads the version-2 file and rejects one without the version
 test("readCheckpoint gives null without a file, the checkpoint when its records are complete, and StateFileInvalid otherwise", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     steps: [{ output: { questions_for_user: [] }, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
-    reviews: [{ issues: [issue("A")] }, { issues: [] }],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   });
   await runTask(layer);
   const dir = probe.dir;
   const read = () => Effect.runPromise(readCheckpoint(dir).pipe(Effect.provide(platformLayer)));
-  assert.equal((await read())?.stage, "executed");
+  // A finished run's last transition is its work review's converged round.
+  assert.deepEqual([(await read())?.subject, (await read())?.stage], ["work-review-1", "reviewed"]);
   const write = (point: Record<string, unknown>) => fs.writeFileSync(path.join(dir, "checkpoint.json"), JSON.stringify({ version: 2, ...point, time: "2026-09-25T12:00:00.000Z" }));
   write({ subject: "planning-1", phase: 1, round: 1, stage: "responded" });
   assert.equal((await read())?.stage, "responded");
@@ -81,4 +82,36 @@ test("readCheckpoint gives null without a file, the checkpoint when its records 
   await rejects({ subject: "planning-1", phase: 1, round: 1, stage: "shipped" }, "an unknown stage");
   fs.rmSync(path.join(dir, "checkpoint.json"));
   assert.equal(await read(), null);
+});
+
+// Plan step 2.2: the work review adds baseline.json (read for `started`) and the work-review-<k> subject directory.
+test("readCheckpoint requires baseline.json and the four logs for started, and reads a work-review checkpoint", async () => {
+  const dir = fs.mkdtempSync(path.join(tempRepo(), "records-"));
+  const put = (name: string, value: unknown) => {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), JSON.stringify(value));
+  };
+  const read = () => Effect.runPromiseExit(readCheckpoint(dir).pipe(Effect.provide(platformLayer)));
+  const failure = async () => {
+    const exit = await read();
+    assert.ok(exit._tag === "Failure", "the checkpoint was accepted");
+    return String(exit.cause);
+  };
+  for (const log of ["issue-log.json", "questions-log.json", "requirements-log.json", "work-review-log.json"]) put(log, { version: 2, entries: [] });
+  put("checkpoint.json", { version: 2, subject: "init", phase: 0, round: 0, stage: "started", time: "t" });
+  assert.match(await failure(), /baseline\.json/);
+  put("baseline.json", { version: 2, tree: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", time: "t" });
+  assert.equal((await read())._tag, "Success");
+  fs.rmSync(path.join(dir, "work-review-log.json"));
+  assert.match(await failure(), /work-review-log\.json/);
+  put("work-review-log.json", { version: 2, entries: [] });
+  put("baseline.json", { version: 2, tree: "", time: "t" });
+  assert.match(await failure(), /at tree/);
+
+  const reviewRecord = { issues: [] };
+  put("work-review-1/review-1.json", reviewRecord);
+  put("work-review-1/round-1.json", { version: 2, kind: "no_response", subject: "work-review-1", phase: 1, round: 1, reconstructed: false, review: reviewRecord });
+  put("checkpoint.json", { version: 2, subject: "work-review-1", phase: 1, round: 1, stage: "reviewed", time: "t" });
+  const exit = await read();
+  assert.ok(exit._tag === "Success", `the work-review checkpoint was rejected: ${exit._tag === "Failure" ? String(exit.cause) : ""}`);
 });

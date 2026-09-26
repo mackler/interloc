@@ -17,7 +17,7 @@ import type { Wiring } from "../src/program.ts";
 import type { SubjectId } from "../src/artifacts.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
-import { Planner, type PlannerShape, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Ui, type UiShape } from "../src/services.ts";
+import { Planner, type PlannerShape, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Store, type StoreShape, Ui, type UiShape } from "../src/services.ts";
 import { type Platform, platformLayer } from "../src/platform.ts";
 import { makeStore, storeLayer } from "../src/store.ts";
 import { FakeSdk } from "./fakeSdk.ts";
@@ -116,7 +116,8 @@ export class ScriptedUi implements UiShape {
 }
 
 /** `hang` makes the call wait until it is interrupted, recording the abort signal it was given. */
-export type PlanningStep = { output?: unknown; plan?: string; touchProject?: boolean; hang?: boolean; resultText?: string };
+/** `onCall` runs when the call begins, before anything else (a test captures the state the call finds). */
+export type PlanningStep = { output?: unknown; plan?: string; touchProject?: boolean; hang?: boolean; resultText?: string; onCall?: () => void };
 
 export class ScriptedPlanner implements PlannerShape {
   readonly prompts: string[] = [];
@@ -145,6 +146,7 @@ export class ScriptedPlanner implements PlannerShape {
       this.schemas.push(schema);
       const step = this.steps.shift();
       if (!step) return Effect.die(new Error(`no scripted planning step for: ${prompt.slice(0, 60)}`));
+      step.onCall?.();
       if (step.hang) {
         return Effect.callback((_resume, signal) => {
           this.hangSignals.push(signal);
@@ -170,7 +172,7 @@ export class ScriptedPlanner implements PlannerShape {
  * A scripted review. `plan` makes the reviewer change plan.md during its turn, as Codex could.
  * `raw` replaces the reply text, for a reply that is not a review (or not JSON).
  */
-export type ReviewStep = Review & { plan?: string; raw?: string };
+export type ReviewStep = Review & { plan?: string; raw?: string; touchProject?: boolean; editRecord?: string };
 
 export class ScriptedReviewer implements ReviewerShape {
   phases = 0;
@@ -195,6 +197,9 @@ export class ScriptedReviewer implements ReviewerShape {
           const step = this.reviews.shift();
           if (!step) throw new Error("no scripted review");
           if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
+          if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "codex\n");
+          // A record under plan-review/ that the turn edits, as Codex could (the work review's changes.diff).
+          if (step.editRecord !== undefined) fs.appendFileSync(path.join(this.state.project, "plan-review", step.editRecord), "edited by the reviewer\n");
           return step.raw ?? JSON.stringify({ issues: step.issues });
         }),
     };
@@ -213,7 +218,8 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
-export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; config?: Partial<Config>; platform?: Layer.Layer<Platform> };
+/** `store` wraps the live store of the test layer (a test that changes the project between the agents' calls). */
+export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; config?: Partial<Config>; platform?: Layer.Layer<Platform>; store?: (store: StoreShape) => StoreShape };
 
 /**
  * The live platform with a file system whose writes and renames can fail: `shouldFail(method, count)` is asked
@@ -252,7 +258,8 @@ export function testLayer(repo: string, options: TestOptions = {}): { layer: Lay
   const ui = new ScriptedUi(options.answers ?? []);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? []);
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
-  const store = Layer.provide(storeLayer(repo, config.ignorePaths), options.platform ?? platformLayer);
+  const wrap = options.store ?? ((s: StoreShape) => s);
+  const store = Layer.effect(Store, makeStore(repo, config.ignorePaths).pipe(Effect.map(wrap))).pipe(Layer.provide(options.platform ?? platformLayer));
   const layer = Layer.mergeAll(store, Layer.succeed(Ui, ui), Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer), Layer.succeed(RunConfig, config));
   const dir = path.join(paths.project, "plan-review");
   const loadLog = (subject: SubjectId = { plan: 1 }): Promise<readonly LogEntry[]> =>

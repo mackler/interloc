@@ -44,7 +44,7 @@ const deepFreeze = <T>(value: T): T => {
 const validate = ({ review, history, response }: { review: Review; history: LogEntry[]; response: PlannerResponse }) => {
   const validated = validateReview(review);
   assert.ok(Result.isSuccess(validated), "a generated review with unique ids was rejected");
-  return validateRound(validated.success, response, history, 1, 1);
+  return validateRound(validated.success, response, history, 1, 1, "P");
 };
 
 test("property: a generated valid round validates, its inputs are unchanged, and every review issue gets exactly one current entry", () => {
@@ -94,7 +94,7 @@ test("property: a user decision supersedes earlier entries of its id, and the on
       for (const [round, decision] of steps) {
         const validated = validateReview(round.review);
         if (!Result.isSuccess(validated)) return;
-        const result = validateRound(validated.success, round.response, history, phase, 1);
+        const result = validateRound(validated.success, round.response, history, phase, 1, "P");
         if (!Result.isSuccess(result)) return; // a generated id may collide with the growing history; that is a valid RoundInvalid
         history = log.appendRound(history, result.success);
         if (decision !== null) history = log.appendUserDecision(history, decision[0] as IssueId, decision[1], phase, 1);

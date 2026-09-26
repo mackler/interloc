@@ -44,6 +44,10 @@ export const RoundRecord = Schema.Union([Schema.Struct(validatedFields), Schema.
 export const RoundFile = Schema.Union([Schema.Struct({ version: V2, ...validatedFields }), Schema.Struct({ version: V2, ...noResponseFields }), Schema.Struct({ version: V2, ...invalidFields })]);
 export type RoundRecord = typeof RoundRecord.Type;
 
+/** The tree of the project at the start of the run (decision Q7): the work reviews diff against it. */
+export const Baseline = Schema.Struct({ version: V2, tree: Schema.NonEmptyString, time: Schema.String });
+export type Baseline = typeof Baseline.Type;
+
 // ---- readers ------------------------------------------------------------------------------------
 
 const all = <A, E>(results: readonly Result.Result<A, E>[]): Result.Result<readonly A[], E> => {
@@ -103,8 +107,8 @@ const files = Effect.gen(function* () {
 
 /**
  * The checkpoint of a run directory, verified: the records the named transition implies exist and decode
- * (review and round record from `reviewed` on, the response from `responded` on, the log for `logged`, the
- * execution result for `executed`); null when there is no checkpoint file.
+ * (the four logs and baseline.json for `started`, review and round record from `reviewed` on, the response from
+ * `responded` on, the log for `logged` and `decided`, the execution result for `executed`); null when there is no checkpoint file.
  */
 export const readCheckpoint = (runDir: string): Effect.Effect<Checkpoint | null, RecordsError, Fs> =>
   Effect.gen(function* () {
@@ -126,6 +130,7 @@ export const readCheckpoint = (runDir: string): Effect.Effect<Checkpoint | null,
     switch (checkpoint.stage) {
       case "started":
         for (const subject of LOG_SUBJECTS) yield* logDecodes(subject);
+        yield* required({ kind: "baseline" }, Baseline);
         break;
       case "executed":
         yield* required({ kind: "execution", phase: checkpoint.phase }, S.ExecOutcome);

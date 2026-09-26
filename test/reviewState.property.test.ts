@@ -9,7 +9,7 @@ import { issue, respond } from "./helpers.ts";
 // through `advance`, checked against a small independent model kept in the test.
 
 const RUNS = { numRuns: 150, seed: 20260925 };
-const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceedLabel: "proceed", hasAmend: false, maxRounds: 3, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceed: "proceed", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, maxRounds: 3, maxIdleRounds: 2, countMinor: true };
 const PRODUCING = new Set(["AskLimit", "AskDecision", "CallReviewer", "CallPlanner", "ApplyDecisions", "Amend", "ObserveFile", "Halt", "Finish"]);
 const ACTIONS: readonly Action[] = ["accepted", "partially_accepted", "rejected", "no_change_needed", "clarification_requested"];
 
@@ -28,9 +28,10 @@ const arbScript: fc.Arbitrary<Script> = fc.record(
 );
 
 /** Drives `advance` with scripted answers until it finishes or halts, recording what the model needs. */
-const drive = (scripts: readonly Script[]) => {
-  const config = { maxRounds: setup.maxRounds, maxIdleRounds: setup.maxIdleRounds, countMinor: true };
-  let t: Transition = advance(initialState(setup, config), { kind: "Begin", hash: "h0", log: [] });
+const drive = (scripts: readonly Script[], use: ReviewSetup = setup) => {
+  const config = { maxRounds: use.maxRounds, maxIdleRounds: use.maxIdleRounds, countMinor: true };
+  let t: Transition = advance(initialState(use, config), { kind: "Begin", hash: "h0", log: [] });
+  const trace: ReviewCommand[] = [...t.commands];
   const reviewerCalls: number[] = [];
   const plannerCalls: number[] = [];
   let finished: string | null = null;
@@ -79,9 +80,12 @@ const drive = (scripts: readonly Script[]) => {
         event = { kind: "FileObserved", hash: script.hash };
         break;
     }
-    if (event !== null) t = advance(t.state, event);
+    if (event !== null) {
+      t = advance(t.state, event);
+      trace.push(...t.commands);
+    }
   }
-  return { state: t.state, finished, reviewerCalls, plannerCalls };
+  return { state: t.state, finished, reviewerCalls, plannerCalls, trace };
 };
 
 test("property: the loop finishes only by convergence, an explicit proceed, or a typed halt, and every round has one reviewer call", () => {
@@ -127,6 +131,31 @@ test("property: the limit is respected — no reviewer call beyond the current l
     fc.property(fc.array(arbScript, { minLength: 1, maxLength: 8 }), (scripts) => {
       const { state, reviewerCalls } = drive(scripts);
       assert.ok(reviewerCalls.every((r) => r <= state.limit), `a round beyond the limit: ${reviewerCalls} > ${state.limit}`);
+    }),
+    RUNS,
+  );
+});
+
+// Plan step 2.4: the policies of a work review. A correction due or a user decision ends the trace with
+// revise; no round is logged twice; every logged checkpoint follows the response and the validated record.
+const workSetup: ReviewSetup = { ...setup, subject: { work: 1 }, heading: "Work review 1", fileLabel: "changes.diff", dirName: "work-review-1", proceed: null, leaveOnAcceptance: true, leaveOnDecision: true };
+test("property: a work review ends at the first correction due or decision, logs each round once, and writes only valid logged checkpoints", () => {
+  fc.assert(
+    fc.property(fc.array(arbScript, { minLength: 1, maxLength: 8 }), (scripts) => {
+      const { finished, trace, state } = drive(scripts, workSetup);
+      assert.notEqual(finished, null, "the loop did not end within the bound");
+      assert.notEqual(finished, "proceed", "a work review proceeded");
+      const decisions = trace.filter((c) => c.kind === "RecordDecision");
+      if (decisions.length > 0) assert.equal(finished, "revise", "a decision did not end the loop");
+      assert.ok(decisions.length <= 1, "the loop asked again after a decision");
+      const rounds = state.log.filter((e) => e.source === "review").map((e) => `${e.phase}/${e.round}/${e.id}`);
+      assert.equal(new Set(rounds).size, rounds.length, "a round is in the log twice");
+      trace.forEach((c, i) => {
+        if (c.kind !== "Checkpoint" || c.point.stage !== "logged") return;
+        const earlier = trace.slice(0, i);
+        assert.ok(earlier.some((e) => e.kind === "SaveResponse" && e.round === c.point.round), "logged without the response file");
+        assert.ok(earlier.some((e) => e.kind === "SaveRound" && e.record.kind === "validated" && e.record.round === c.point.round), "logged without a validated round record");
+      });
     }),
     RUNS,
   );

@@ -10,7 +10,7 @@ import { issue, respond } from "./helpers.ts";
 // state machine. The scenario tests of test/run.test.ts remain the behavioural specification; these
 // examples pin each transition.
 
-const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceedLabel: "proceed to execution with the plan as it is", hasAmend: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceed: "proceed to execution with the plan as it is", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
 const start = (config: Partial<{ maxRounds: number; maxIdleRounds: number; countMinor: boolean }> = {}, log: LogEntry[] = []): Transition =>
   advance(initialState(setup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", log });
 // Notify commands are pinned by their own tests below; the sequences of the other commands ignore them.
@@ -256,4 +256,93 @@ test("Notify: proceeding at the round limit finishes the loop with proceed", () 
     proceed.commands.filter((c) => c.kind === "Notify").map((c) => (c as { event: unknown }).event),
     [{ _tag: "LoopFinished", subject: { plan: 1 }, result: "proceed" }],
   );
+});
+
+// Plan step 2.4: the policies of a work review (Q13, Q14, G-R1-1; P1-R1-1 of the earlier run, P1-R1-1 of this one).
+const workSetup: ReviewSetup = { ...setup, subject: { work: 1 }, heading: "Work review 1", fileLabel: "changes.diff", dirName: "work-review-1", proceed: null, leaveOnAcceptance: true, leaveOnDecision: true };
+const workStart = (config: Partial<{ maxRounds: number; maxIdleRounds: number }> = {}, log: LogEntry[] = []): Transition =>
+  advance(initialState(workSetup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", log });
+const allKinds = (t: Transition): string[] => t.commands.map((c) => (c.kind === "Notify" ? `Notify:${c.event._tag}` : c.kind === "Checkpoint" ? `Checkpoint:${c.point.stage}` : c.kind));
+const savedLog = (t: Transition): readonly LogEntry[] => {
+  const saves = t.commands.filter((c) => c.kind === "SaveLog");
+  assert.equal(saves.length, 1, `expected one SaveLog, got ${allKinds(t).join(",")}`);
+  return (saves[0] as { log: readonly LogEntry[] }).log;
+};
+const revised = (t: Transition): void => {
+  assert.deepEqual(allKinds(t).slice(-2), ["Notify:LoopFinished", "Finish"]);
+  assert.deepEqual(last(t), { kind: "Finish", result: "revise" });
+};
+
+test("work review: without a proceed choice, p at the round limit is a stop", () => {
+  const atLimit = run(workStart({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  assert.deepEqual(last(atLimit), { kind: "AskLimit", limit: 1 });
+  assert.equal(halt(advance(atLimit.state, { kind: "LimitAnswer", answer: "p" }))._tag, "RoundLimitStop");
+});
+
+test("work review: an accepted issue ends the loop with revise after the log and the logged checkpoint, without an observation", () => {
+  const t = run(workStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]));
+  assert.deepEqual(allKinds(t).slice(-4), ["SaveLog", "Checkpoint:logged", "Notify:LoopFinished", "Finish"]);
+  assert.deepEqual(last(t), { kind: "Finish", result: "revise" });
+  assert.ok(!kinds(t).includes("ObserveFile"));
+});
+
+test("work review: an effective accepted self-correction ends the loop with revise; the plan subject continues", () => {
+  const self = { self_corrections: [{ id: "W1-R0-1", new_action: "accepted" as const, explanation: "earlier issue is valid" }] };
+  const work = run(workStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]], self));
+  assert.deepEqual(last(work), { kind: "Finish", result: "revise" });
+  const plan = run(start(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]], self));
+  assert.equal(last(plan).kind, "ObserveFile");
+});
+
+test("work review exit (i): a decision at a pause after the response logs the round once with the decision, then checkpoint logged", () => {
+  const log = [entry("A", "clarification_requested")];
+  const asked = run(workStart({}, log), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "clarification_requested"]]));
+  assert.equal(last(asked).kind, "AskDecision");
+  const t = advance(asked.state, { kind: "DecisionGiven", text: "act on it" });
+  assert.deepEqual(allKinds(t), ["RecordDecision", "Checkpoint:decided", "SaveLog", "Checkpoint:logged", "Notify:LoopFinished", "Finish"]);
+  revised(t);
+  const saved = savedLog(t);
+  // The earlier entry, the round's one entry, and the decision: the round is appended once.
+  assert.equal(saved.length, log.length + 2, "the round's entry is not in the log exactly once");
+  assert.equal(saved.at(-1)?.action, "decided_by_user");
+});
+
+test("work review exit (ii): a decision at the idle, unexplained-change or identical-content pause appends nothing and ends after checkpoint decided", () => {
+  const idleAsk = run(workStart({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const unexplainedAsk = run(workStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" });
+  const identicalAsk = run(
+    workStart({ maxIdleRounds: 5 }),
+    { kind: "ReviewDecoded", review: { issues: [issue("A")] } },
+    response([["A", "rejected"]]),
+    { kind: "FileObserved", hash: "h1" },
+    { kind: "DecisionGiven", text: "" },
+    { kind: "ReviewDecoded", review: { issues: [issue("B")] } },
+    response([["B", "rejected"]]),
+    { kind: "FileObserved", hash: "h0" },
+    { kind: "DecisionGiven", text: "" },
+  );
+  for (const [asked, step] of [[idleAsk, "askingIdle"], [unexplainedAsk, "askingUnexplained"], [identicalAsk, "askingIdentical"]] as const) {
+    assert.equal(asked.state.step.name, step);
+    const t = advance(asked.state, { kind: "DecisionGiven", text: "act on it" });
+    assert.deepEqual(allKinds(t), ["RecordDecision", "Checkpoint:decided", "Notify:LoopFinished", "Finish"], step);
+    revised(t);
+    assert.deepEqual(t.state.log, asked.state.log, `${step}: the log changed`);
+  }
+});
+
+test("work review exit (iii): a decision on a reraised issue appends only the decision and writes a second decided checkpoint", () => {
+  const log = [entry("A", "rejected")];
+  const asked = run(workStart({}, log), { kind: "ReviewDecoded", review: { issues: [issue("A")] } });
+  assert.equal(asked.state.step.name, "askingReraised");
+  const t = advance(asked.state, { kind: "DecisionGiven", text: "act on it" });
+  assert.deepEqual(allKinds(t), ["RecordDecision", "Checkpoint:decided", "SaveLog", "Checkpoint:decided", "Notify:LoopFinished", "Finish"]);
+  revised(t);
+  const saved = savedLog(t);
+  assert.equal(saved.length, log.length + 1);
+  assert.deepEqual([saved.at(-1)?.id, saved.at(-1)?.action], ["A", "decided_by_user"]);
+});
+
+test("work review: an empty answer continues the loop as for the plan", () => {
+  const idleAsk = run(workStart({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  assert.deepEqual(last(advance(idleAsk.state, { kind: "DecisionGiven", text: "" })), { kind: "CallReviewer", round: 2 });
 });

@@ -90,8 +90,15 @@ export interface StoreShape {
   converse(markdown: string): Effect.Effect<void, StoreError>;
   recordUsage(line: UsageLine): Effect.Effect<void, StoreError>;
   usageLines(): Effect.Effect<readonly UsageLine[], StoreError>;
-  /** The content hash of a subject's reviewed file; "" when it does not exist. */
+  /**
+   * The hash of what a subject's rounds observe (behaviour 7): the reviewed file's content; for a work review the
+   * diff recomputed from the baseline and the current tree (Q14). "" when it does not exist.
+   */
   fileHash(subject: SubjectId): Effect.Effect<string, StoreError>;
+  /** The hash of the bytes of the reviewed artifact on disk (the guard of behaviour 5); equal to fileHash but for a work review. */
+  recordHash(subject: SubjectId): Effect.Effect<string, StoreError>;
+  /** Writes work-review-<phase>/changes.diff: the diff of the project from the baseline tree to the current one (Q7). */
+  changeRecord(phase: number): Effect.Effect<void, StoreError>;
   saveInvalidReply(agent: "claude" | "codex", content: string): Effect.Effect<string, StoreError>;
   projectSnapshot(): Effect.Effect<Snapshot, StoreError>;
   /** Replaces plan-review/checkpoint.json atomically with the last committed transition (Q6). */

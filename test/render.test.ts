@@ -50,3 +50,7 @@ test("renderRound is the heading followed by renderReview and renderResponse", (
   assert.match(renderReview(review), /^### Codex\n\n- \*\*\[A\]\*\*/);
   assert.match(renderResponse(response), /^### Claude Code\n\n- \*\*\[A\]\*\* accepted/);
 });
+
+test("the heading of a work review", () => {
+  assert.equal(subjectHeading({ work: 2 }), "Work review 2");
+});

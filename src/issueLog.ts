@@ -96,3 +96,14 @@ export function appendUserDecision(log: readonly LogEntry[], id: IssueId, decisi
 export function countedIssues(review: Review, countMinor: boolean): number {
   return countMinor ? review.issues.length : review.issues.filter((i) => i.severity !== "minor").length;
 }
+
+/**
+ * Whether the round acknowledges a defect that needs a planning phase (plan 2.4): a disposition accepted or
+ * partially accepted, or an effective self-correction accepted or plan_error. A self-correction whose id is
+ * an issue of the round's review is superseded by that issue's disposition (the overlap rule of appendRound).
+ */
+export function correctionsDue(round: ValidatedRound): boolean {
+  if (acceptedCount(round) > 0) return true;
+  const reviewed = new Set<string>(round.review.issues.map((i) => i.id));
+  return round.selfCorrections.some((sc) => !reviewed.has(sc.id) && (sc.newAction === "accepted" || sc.newAction === "plan_error"));
+}

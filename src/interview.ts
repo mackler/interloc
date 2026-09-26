@@ -43,5 +43,5 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
     }
 
     const reviewed = yield* reviewLoop(requirementsSubject());
-    yield* ui.notify({ _tag: "PhaseEnded", phase: { kind: "questions" }, result: reviewed });
+    yield* ui.notify({ _tag: "PhaseEnded", phase: { kind: "questions" }, result: reviewed.result });
   });

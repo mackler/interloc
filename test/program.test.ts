@@ -19,7 +19,7 @@ const assertTail = (probe: WiringProbe): void => {
 };
 
 test("a finished run prints the plan path and exits 0", async () => {
-  const { wiring, probe } = testWiring(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }], execs: [finished] });
+  const { wiring, probe } = testWiring(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] });
   assert.equal(await runProgram(["task"], wiring), 0);
   assert.match(said(probe), /Claude Code reports that the task is finished after 1 execution phase\(s\)\./);
   assert.match(said(probe), new RegExp(`Plan: ${path.join(probe.dir, "plan.md")}\\nConversation record: ${probe.dir}/conversation.md`));
@@ -36,7 +36,7 @@ test("a halt prints HALTED and the reason, the session id and the usage, and exi
 
 test("the project directory argument is used, and the config of that project applies", async () => {
   const repo = tempRepo();
-  const { wiring, probe } = testWiring(repo, { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }], execs: [finished], config: { maxRounds: 3 } });
+  const { wiring, probe } = testWiring(repo, { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished], config: { maxRounds: 3 } });
   assert.equal(await runProgram(["task", repo], { ...wiring, cwd: "/nonexistent" }), 0);
   assert.match(said(probe), /round 1 \(limit 3\)/);
 });

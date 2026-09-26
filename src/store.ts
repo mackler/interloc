@@ -9,10 +9,11 @@ import { type Artifact, LOG_SUBJECTS, pathOf, recordPath, reviewedFile, type Sub
 import { FileSystemError, GitError } from "./errors.ts";
 import type { LogEntry, UsageRecord } from "./schema.ts";
 import type { Platform } from "./platform.ts";
-import { type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
+import { Baseline, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
 import { renderDecision, renderFeedback, subjectHeading } from "./render.ts";
 import { type ProjectPath, type RecordPath, Store, type StoreError, type StoreShape } from "./services.ts";
-import { decodeStatusV2, excluded, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
+import { decodeStatusV2, excluded, excludedIndexPaths, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
+import { decodeText } from "./state.ts";
 
 /** The store of one project. `ignorePaths` are the paths the change detection ignores (config). */
 export const makeStore = (projectDir: string, ignorePaths: readonly string[]): Effect.Effect<StoreShape, never, Platform> =>
@@ -69,6 +70,13 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
     const saveRecord = (artifact: Artifact, value: unknown) => writeJson(at(artifact), value);
     const saveLog = (subject: SubjectId, log: readonly LogEntry[]) => saveRecord({ kind: "log", subject }, { version: VERSION, entries: log });
     const converse = (markdown: string) => append(conversationFile, markdown);
+    /** The hash of the bytes of a subject's reviewed artifact; "" when it does not exist. */
+    const recordHash = (subject: SubjectId): Effect.Effect<string, FileSystemError> =>
+      Effect.gen(function* () {
+        const file = at(reviewedFile(subject));
+        if (!(yield* exists(file))) return "";
+        return createHash("sha256").update(yield* io("read", file, fs.readFile(file))).digest("hex");
+      });
 
     /**
      * What is at a working-tree path: a link is the link itself (readLink, which also works for a dangling
@@ -91,17 +99,57 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
         return { type: "file" as const, hash: createHash("sha256").update(bytes).digest("hex") };
       });
 
-    /** One git command in the project. A non-zero exit or a spawn failure is a GitError. */
-    const git = (args: string[]): Effect.Effect<string, GitError> =>
+    /** One git command in the project, with extra environment variables. A non-zero exit or a spawn failure is a GitError. */
+    const git = (args: string[], env: Readonly<Record<string, string>> = {}): Effect.Effect<string, GitError> =>
       Effect.scoped(
         Effect.gen(function* () {
-          const handle = yield* spawner.spawn(ChildProcess.make("git", ["-C", project, ...args]));
+          const options = Object.keys(env).length === 0 ? undefined : { env: { ...env }, extendEnv: true };
+          const handle = yield* spawner.spawn(ChildProcess.make("git", ["-C", project, ...args], options));
           const [out, err] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stdout)), Stream.mkString(Stream.decodeText(handle.stderr))], { concurrency: "unbounded" });
           const code = yield* handle.exitCode;
           if (code !== 0) return yield* Effect.fail(new GitError({ args, message: err.trim() !== "" ? err.trim() : `exit code ${code}` }));
           return out;
         }),
       ).pipe(Effect.catchTag("PlatformError", (e) => Effect.fail(new GitError({ args, message: e.message }))));
+
+    /** A path that git names relative to the project (`rev-parse --git-path`), made absolute. */
+    const gitPath = (name: string) => git(["rev-parse", "--git-path", name]).pipe(Effect.map((out) => path.resolve(project, out.trim())));
+    /**
+     * The tree of the working tree as the work review sees it (decision Q7): a temporary index in the git
+     * directory (outside the working tree, so it can never be staged itself; P1-R2-1), started as a copy of
+     * the repository's index so that tracked files matching .gitignore stay in it (P1-R1-5), then
+     * `git add -A`, then the removal of exactly the paths `excluded` selects, as literal pathspecs (P4-R1-1),
+     * then `git write-tree`. The temporary files are removed on every exit.
+     */
+    const workingTree = (): Effect.Effect<string, StoreError> =>
+      Effect.gen(function* () {
+        const stamp = `${(yield* Clock.currentTimeMillis)}-${process.pid}`;
+        const index = yield* gitPath("index");
+        const temporary = yield* gitPath(`plan-review-index-${stamp}`);
+        const pathspecs = yield* gitPath(`plan-review-pathspecs-${stamp}`);
+        const cleanup = Effect.all([fs.remove(temporary, { force: true }), fs.remove(pathspecs, { force: true })]).pipe(Effect.ignore);
+        const build = Effect.gen(function* () {
+          if (yield* exists(index)) yield* io("copy", index, fs.copyFile(index, temporary));
+          const env = { GIT_INDEX_FILE: temporary };
+          yield* git(["add", "-A", "--", "."], env);
+          const listed = (yield* git(["ls-files", "-z"], env)).split("\0").filter((p) => p !== "");
+          const removed = excludedIndexPaths(listed, ignorePaths);
+          if (removed.length > 0) {
+            yield* writeText(pathspecs, removed.map((p) => p + "\0").join(""));
+            yield* git(["rm", "--cached", "-q", `--pathspec-from-file=${pathspecs}`, "--pathspec-file-nul"], { ...env, GIT_LITERAL_PATHSPECS: "1" });
+          }
+          return (yield* git(["write-tree"], env)).trim();
+        });
+        return yield* build.pipe(Effect.ensuring(cleanup));
+      });
+    const baselineFile = at({ kind: "baseline" });
+    /** The text of the diff from the baseline tree to the current one; null before init wrote the baseline. */
+    const diffText = (): Effect.Effect<string | null, StoreError> =>
+      Effect.gen(function* () {
+        if (!(yield* exists(baselineFile))) return null;
+        const baseline = yield* Effect.fromResult(decodeText(baselineFile, Baseline, yield* readText(baselineFile)));
+        return yield* git(["diff", "--no-color", "--no-ext-diff", baseline.tree, yield* workingTree()]);
+      });
 
     return {
       project,
@@ -124,6 +172,7 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
             for (const name of earlier) yield* io("move", path.join(dir, name), fs.rename(path.join(dir, name), path.join(archive, name)));
           }
           for (const subject of LOG_SUBJECTS) yield* saveLog(subject, []);
+          yield* writeJson(baselineFile, { version: VERSION, tree: yield* workingTree(), time: yield* now });
           yield* writeText(decisionsFile, "");
           yield* writeText(feedbackFile, "");
           yield* writeText(conversationFile, `# Conversation record\n\nTask: ${task}\n\n`);
@@ -180,10 +229,19 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           );
         }),
       fileHash: (subject) =>
+        typeof subject === "object" && "work" in subject
+          ? diffText().pipe(Effect.map((text) => (text === null ? "" : createHash("sha256").update(text).digest("hex"))))
+          : recordHash(subject),
+      recordHash,
+      /** Written to a temporary name and renamed into place, like the JSON records. */
+      changeRecord: (phase) =>
         Effect.gen(function* () {
-          const file = at(reviewedFile(subject));
-          if (!(yield* exists(file))) return "";
-          return createHash("sha256").update(yield* io("read", file, fs.readFile(file))).digest("hex");
+          const file = at({ kind: "changes", phase });
+          const text = (yield* diffText()) ?? "";
+          yield* mkdir(path.dirname(file));
+          const temporary = `${file}.tmp-${process.pid}`;
+          yield* writeText(temporary, text);
+          yield* io("rename", file, fs.rename(temporary, file));
         }),
       /**
        * Keeps a reply that did not match its schema, as plan-review/invalid-replies/<agent>-<n>.json, and returns

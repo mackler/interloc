@@ -48,7 +48,7 @@ test("property: with a write failure injected at any one persistence step, the c
     fc.asyncProperty(fc.integer({ min: 1, max: 60 }), async (failAt) => {
       const { layer, probe } = testLayer(tempRepo(), {
         steps: [{ output: { questions_for_user: [] }, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
-        reviews: [{ issues: [issue("A")] }, { issues: [] }],
+        reviews: [{ issues: [issue("A")] }, { issues: [] }, { issues: [] }],
         execs: [finished],
         platform: faultyPlatform((_, count) => count === failAt),
       });

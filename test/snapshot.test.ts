@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Change, compareSnapshots, decodeStatusV2, excluded, renderChange, type Snapshot, type SnapshotEntry, type StatusRecord } from "../src/snapshot.ts";
+import { type Change, compareSnapshots, decodeStatusV2, excluded, excludedIndexPaths, renderChange, type Snapshot, type SnapshotEntry, type StatusRecord } from "../src/snapshot.ts";
 
 // Decision Q1 (plan-review/requirements.md) and findings 1, 2 and 26 of docs/functional-design-review.md.
 
@@ -78,4 +78,17 @@ test("excluded: plan-review/ always; ignorePaths as a path or a directory prefix
   assert.equal(excluded("ab/c", ["a"]), false);
   assert.equal(excluded("a/b", ["a/"]), true);
   assert.equal(excluded("b", ["a"]), false);
+});
+
+// Plan step 2.3 (P4-R1-1): the paths removed from a work-review tree are exactly those `excluded` selects,
+// taken literally: an ignorePaths entry with pattern characters is never a Git pattern.
+test("excludedIndexPaths selects plan-review/ and the ignorePaths entries literally", () => {
+  const paths = ["a.txt", "plan-review/plan.md", "src/run.ts", "src/review.ts", "src/[rs]*.ts", "docs/x?.md", "docs/xa.md", ".devcontainer/claude.json", "vendor/lib/a.js"];
+  assert.deepEqual(excludedIndexPaths(paths, ["src/[rs]*.ts", "docs/x?.md", ".devcontainer/claude.json", "vendor/"]), [
+    "plan-review/plan.md",
+    "src/[rs]*.ts",
+    "docs/x?.md",
+    ".devcontainer/claude.json",
+    "vendor/lib/a.js",
+  ]);
 });

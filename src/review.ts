@@ -5,7 +5,8 @@
 import { Effect, Ref, Schema } from "effect";
 import { phaseOf, type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
-import { decisionPrompt, limitPrompt, repairReplyPrompt } from "./prompts.ts";
+import type { LoopResult } from "./uiEvents.ts";
+import { decisionPrompt, limitNoProceedPrompt, limitPrompt, repairReplyPrompt } from "./prompts.ts";
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
@@ -38,8 +39,14 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
   applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError, Store>) | null }>;
   /** After the response of a round, an amendment that requires the user (the requirements); null otherwise. */
   amend: ((review: Review, response: R, round: number) => Effect.Effect<void, RunError, Services>) | null;
-  /** Text of the "p" choice at the round limit. */
-  proceedLabel: string;
+  /** Text of the "p" choice at the round limit; null: no such choice (the work review, Q13). */
+  proceed: string | null;
+  /** Q14: a round with a correction due ends the loop with "revise" before the observation. */
+  leaveOnAcceptance: boolean;
+  /** G-R1-1: a non-empty decision at a pause ends the loop with "revise" instead of a planning call. */
+  leaveOnDecision: boolean;
+  /** Run before every round's Codex turn, before its guard's snapshot (the work review rewrites changes.diff); null otherwise. */
+  prepare: Effect.Effect<void, RunError, Services> | null;
 }>;
 
 /** Reads one decision outside a review loop (a question of the plan writer). An empty answer records nothing and returns "". */
@@ -133,7 +140,10 @@ export const applyDecisions = <D>(subject: Subject<PlannerResponse, D>): Effect.
  * against the services, and the command that yields an event (the last of its batch) drives the next
  * transition. The pauses, the log update and the progress checks are all in `advance`.
  */
-export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>): Effect.Effect<"converged" | "proceed", RunError, Services> =>
+/** How a review loop ended, and in which round. */
+export type LoopEnd = Readonly<{ result: LoopResult; round: number }>;
+
+export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>): Effect.Effect<LoopEnd, RunError, Services> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const ui = yield* Ui;
@@ -150,15 +160,22 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
       Effect.gen(function* () {
         const projectBefore = yield* store.projectSnapshot();
         const fileBefore = yield* store.fileHash(id);
+        // The bytes of the reviewed artifact too: a work review's fileHash is recomputed from the project and
+        // does not see an edit of changes.diff itself (P1-R2-2).
+        const recordBefore = yield* store.recordHash(id);
         const reply = yield* session.review(text);
         const changes = compareSnapshots(projectBefore, yield* store.projectSnapshot());
-        const fileChanged = (yield* store.fileHash(id)) !== fileBefore;
+        // The artifact's bytes, or the observed hash without a visible project change (a work review's diff also
+        // changes with a commit); a change of the project itself is reported as ProjectChanged below. For the
+        // other subjects both hashes are the file's content, as before.
+        const recordChanged = (yield* store.recordHash(id)) !== recordBefore;
+        const fileChanged = recordChanged || ((yield* store.fileHash(id)) !== fileBefore && changes.length === 0);
         if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes: [...changes, { kind: "content_changed", path: fileLabel }] }));
         if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "review", fileLabel, changes }));
         return reply;
       });
 
-    type Outcome = ReviewEvent | { finished: "converged" | "proceed" };
+    type Outcome = ReviewEvent | { finished: LoopResult };
     /** Executes one command; the commands that yield an event return it. */
     const execute = (command: ReviewCommand, state: ReviewState): Effect.Effect<Outcome | null, RunError, Services> =>
       Effect.gen(function* () {
@@ -199,10 +216,12 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
           case "Finish":
             return { finished: command.result };
           case "AskLimit":
-            return { kind: "LimitAnswer", answer: yield* ui.ask(limitPrompt(command.limit, subject.proceedLabel)) };
+            return { kind: "LimitAnswer", answer: yield* ui.ask(state.setup.proceed === null ? limitNoProceedPrompt(command.limit) : limitPrompt(command.limit, state.setup.proceed)) };
           case "AskDecision":
             return { kind: "DecisionGiven", text: yield* ui.ask(decisionPrompt(command.subject)) };
           case "CallReviewer": {
+            // Before the turn's guard takes its snapshot, so that it is not counted as a change during the turn.
+            if (subject.prepare !== null) yield* subject.prepare;
             const review: Review = yield* decodeWithRepair("codex", ReviewText, yield* reviewCall(subject.reviewPrompt(command.round)), reviewCall);
             return { kind: "ReviewDecoded", review };
           }
@@ -221,17 +240,17 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
         }
       });
 
-    const interpret = (transition: Transition): Effect.Effect<"converged" | "proceed", RunError, Services> =>
+    const interpret = (transition: Transition): Effect.Effect<LoopEnd, RunError, Services> =>
       Effect.gen(function* () {
         for (const command of transition.commands) {
           const outcome = yield* execute(command, transition.state);
           if (outcome === null) continue;
-          if ("finished" in outcome) return outcome.finished;
+          if ("finished" in outcome) return { result: outcome.finished, round: transition.state.round };
           return yield* interpret(advance(transition.state, outcome));
         }
         return yield* Effect.die(new Error("the review loop ended a batch without an event"));
       });
 
-    const setup: ReviewSetup = { subject: id, heading, fileLabel, dirName: subjectDir(id), phase, proceedLabel: subject.proceedLabel, hasAmend: subject.amend !== null, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
+    const setup: ReviewSetup = { subject: id, heading, fileLabel, dirName: subjectDir(id), phase, proceed: subject.proceed, hasAmend: subject.amend !== null, leaveOnAcceptance: subject.leaveOnAcceptance, leaveOnDecision: subject.leaveOnDecision, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
     return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: yield* store.fileHash(id), log: yield* store.loadLog(id) }));
   });

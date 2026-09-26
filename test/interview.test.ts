@@ -21,7 +21,7 @@ test("a turn that is complete with a blank summary continues the conversation in
       { output: turn("Done.", true, "# Requirements\n\nNone.") },
       { output: noQuestions, plan: "v1" },
     ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { questionPhase: true },
   });
@@ -49,7 +49,7 @@ test("a default answer that names no proposed answer is recorded as null, with a
       { output: turn("Done.", true, "# Requirements\n\nQ1: A") },
       { output: noQuestions, plan: "v1" },
     ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { questionPhase: true },
   });
@@ -70,7 +70,7 @@ test("the question phase notifies its beginning and end and every interview turn
       { output: turn("Done.", true, "# Requirements\n\nNone.") },
       { output: noQuestions, plan: "v1" },
     ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { questionPhase: true },
   });

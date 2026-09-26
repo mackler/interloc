@@ -11,7 +11,7 @@ import { type IssueId, validateReview, validateRound, type ValidatedReview, type
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { Config, LogEntry, PlannerResponse, Review } from "./schema.ts";
 import type { SubjectId } from "./artifacts.ts";
-import type { UiEvent } from "./uiEvents.ts";
+import type { LoopResult, UiEvent } from "./uiEvents.ts";
 import { Result } from "effect";
 
 export type Stage = "start" | "response" | "decision";
@@ -39,7 +39,7 @@ export type ReviewCommand =
   | Readonly<{ kind: "Amend"; round: number }>
   | Readonly<{ kind: "ObserveFile"; stage: Stage }>
   | Readonly<{ kind: "Halt"; error: RunError }>
-  | Readonly<{ kind: "Finish"; result: "converged" | "proceed" }>;
+  | Readonly<{ kind: "Finish"; result: LoopResult }>;
 
 /** What the world reports back. */
 export type ReviewEvent =
@@ -61,8 +61,13 @@ export type ReviewSetup = Readonly<{
   /** The subject directory under plan-review/, recorded in the round records. */
   dirName: string;
   phase: number;
-  proceedLabel: string;
+  /** The label of the choice to proceed at the round limit; null: no such choice, "p" is a stop (Q13). */
+  proceed: string | null;
   hasAmend: boolean;
+  /** Q14: a round with a correction due ends the loop with "revise" right after its log, before the observation. */
+  leaveOnAcceptance: boolean;
+  /** G-R1-1: a non-empty decision at any pause ends the loop with "revise" instead of a planning call. */
+  leaveOnDecision: boolean;
   maxRounds: number;
   maxIdleRounds: number;
   countMinor: boolean;
@@ -135,6 +140,8 @@ export const initialState = (setup: ReviewSetup, config: Pick<Config, "maxRounds
 // ---- rendering ----------------------------------------------------------------------------------
 
 const say = (text: string): ReviewCommand => ({ kind: "Say", text });
+/** The prefix of a subject's issue ids, as its review prompt names them (plan 2.5). */
+const idPrefixOf = (subject: SubjectId): string => (subject === "questions" ? "Q" : subject === "requirements" ? "G" : "plan" in subject ? "P" : "W");
 const notify = (event: UiEvent): ReviewCommand => ({ kind: "Notify", event });
 const show = (value: unknown): string => JSON.stringify(value, null, 2);
 const describeObservation = (o: Observation): string => (o.stage === "decision" ? `round ${o.round} (after the user's decision)` : `round ${o.round}`);
@@ -156,10 +163,9 @@ const ask = (s: ReviewState, step: Step, asking: Ask, before: readonly ReviewCom
 
 /** Round n + 1 begins: the limit prompt if the limit is reached, otherwise the Codex review. */
 const startRound = (s: ReviewState): Transition => {
-  const { heading, proceedLabel } = s.setup;
+  const { heading } = s.setup;
   const n = s.round + 1;
   if (n > s.limit) {
-    void proceedLabel;
     const lines = [`\nCounted issues and reported Claude Code usage per round of ${heading}:`, ...s.counts.map((c, i) => `  round ${i + 1}: counted issues = ${c}, total_cost_usd = ${s.costs[i] ?? "not reported"}`)];
     return { state: { ...s, step: { name: "awaitingLimit" } }, commands: [...lines.map(say), { kind: "AskLimit", limit: s.limit }] };
   }
@@ -170,10 +176,10 @@ const startRound = (s: ReviewState): Transition => {
 };
 
 const onLimitAnswer = (s: ReviewState, answer: string): Transition => {
-  const { heading, proceedLabel } = s.setup;
-  if (answer === "p") {
+  const { heading, proceed } = s.setup;
+  if (answer === "p" && proceed !== null) {
     return done(s, { kind: "Finish", result: "proceed" }, [
-      { kind: "Converse", markdown: `**User decision:** ${proceedLabel} without convergence after round ${s.round} of ${heading}.\n\n` },
+      { kind: "Converse", markdown: `**User decision:** ${proceed} without convergence after round ${s.round} of ${heading}.\n\n` },
       notify({ _tag: "LoopFinished", subject: s.setup.subject, result: "proceed" }),
     ]);
   }
@@ -222,7 +228,7 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
   const { heading, phase } = s.setup;
   const n = s.round;
   const review = s.current.review!;
-  const checked = validateRound(s.current.validatedReview!, response, s.log, phase, n);
+  const checked = validateRound(s.current.validatedReview!, response, s.log, phase, n, idPrefixOf(s.setup.subject));
   const withCost: ReviewState = { ...s, costs: [...s.costs, costUsd] };
   if (Result.isFailure(checked)) return halt(withCost, checked.failure);
   const round = checked.success;
@@ -286,12 +292,21 @@ const afterPauses = (s: ReviewState, before: readonly ReviewCommand[] = []): Tra
 const amendStep = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition =>
   s.setup.hasAmend ? { state: { ...s, step: { name: "amending" } }, commands: [...before, { kind: "Amend", round: s.round }] } : logStep(s, before);
 
-/** The issue log update: the round, then the user's decisions on single issues, which replace the round's disposition. */
+/** The log of the round in progress: the round, then the user's decisions on single issues, which replace the round's disposition. */
+const roundLog = (s: ReviewState, decisions: readonly DecisionEvent[]): readonly LogEntry[] =>
+  decisions.reduce((acc, d) => (d.id === null ? acc : log.appendUserDecision(acc, d.id, d.decision, s.setup.phase, s.round)), log.appendRound(s.log, s.current.round!));
+
+/** The loop leaves for a planning phase (a work review, plan 2.4). */
+const leave = (s: ReviewState, before: readonly ReviewCommand[]): Transition =>
+  done(s, { kind: "Finish", result: "revise" }, [...before, notify({ _tag: "LoopFinished", subject: s.setup.subject, result: "revise" })]);
+
+/** The issue log update; with leaveOnAcceptance, a round with a correction due leaves right after it (Q14). */
 const logStep = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition => {
-  const { phase } = s.setup;
-  const appended = log.appendRound(s.log, s.current.round!);
-  const updated = s.current.decisions.reduce((acc, d) => (d.id === null ? acc : log.appendUserDecision(acc, d.id, d.decision, phase, s.round)), appended);
-  return { state: { ...s, log: updated, step: { name: "observingResponse" } }, commands: [...before, { kind: "SaveLog", log: updated }, checkpoint(s, "logged"), { kind: "ObserveFile", stage: "response" }] };
+  const updated = roundLog(s, s.current.decisions);
+  const logged: readonly ReviewCommand[] = [...before, { kind: "SaveLog", log: updated }, checkpoint(s, "logged")];
+  const state: ReviewState = { ...s, log: updated };
+  if (s.setup.leaveOnAcceptance && log.correctionsDue(s.current.round!)) return leave(state, logged);
+  return { state: { ...state, step: { name: "observingResponse" } }, commands: [...logged, { kind: "ObserveFile", stage: "response" }] };
 };
 
 const lastHash = (s: ReviewState): string => s.observations[s.observations.length - 1]?.hash ?? "";
@@ -357,9 +372,38 @@ const onFileObserved = (s: ReviewState, hash: string): Transition => {
   }
 };
 
+/**
+ * A non-empty decision with leaveOnDecision (G-R1-1): recorded, then what the step has not yet persisted, then
+ * the exit. Each checkpoint written is one readCheckpoint accepts (P1-R1-1 of the earlier run's second review).
+ */
+const leaveOnDecision = (s: ReviewState, asking: Ask, text: string): Transition | null => {
+  if (!s.setup.leaveOnDecision) return null;
+  const decision = decisionOf(s, asking, text);
+  const recorded = record(s, decision);
+  switch (s.step.name) {
+    // (i) After the response, before logStep: the round and every issue-naming decision of it, once; then logged.
+    case "askingPauses": {
+      const updated = roundLog(s, asking.id === null ? s.current.decisions : [...s.current.decisions, decision]);
+      return leave({ ...s, log: updated }, [...recorded, { kind: "SaveLog", log: updated }, checkpoint(s, "logged")]);
+    }
+    // (iii) Before the response: only the decision's entry; the round record stays no_response, so decided, not logged.
+    case "askingReraised": {
+      const updated = asking.id === null ? s.log : log.appendUserDecision(s.log, asking.id, text, s.setup.phase, s.round);
+      return leave({ ...s, log: updated }, [...recorded, { kind: "SaveLog", log: updated }, checkpoint(s, "decided")]);
+    }
+    // (ii) After logStep: the round is already logged, and these asks name no issue.
+    default:
+      return leave(s, recorded);
+  }
+};
+
 const onDecisionGiven = (s: ReviewState, text: string): Transition => {
   const step = s.step;
   const given = text !== "";
+  if (given && "asking" in step) {
+    const left = leaveOnDecision(s, step.asking, text);
+    if (left !== null) return left;
+  }
   switch (step.name) {
     case "askingReraised": {
       const decision = decisionOf(s, step.asking, text);
