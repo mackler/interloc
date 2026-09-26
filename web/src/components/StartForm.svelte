@@ -3,12 +3,15 @@
   // active; help users recognise, diagnose and recover: the server's refusal is the field's error text;
   // recognition rather than recall: the directory browser, and the last path remembered].
   import { Button, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
+  import { readRemembered, remember } from "../storage.ts";
 
   type Props = { cwd: string; running: boolean; refused: string | null; chosen: string | null; onStart: (project: string, task: string) => void; onBrowse: (from: string) => void };
   let { cwd, running, refused, chosen, onStart, onBrowse }: Props = $props();
 
-  const KEY = "plan-review.project";
-  const remembered = (): string => (typeof localStorage === "undefined" ? "" : (localStorage.getItem(KEY) ?? ""));
+  // The storage is an edge (../storage.ts): a failing read falls back to the server's directory, a failing write
+  // does not stop Start [error prevention: remembering is a convenience, never a prerequisite].
+  const read = readRemembered();
+  const remembered = (): string => (read.ok ? read.value : "");
   let edited = $state<string | null>(null);
   let task = $state("");
   // The directory chosen in the dialog wins, then what the user typed, then the remembered path, then the server's directory.
@@ -17,7 +20,7 @@
 
   const start = () => {
     if (!ready) return;
-    localStorage.setItem(KEY, project.trim());
+    remember(project.trim());
     onStart(project.trim(), task.trim());
   };
   $effect(() => {

@@ -1,7 +1,7 @@
 // The web server (plan step 3.4): the built page from web/dist, and one WebSocket per tab: on connect the hello
 // and the replay, then the live events; from the page start, answer, stop and list.
 
-import { Effect, Exit, FileSystem, Path, Queue, type Scope } from "effect";
+import { Effect, Exit, FileSystem, Path, Queue, Result, type Scope } from "effect";
 import { HttpPlatform, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import type { Socket } from "effect/unstable/socket";
 import { type ClientMessage, decodeClient, inSnapshot, type ServerMessage } from "./protocol.ts";
@@ -12,22 +12,28 @@ export type WebServerServices = HttpServerRequest.HttpServerRequest | Scope.Scop
 
 const notFound = HttpServerResponse.text("not found", { status: 404 });
 
+/** The decoded path of a request target, or "malformed" when the URL or its percent-encoding is invalid (finding 2). */
+export const requestTarget = (url: string): Result.Result<string, "malformed"> =>
+  Result.try({ try: () => decodeURIComponent(new URL(url, "http://localhost").pathname), catch: (): "malformed" => "malformed" });
+
 /** The handler of every request. */
 export const makeWebServer = (manager: RunManager, distDir: string): Effect.Effect<HttpServerResponse.HttpServerResponse, never, WebServerServices> =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const url = new URL(request.url, "http://localhost");
     if (request.method !== "GET") return notFound;
-    if (url.pathname === "/ws") {
+    const target = requestTarget(request.url);
+    if (Result.isFailure(target)) return HttpServerResponse.text("bad request", { status: 400 });
+    const pathname = target.success;
+    if (pathname === "/ws") {
       const socket = yield* request.upgrade.pipe(Effect.option);
       if (socket._tag === "None") return HttpServerResponse.text("a WebSocket upgrade was expected", { status: 400 });
       yield* session(manager, socket.value, fs, path);
       return HttpServerResponse.empty();
     }
     // The page: index.html at /, and the build's files; a path that leaves the build is not found.
-    const relative = url.pathname === "/" ? "index.html" : decodeURIComponent(url.pathname).replace(/^\/+/, "");
+    const relative = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
     const root = path.resolve(distDir);
     const file = path.resolve(root, relative);
     if (file !== root && !file.startsWith(root + path.sep)) return notFound;

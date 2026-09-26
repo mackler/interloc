@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { render } from "./markdown.ts";
+import DOMPurify from "dompurify";
+import { makeRenderer, render } from "./markdown.ts";
 
 // Plan step 4.4: the agents' Markdown is rendered and sanitised.
 describe("render", () => {
@@ -19,5 +20,21 @@ describe("render", () => {
 
   test("links open without access to the page", () => {
     expect(render("[site](https://example.com)")).toMatch(/<a href="https:\/\/example.com"[^>]*rel="noopener noreferrer"/);
+  });
+});
+
+// Finding 14 of docs/gui-review.md: the link hook belongs to a private instance, not to the imported singleton.
+describe("makeRenderer", () => {
+  test("its links open without access to the page, and the global DOMPurify is left unconfigured", () => {
+    const own = makeRenderer(window);
+    expect(own("[site](https://example.com)")).toMatch(/target="_blank"/);
+    expect(DOMPurify.sanitize('<a href="https://example.com">x</a>', { ADD_ATTR: ["target"] })).not.toMatch(/target=|rel=/);
+  });
+
+  test("two renderers are independent instances", () => {
+    const a = makeRenderer(window);
+    const b = makeRenderer(window);
+    expect(a).not.toBe(b);
+    expect(b("[x](https://example.com)")).toMatch(/rel="noopener noreferrer"/);
   });
 });

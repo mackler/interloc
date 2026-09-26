@@ -3,13 +3,13 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { platformLayer } from "../src/platform.ts";
 import type { ClientMessage, RunEvent, ServerMessage } from "../src/protocol.ts";
 import { makeRunManager, type RunManager } from "../src/runManager.ts";
-import { makeWebServer } from "../src/webServer.ts";
+import { makeWebServer, requestTarget } from "../src/webServer.ts";
 import { finished, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
 
 // Plan step 3.4: the server over NodeHttpServer.layerTest, with Node's WebSocket as the scripted client.
@@ -100,6 +100,26 @@ test("the page and its assets are served; any other path, and a path out of the 
     assert.equal((await get("/nope")).status, 404);
     assert.equal((await get("/assets/..%2F..%2Fetc%2Fpasswd")).status, 404);
   });
+});
+
+// Finding 2 of docs/gui-review.md: a malformed target is a deliberate 400, not a defect (500).
+test("a malformed percent escape or invalid UTF-8 escape is 400; traversal stays 404", async () => {
+  const repo = tempRepo();
+  await serve(await managerOf(repo, []), dist(), async (port) => {
+    const get = (p: string) => fetch(`http://127.0.0.1:${port}${p}`);
+    assert.equal((await get("/%ZZ")).status, 400);
+    assert.equal((await get("/%C0%AF")).status, 400);
+    assert.equal((await get("/../x")).status, 404);
+    assert.equal((await get("/%2e%2e/x")).status, 404);
+    assert.equal((await get("/assets/app.js")).status, 200);
+  });
+});
+
+test("requestTarget decodes the path of a request target and reports a malformed one", () => {
+  assert.deepEqual(requestTarget("/assets/a%20b.js"), Result.succeed("/assets/a b.js"));
+  assert.deepEqual(requestTarget("/%ZZ"), Result.fail("malformed"));
+  assert.deepEqual(requestTarget("/%C0%AF"), Result.fail("malformed"));
+  assert.deepEqual(requestTarget("//["), Result.fail("malformed"));
 });
 
 test("a started run's events reach two clients in the same order with increasing seq", async () => {

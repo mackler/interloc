@@ -1,5 +1,5 @@
 import { type Component, flushSync, mount, unmount } from "svelte";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import * as prompts from "../../src/prompts.ts";
 import { promptOf } from "../../src/userPrompts.ts";
 import DirectoryDialog from "./components/DirectoryDialog.svelte";
@@ -60,6 +60,51 @@ describe("StartForm", () => {
     const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, onStart: () => undefined, onBrowse: () => undefined });
     expect(root.textContent).toMatch(/Claude Code writes a plan, Codex reviews it/);
     expect(root.textContent).toMatch(/Stop task/);
+  });
+
+  // Finding 3 of docs/gui-review.md: remembering the directory is never a prerequisite for starting a task.
+  const startsDespite = (breakStorage: () => () => void) => {
+    const restore = breakStorage();
+    try {
+      const started: string[][] = [];
+      const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, onStart: (p: string, t: string) => void started.push([p, t]), onBrowse: () => undefined });
+      expect((one(root, "input[name=project]") as HTMLInputElement).value).toBe("/work");
+      type(one(root, "textarea[name=task]") as HTMLTextAreaElement, "Write the docs");
+      (one(root, "button[name=start]") as HTMLButtonElement).click();
+      flushSync();
+      expect(started).toEqual([["/work", "Write the docs"]]);
+    } finally {
+      restore();
+    }
+  };
+  const denied = () => new DOMException("access denied", "SecurityError");
+  test("Start still starts when storing the directory throws, and a failing read falls back to the server's directory", () => {
+    startsDespite(() => {
+      const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+        throw denied();
+      });
+      const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+        throw denied();
+      });
+      return () => {
+        set.mockRestore();
+        get.mockRestore();
+      };
+    });
+  });
+  test("the form renders and Start starts when the localStorage getter itself throws", () => {
+    startsDespite(() => {
+      const original = Object.getOwnPropertyDescriptor(window, "localStorage");
+      Object.defineProperty(window, "localStorage", {
+        configurable: true,
+        get() {
+          throw denied();
+        },
+      });
+      return () => {
+        if (original !== undefined) Object.defineProperty(window, "localStorage", original);
+      };
+    });
   });
 
   test("a refusal is shown as the field's error text", () => {

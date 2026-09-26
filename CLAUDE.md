@@ -49,7 +49,7 @@ recommendations of `docs/functional-design-review.md` are the reference for what
 | `src/main.ts` | Entry point: the live wiring and the platform runner (`NodeRuntime.runMain`) applied to the program; untested, like `src/sdkLive.ts` and `src/web.ts` |
 | `src/web.ts` | The web GUI's entry point, `node src/web.ts [port]` (default 8090): the web server over the live wiring per run, under the platform runner; refuses to start without `web/dist/index.html`; untested wiring |
 | `src/webArgs.ts` | The pure parts of `src/web.ts`: `parsePort`, the usage and the missing-build message |
-| `src/webServer.ts` | The HTTP handler: the built page from `web/dist`, and one WebSocket per tab (hello, the replay, then the live events without those the replay holds; the page's start, answer, stop and list) |
+| `src/webServer.ts` | The HTTP handler: `requestTarget` (a malformed URL or percent-encoding is a 400, never a defect), the built page from `web/dist`, and one WebSocket per tab (hello, the replay, then the live events without those the replay holds; the page's start, answer, stop and list) |
 | `src/runManager.ts` | One run at a time for the web GUI: start (the project path checked), answer and stop checked against the current run's id, the events of the current and the last run, broadcast with their per-run seq |
 | `src/webUi.ts` | The `Ui` of a run in the page: every call becomes a `RunEvent`; a prompt waits for the first answer of any tab, interpreted as in the terminal |
 | `src/protocol.ts` | The messages between the page and the server as Effect schemas (pure, also imported by the browser); `inSnapshot`, the replay boundary per replayed run |
@@ -90,7 +90,8 @@ recommendations of `docs/functional-design-review.md` are the reference for what
 | `web/` | The page: `index.html`, `vite.config.ts` (build into `web/dist`, the CSS mixins of m3-svelte, Vitest in jsdom), `tsconfig.json` (DOM lib) |
 | `web/src/state.ts` | The page's pure reducer over the server's messages: the two panels, the pending prompt with its choices, the activity line, the timeline rail; replay and live events fold alike |
 | `web/src/socket.ts` | The page's WebSocket: reconnection with backoff, the queue of actions until the hello (an action for an ended run is discarded with a notice) |
-| `web/src/markdown.ts` | The agents' Markdown rendered with marked and sanitised with DOMPurify |
+| `web/src/markdown.ts` | The agents' Markdown rendered with marked and sanitised by a private DOMPurify instance (`makeRenderer`; the imported singleton is never configured) |
+| `web/src/storage.ts` | The remembered project directory: an edge over `localStorage` whose acquisition, read and write failures are typed results; Start never depends on it |
 | `web/src/components/*.svelte` | The components over m3-svelte: `App`, `TopBar`, `StartForm`, `DirectoryDialog`, `TimelineRail`, `ChatPanel`, `Message`, `PromptWidget`, `ActivityLine`; `web/src/theme.css` (M3 styles, the tonal-spot scheme, the density function) |
 | `web/src/*.test.ts` | Vitest: the reducer (with a fast-check property), the socket over a fake WebSocket, the Markdown, the components mounted in jsdom (`test-setup.ts` supplies `matchMedia` and the dialog methods jsdom lacks) |
 | `e2e/server.ts`, `e2e/run.spec.ts`, `playwright.config.ts` | The end-to-end tests: the real web server and run manager over the scripted agents of `test/helpers.ts` in a temporary repository, one server per scenario (`converge`, `decision`, `stop`), and four Playwright tests in Chromium |
