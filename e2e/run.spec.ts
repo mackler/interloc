@@ -14,8 +14,14 @@ const rail = (page: Page) => page.getByRole("navigation", { name: "Progress of t
 const startTask = async (page: Page, scenario: Scenario, task: string) => {
   await page.goto(url(scenario));
   await expect(page.getByText("connected", { exact: true })).toBeVisible();
+  // The form, an ended run, or a run left by an earlier test on the shared server, which is stopped first.
+  await expect(page.locator("textarea[name=task], button[name=new], button[name=stop]:not([disabled])").first()).toBeVisible();
+  const stop = page.locator("button[name=stop]");
   const again = page.locator("button[name=new]");
-  if (await again.isVisible()) await again.click();
+  if (await stop.isEnabled()) {
+    await stop.click();
+    await again.click();
+  } else if (await again.isVisible()) await again.click();
   await page.locator("textarea[name=task]").fill(task);
   await page.locator("button[name=start]").click();
 };
@@ -82,7 +88,8 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await page.getByRole("button", { name: "End interview" }).click();
   await expect(left(page).getByText("The service uses PostgreSQL.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  // Four review loops and an execution follow; the run takes about 5 s alone and longer under the whole suite's load.
+  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible({ timeout: 20_000 });
   await expect(rail(page).getByText("Question phase", { exact: true })).toBeVisible();
 });
 

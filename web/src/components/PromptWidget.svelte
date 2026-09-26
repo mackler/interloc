@@ -3,6 +3,7 @@
   // text is meaningful; consistency: each button sends exactly what the terminal would receive]. It disappears
   // when any tab has answered.
   import { Button, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
+  import { answerHint } from "../../../src/prompts.ts";
   import type { Widget } from "../state.ts";
 
   // The typed text is the page's draft of this prompt (../draft.ts, finding 5): App keeps it per (incarnation, run,
@@ -35,7 +36,7 @@
         <TextFieldOutlinedMultiline label="Your message" name="answer" rows={3} bind:value={text} onkeydown={(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey && !composing(e)) { e.preventDefault(); send(text); } }} />
       {/if}
       <div class="send-row">
-        <p class="hint m3-font-body-small">{widget.asked.free === "line" ? "Enter sends." : "Enter sends; Shift+Enter starts a new line."}</p>
+        <p class="hint m3-font-body-small">{answerHint(widget.asked.free === "line" ? "line" : "message")}</p>
         <Button variant="filled" type="button" name="send" disabled={text === ""} onclick={() => send(text)}>Send</Button>
       </div>
     {/if}

@@ -74,3 +74,19 @@ test("the revision prompt after an execution phase names the stop and the work r
   assert.match(both, /user's input for this stop/);
   assert.match(both, /Work review 1 ended in round 1/);
 });
+
+// W2-R1-4: the page's help and notice texts live here, with the other texts the user reads.
+test("the page's hint, notices, progress line and badge", () => {
+  assert.equal(prompts.answerHint("line"), "Enter sends.");
+  assert.equal(prompts.answerHint("message"), "Enter sends; Shift+Enter starts a new line.");
+  assert.equal(prompts.draftWithdrawnNotice("my text"), "This question was answered in another tab; your unsent text was discarded: «my text»");
+  assert.equal(prompts.SERVER_CLOSED_NOTICE, "The server has ended. The page reconnects when it is started again.");
+  assert.equal(prompts.notSentNotice("answer", "ended"), "Your answer was not sent: the run has ended.");
+  assert.equal(prompts.notSentNotice("stop", "ended"), "Stop was not sent: the run has ended.");
+  assert.equal(prompts.notSentNotice("answer", "restarted"), "Your answer was not sent: the server has been restarted since.");
+  assert.equal(prompts.notSentNotice("stop", "restarted"), "Stop was not sent: the server has been restarted since.");
+  assert.equal(prompts.progressLine(null, null), "Progress: no phase has begun");
+  assert.equal(prompts.progressLine("Planning 1", null), "Progress: Planning 1");
+  assert.equal(prompts.progressLine("Planning 1", { round: 2, limit: 5 }), "Progress: Planning 1, round 2 of 5");
+  assert.equal(prompts.unseenBadge(3), "· 3 new");
+});

@@ -194,7 +194,7 @@ describe("the server closing", () => {
   test("closing sets the connection to reconnecting and says so", () => {
     const next = reduce(reduce(initialState, hello()), { type: "closing" });
     expect(next.connection).toBe("reconnecting");
-    expect(next.notices.at(-1)).toBe("The server has ended. The page reconnects when it is started again.");
+    expect(next.notices.at(-1)).toBe(prompts.SERVER_CLOSED_NOTICE);
   });
 });
 

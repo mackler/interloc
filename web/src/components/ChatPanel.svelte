@@ -2,11 +2,15 @@
   // A chat panel. New messages scroll into view unless the user has scrolled up, when a chip offers to jump to
   // them [user control and freedom: the scrolling is not taken from the user; visibility of system status].
   import { Chip } from "m3-svelte";
+  import { tick, untrack } from "svelte";
   import MessageView from "./Message.svelte";
   import type { Message } from "../state.ts";
 
-  type Props = { title: string; messages: readonly Message[]; empty: string };
-  let { title, messages, empty }: Props = $props();
+  // `visible` (P3-R1-1): a panel hidden by the compact layout stays mounted with display: none, where its list has no
+  // height. While hidden it neither scrolls nor reads scroll events; shown again, it goes to its end if it was
+  // following, and otherwise keeps the user's place, with the chip counting what arrived meanwhile.
+  type Props = { title: string; messages: readonly Message[]; empty: string; visible?: boolean };
+  let { title, messages, empty, visible = true }: Props = $props();
   let list = $state<HTMLElement | null>(null);
   let following = $state(true);
   let unseen = $state(0);
@@ -21,15 +25,20 @@
   $effect(() => {
     const count = messages.length;
     if (count < seen) seen = 0;
-    if (following) queueMicrotask(toBottom);
-    else unseen += count - seen;
+    const shown = untrack(() => visible);
+    if (following) {
+      if (shown) queueMicrotask(toBottom);
+    } else unseen += count - seen;
     seen = count;
+  });
+  $effect(() => {
+    if (visible && untrack(() => following)) void tick().then(toBottom);
   });
 </script>
 
 <section class="panel" aria-label={title}>
   <h2 class="m3-font-title-small">{title}</h2>
-  <div class="list" bind:this={list} onscroll={() => { if (list !== null) { following = atBottom(list); if (following) unseen = 0; } }} aria-live="polite">
+  <div class="list" bind:this={list} onscroll={() => { if (list !== null && visible) { following = atBottom(list); if (following) unseen = 0; } }} aria-live="polite">
     {#if messages.length === 0}<p class="empty m3-font-body-medium">{empty}</p>{/if}
     {#each messages as message (message.key)}<MessageView {message} />{/each}
   </div>

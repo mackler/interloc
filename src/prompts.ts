@@ -323,3 +323,31 @@ export function interviewHelp(heading: string, ui: "terminal" | "page"): string 
     ? `\n${heading}. Commands: /done = end the interview; /quit = end the run; """ on its own line starts and ends a message of several lines.`
     : `${heading}. /done ends the interview, /quit ends the run; Shift+Enter starts a new line.`;
 }
+
+// ---- the page's help and notices (W2-R1-4) --------------------------------------------------------------------------
+// Texts that the web page shows the user besides the prompts: the answer field's hint, the notices, the compact
+// layout's progress line and badge. Field and button labels stay in the components.
+
+/** The hint under the answer field. */
+export function answerHint(free: "line" | "message"): string {
+  return free === "line" ? "Enter sends." : "Enter sends; Shift+Enter starts a new line.";
+}
+/** Another tab answered the prompt this tab had an unsent draft for (finding 5). */
+export function draftWithdrawnNotice(text: string): string {
+  return `This question was answered in another tab; your unsent text was discarded: «${text}»`;
+}
+/** The server is ending (finding 15). */
+export const SERVER_CLOSED_NOTICE = "The server has ended. The page reconnects when it is started again.";
+/** An action queued while disconnected that was not sent after the reconnection. */
+export function notSentNotice(kind: "answer" | "stop", reason: "ended" | "restarted"): string {
+  return `${kind === "answer" ? "Your answer was" : "Stop was"} not sent: ${reason === "ended" ? "the run has ended" : "the server has been restarted since"}.`;
+}
+/** The one-line progress of a compact window: the current phase and its latest round, or none. */
+export function progressLine(label: string | null, round: Readonly<{ round: number; limit: number }> | null): string {
+  if (label === null) return "Progress: no phase has begun";
+  return `Progress: ${label}${round === null ? "" : `, round ${round.round} of ${round.limit}`}`;
+}
+/** The count of a hidden panel's new messages on its button. */
+export function unseenBadge(n: number): string {
+  return `· ${n} new`;
+}

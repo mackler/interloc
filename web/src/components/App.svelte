@@ -9,6 +9,7 @@
   // plan-review", selects it].
   import { Button, ConnectedButtons } from "m3-svelte";
   import { untrack } from "svelte";
+  import { progressLine, unseenBadge } from "../../../src/prompts.ts";
   import { EXPANDED_MIN_WIDTH, initialLayout, type Layout, observe, type Pane, select } from "../layout.ts";
   import type { ClientMessage } from "../../../src/protocol.ts";
   import { type Draft, draftFor, pendingKey, reconcile } from "../draft.ts";
@@ -55,18 +56,19 @@
   let layout = $state<Layout>(initialLayout);
   $effect(() => {
     const counts = { left: view.run?.left.length ?? 0, right: view.run?.right.length ?? 0 };
-    const prompt = view.run?.pending?.asked.prompt ?? null;
+    const prompt = pendingKey(view);
     const narrow = compact;
     layout = observe(untrack(() => layout), { counts, prompt }, narrow);
   });
+  /** Whether a column is shown: both at expanded width, the selected one below it. */
+  const shown = (pane: Pane): boolean => !compact || layout.selected === pane;
   const TITLES: Record<Pane, string> = { left: "You and plan-review", right: "Claude Code and Codex" };
-  /** The one-line progress of a compact window: the current phase and its latest round. */
-  const progressLine = (r: NonNullable<ViewState["run"]>): string => {
+  /** The one-line progress of a compact window: the current phase and its latest round (the text: src/prompts.ts). */
+  const progressOf = (r: NonNullable<ViewState["run"]>): string => {
     const entry = [...r.timeline].reverse().find((e) => e.state === "active") ?? r.timeline[r.timeline.length - 1];
-    if (entry === undefined) return "Progress: no phase has begun";
+    if (entry === undefined) return progressLine(null, null);
     const rounds = entry.groups[entry.groups.length - 1]?.rounds ?? [];
-    const last = rounds[rounds.length - 1];
-    return `Progress: ${entry.label}${last === undefined ? "" : `, round ${last.round} of ${last.limit}`}`;
+    return progressLine(entry.label, rounds[rounds.length - 1] ?? null);
   };
 
   const run = $derived(view.run);
@@ -90,14 +92,33 @@
       />
     </main>
   {:else if run !== null}
-    {#snippet leftColumn()}
-      <div class="left">
-        <ChatPanel title={TITLES.left} messages={run.left} empty="The run has started." />
+    <!-- One tree for both layouts (W2-R1-3): the columns stay mounted, and CSS alone shows or hides them, so a switch
+         of panels or a resize across 840 px keeps each panel's reading position [user control and freedom]. -->
+    <main class="run" class:compact>
+      {#if compact}
+        <details class="progress">
+          <Button summary variant="text">{progressOf(run)}</Button>
+          <TimelineRail timeline={run.timeline} busy={run.busy} />
+        </details>
+        <ConnectedButtons>
+          {#each ["left", "right"] as const as pane (pane)}
+            <Button variant={layout.selected === pane ? "filled" : "tonal"} type="button" aria-pressed={layout.selected === pane} onclick={() => (layout = select(layout, pane))}>
+              {TITLES[pane]}{#if layout.unseen[pane] > 0}<span class="badge">&nbsp;{unseenBadge(layout.unseen[pane])}</span>{/if}
+            </Button>
+          {/each}
+        </ConnectedButtons>
+        <!-- The latest notice above the panels, whichever is shown (W2-R1-2) [visibility of system status]. -->
+        {#if latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
+      {:else}
+        <TimelineRail timeline={run.timeline} busy={run.busy} />
+      {/if}
+      <div class="left" class:hidden={!shown("left")}>
+        <ChatPanel title={TITLES.left} messages={run.left} empty="The run has started." visible={shown("left")} />
         <PromptWidget
           widget={run.pending}
           bind:text={() => draftFor(draft, pendingKey(view)), (text) => { const key = pendingKey(view); draft = key === null ? null : { key, text }; }}
           onAnswer={(prompt, text) => send({ type: "answer", incarnation: view.incarnation ?? "", run: run.id, prompt, text })} />
-        {#if latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
+        {#if !compact && latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
         {#if run.ended !== null}
           <div class="ended">
             <span class="m3-font-body-medium">This task has ended ({run.ended === 0 ? "finished" : run.ended === 130 ? "interrupted" : "halted"}).</span>
@@ -105,35 +126,11 @@
           </div>
         {/if}
       </div>
-    {/snippet}
-    {#snippet rightColumn()}
-      <div class="right">
-        <ChatPanel title={TITLES.right} messages={run.right} empty="No review yet." />
+      <div class="right" class:hidden={!shown("right")}>
+        <ChatPanel title={TITLES.right} messages={run.right} empty="No review yet." visible={shown("right")} />
         <ActivityLine text={run.activity} />
       </div>
-    {/snippet}
-    {#if compact}
-      <main class="run compact">
-        <details class="progress">
-          <Button summary variant="text">{progressLine(run)}</Button>
-          <TimelineRail timeline={run.timeline} busy={run.busy} />
-        </details>
-        <ConnectedButtons>
-          {#each ["left", "right"] as const as pane (pane)}
-            <Button variant={layout.selected === pane ? "filled" : "tonal"} type="button" aria-pressed={layout.selected === pane} onclick={() => (layout = select(layout, pane))}>
-              {TITLES[pane]}{#if layout.unseen[pane] > 0}<span class="badge">&nbsp;· {layout.unseen[pane]} new</span>{/if}
-            </Button>
-          {/each}
-        </ConnectedButtons>
-        {#if layout.selected === "left"}{@render leftColumn()}{:else}{@render rightColumn()}{/if}
-      </main>
-    {:else}
-      <main class="run">
-        <TimelineRail timeline={run.timeline} busy={run.busy} />
-        {@render leftColumn()}
-        {@render rightColumn()}
-      </main>
-    {/if}
+    </main>
   {/if}
   <DirectoryDialog open={browsing} listing={view.listing} onList={(path) => send({ type: "list", path })} onChoose={(path) => { chosen = path; browsing = false; }} onClose={() => (browsing = false)} />
 </div>
@@ -146,6 +143,7 @@
   .left :global(.panel), .right :global(.panel) { flex: 1; }
   .run.compact { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
   .run.compact > :global(*) { flex-shrink: 0; }
+  .hidden { display: none; }
   /* The shown column fills the window; its panel scrolls inside it and keeps at least 12.5rem, below which the page scrolls. */
   .run.compact .left, .run.compact .right { flex: 1 0 0; }
   .run.compact .left :global(.panel), .run.compact .right :global(.panel) { min-height: 12.5rem; }

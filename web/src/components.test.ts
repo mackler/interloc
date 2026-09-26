@@ -171,6 +171,7 @@ describe("PromptWidget", () => {
     flushSync();
     expect(sent).toEqual(["keep it"]);
     expect(root.querySelector("label")?.textContent).toBe("Your answer");
+    expect(root.querySelector(".hint")?.textContent).toBe(prompts.answerHint("line"));
     const message = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt), onAnswer: () => undefined });
     expect(message.querySelector("label")?.textContent).toBe("Your message");
   });
@@ -274,7 +275,7 @@ describe("App and the draft", () => {
     ws.receive({ type: "event", run: 1, seq: 2, event: { _tag: "Answered", prompt: 1, text: "" } });
     ws.receive({ type: "event", run: 1, seq: 3, event: asked(2) });
     expect(field(root).value).toBe("");
-    expect(root.textContent).toMatch(/answered in another tab; your unsent text was discarded: «draft for question one»/);
+    expect(root.textContent).toContain(prompts.draftWithdrawnNotice("draft for question one"));
   });
 
   test("after a reconnection whose replay answered the prompt, the draft is withdrawn with a notice", async () => {

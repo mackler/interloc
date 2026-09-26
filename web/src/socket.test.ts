@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import * as prompts from "../../src/prompts.ts";
 import type { ServerMessage } from "../../src/protocol.ts";
 import { backoff, connect, type Environment, type SocketLike } from "./socket.ts";
 
@@ -108,7 +109,7 @@ describe("socket", () => {
     sockets[1].open();
     sockets[1].receive({ type: "hello", cwd: "/", current: null, incarnation: "a" });
     expect(sockets[1].sent.map((s) => JSON.parse(s).type)).toEqual(["start"]);
-    expect(h.notices).toEqual(["Stop was not sent: the run has ended."]);
+    expect(h.notices).toEqual([prompts.notSentNotice("stop", "ended")]);
   });
 });
 
@@ -125,6 +126,6 @@ describe("socket across a server restart", () => {
     vi.advanceTimersByTime(1000);
     sockets[1].receive({ type: "hello", cwd: "/w", current: 1, incarnation: "b" });
     expect(sockets[1].sent).toEqual([]);
-    expect(h.notices).toEqual(["Stop was not sent: the server has been restarted since.", "Your answer was not sent: the server has been restarted since."]);
+    expect(h.notices).toEqual([prompts.notSentNotice("stop", "restarted"), prompts.notSentNotice("answer", "restarted")]);
   });
 });

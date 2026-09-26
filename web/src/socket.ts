@@ -2,6 +2,7 @@
 // (1 s to 30 s), and a queue of the page's actions while it is not connected. This module is an edge of the page:
 // it holds the socket and the timers; what the messages mean is the reducer's (state.ts).
 
+import { notSentNotice } from "../../src/prompts.ts";
 import { type ClientMessage, decodeServer, type ServerMessage } from "../../src/protocol.ts";
 
 /** The part of the browser's WebSocket this module uses; a test injects a fake. */
@@ -35,8 +36,6 @@ export const browserEnvironment = (): Environment => ({
   clearTimeout: (handle) => globalThis.clearTimeout(handle as number),
 });
 
-const NOT_SENT: Record<"answer" | "stop", string> = { answer: "Your answer was not sent: the run has ended.", stop: "Stop was not sent: the run has ended." };
-const RESTARTED: Record<"answer" | "stop", string> = { answer: "Your answer was not sent: the server has been restarted since.", stop: "Stop was not sent: the server has been restarted since." };
 
 export const connect = (url: string, handlers: Handlers, env: Environment = browserEnvironment()): Connection => {
   let socket: SocketLike | null = null;
@@ -52,8 +51,8 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
     const pending = queue;
     queue = [];
     for (const m of pending) {
-      if ((m.type === "answer" || m.type === "stop") && m.incarnation !== hello.incarnation) handlers.onNotice(RESTARTED[m.type]);
-      else if ((m.type === "answer" || m.type === "stop") && m.run !== hello.current) handlers.onNotice(NOT_SENT[m.type]);
+      if ((m.type === "answer" || m.type === "stop") && m.incarnation !== hello.incarnation) handlers.onNotice(notSentNotice(m.type, "restarted"));
+      else if ((m.type === "answer" || m.type === "stop") && m.run !== hello.current) handlers.onNotice(notSentNotice(m.type, "ended"));
       else socket?.send(JSON.stringify(m));
     }
   };

@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import * as prompts from "../../src/prompts.ts";
 import type { RunEvent, ServerMessage } from "../../src/protocol.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { type Draft, draftFor, pendingKey, reconcile, withdrawnNotice } from "./draft.ts";
+import { type Draft, draftFor, pendingKey, reconcile } from "./draft.ts";
 import { initialState, reduce, type ViewState } from "./state.ts";
 
 // Finding 5 of docs/gui-review.md: a draft belongs to (incarnation, run, prompt).
@@ -24,12 +24,12 @@ describe("draft", () => {
   });
 
   test("a live answer from another tab withdraws the draft with a notice", () => {
-    expect(reconcile(draft, live([started, asked(1), answered(1), asked(2)]))).toEqual({ draft: null, notice: withdrawnNotice("my unsent answer") });
+    expect(reconcile(draft, live([started, asked(1), answered(1), asked(2)]))).toEqual({ draft: null, notice: prompts.draftWithdrawnNotice("my unsent answer") });
   });
 
   test("a replay after a reconnection in which the prompt was answered meanwhile withdraws the draft with a notice", () => {
     const view = fold([hello(), { type: "replay", runs: [{ id: 1, events: [started, asked(1), answered(1), asked(2)] }] }], live([started, asked(1)]));
-    expect(reconcile(draft, view)).toEqual({ draft: null, notice: withdrawnNotice("my unsent answer") });
+    expect(reconcile(draft, view)).toEqual({ draft: null, notice: prompts.draftWithdrawnNotice("my unsent answer") });
   });
 
   test("a replay in which the same prompt is still pending keeps the draft", () => {
@@ -39,7 +39,7 @@ describe("draft", () => {
 
   test("another incarnation of the server withdraws the draft with a notice; an empty draft goes quietly", () => {
     const view = fold([hello("b"), { type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] }], live([started, asked(1)]));
-    expect(reconcile(draft, view)).toEqual({ draft: null, notice: withdrawnNotice("my unsent answer") });
+    expect(reconcile(draft, view)).toEqual({ draft: null, notice: prompts.draftWithdrawnNotice("my unsent answer") });
     expect(reconcile({ ...draft, text: "" }, live([started, asked(1), answered(1)]))).toEqual({ draft: null, notice: null });
   });
 });

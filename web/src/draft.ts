@@ -2,14 +2,13 @@
 // of one start of the server; it is reconciled against the view after every reduction, live or replayed, so that
 // another tab's answer withdraws it with a notice instead of leaving it attached to the next prompt.
 
+import { draftWithdrawnNotice } from "../../src/prompts.ts";
 import type { ViewState } from "./state.ts";
 
 export type DraftKey = Readonly<{ incarnation: string; run: number; prompt: number }>;
 export type Draft = Readonly<{ key: DraftKey; text: string }>;
 export type Reconciled = Readonly<{ draft: Draft | null; notice: string | null }>;
 
-/** The notice when another tab's answer overtook this tab's unsent text. */
-export const withdrawnNotice = (text: string): string => `This question was answered in another tab; your unsent text was discarded: «${text}»`;
 
 /** The key of the prompt the view waits on, or null. */
 export const pendingKey = (view: ViewState): DraftKey | null =>
@@ -33,5 +32,5 @@ export const reconcile = (draft: Draft | null, view: ViewState): Reconciled => {
   const overtaken = !sameRun || view.run!.answered.includes(draft.key.prompt);
   // A prompt neither pending nor answered in the same run (for example not yet replayed): the draft waits.
   if (!overtaken) return { draft, notice: null };
-  return { draft: null, notice: draft.text.trim() === "" ? null : withdrawnNotice(draft.text) };
+  return { draft: null, notice: draft.text.trim() === "" ? null : draftWithdrawnNotice(draft.text) };
 };

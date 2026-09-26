@@ -2,11 +2,19 @@
 // breakpoint only one of the two panels is shown; the other's new messages are counted for its badge, and a new
 // prompt selects "You and plan-review", where the prompt is answered.
 
+import type { DraftKey } from "./draft.ts";
+
 export type Pane = "left" | "right";
 export type Counts = Readonly<Record<Pane, number>>;
-export type Layout = Readonly<{ selected: Pane; unseen: Counts; counts: Counts; prompt: number | null }>;
-/** What the layout observes of the view: each panel's message count and the pending prompt. */
-export type Observed = Readonly<{ counts: Counts; prompt: number | null }>;
+export type Layout = Readonly<{ selected: Pane; unseen: Counts; counts: Counts; prompt: DraftKey | null }>;
+/**
+ * What the layout observes of the view: each panel's message count and the pending prompt, by its full key
+ * (incarnation, run, prompt), since prompt numbers restart with each run and each start of the server (W2-R1-1).
+ */
+export type Observed = Readonly<{ counts: Counts; prompt: DraftKey | null }>;
+
+const sameKey = (a: DraftKey | null, b: DraftKey | null): boolean =>
+  a === null || b === null ? a === b : a.incarnation === b.incarnation && a.run === b.run && a.prompt === b.prompt;
 
 /** M3's expanded window class begins at 840 dp. */
 export const EXPANDED_MIN_WIDTH = 840;
@@ -15,7 +23,7 @@ export const initialLayout: Layout = { selected: "left", unseen: { left: 0, righ
 
 /** The layout after the view changed; `compact` when the window is narrower than the expanded class. */
 export const observe = (layout: Layout, observed: Observed, compact: boolean): Layout => {
-  const newPrompt = observed.prompt !== null && observed.prompt !== layout.prompt;
+  const newPrompt = observed.prompt !== null && !sameKey(observed.prompt, layout.prompt);
   const selected: Pane = newPrompt ? "left" : layout.selected;
   // A panel with fewer messages than before belongs to a new run: its count starts again.
   const added = (pane: Pane): number => Math.max(0, observed.counts[pane] - layout.counts[pane]);

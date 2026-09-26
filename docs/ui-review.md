@@ -45,6 +45,12 @@ layout now follows M3's window size classes (`web/src/layout.ts`, `App.svelte`, 
 - **The top bar** wraps: the title, the connection and Stop stay on the first line (the title at M3's 22 px below
   600 px), and the project and the task move to a second line.
 - **The answer field** has the full width in every window, with the hint and Send on the row beneath it.
+- **Corrections after work review 2** (W2-R1-1 to W2-R1-3): both panels stay mounted and CSS alone hides one, so a
+  switch or a resize across 840 px keeps each panel's reading position [user control and freedom]; a panel that was
+  hidden goes to its end when shown again if it was following, and otherwise keeps the user's place with the chip
+  counting what arrived; the latest notice stands above the panels in a compact window, so the server's end or a
+  withdrawn draft is seen whichever panel is shown [visibility of system status]; a new prompt is recognised by its
+  full identity, so a new run's first prompt selects "You and plan-review" after a reconnection too.
 
 `e2e/layout.spec.ts` checks, at 390 × 844 and at 640 × 400, that nothing overflows sideways, that the shown panel is
 at least 300 px wide (and 400 or 200 px high) and the answer field at least 280 px wide, the panel switch, the badge

@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, RunEvent, ServerMessage } from "../../src/protocol.ts";
-import { interviewHelp, pagePromptText } from "../../src/prompts.ts";
+import { interviewHelp, pagePromptText, SERVER_CLOSED_NOTICE } from "../../src/prompts.ts";
 import { interviewSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
@@ -175,7 +175,6 @@ export const foldEvent = (run: RunView, event: RunEvent): RunView => {
 
 const foldRun = (id: number, events: readonly RunEvent[]): RunView => events.reduce(foldEvent, emptyRun(id));
 
-export const SERVER_CLOSED = "The server has ended. The page reconnects when it is started again.";
 /** A notice for the user that the page itself produces (for example an action discarded after a reconnect). */
 export const notice = (state: ViewState, text: string): ViewState => ({ ...state, notices: [...state.notices, text] });
 
@@ -198,7 +197,7 @@ export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
       return notice(state, message.reason);
     case "closing":
       // [visibility of system status] The socket's reconnection keeps trying; the page says why it is disconnected.
-      return notice({ ...state, connection: "reconnecting" }, SERVER_CLOSED);
+      return notice({ ...state, connection: "reconnecting" }, SERVER_CLOSED_NOTICE);
     case "event": {
       const current = message.event._tag === "Started" ? message.run : message.event._tag === "Ended" ? null : state.current;
       if (state.run !== null && message.run === state.run.id) {
