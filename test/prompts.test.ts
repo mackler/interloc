@@ -38,10 +38,25 @@ test("the work review prompt names the change record, the plan, the requirements
 });
 
 test("the work response prompt forbids any file change and defers the corrections", () => {
-  const text = prompts.workRespondPrompt(2, 1);
+  const text = prompts.workRespondPrompt(2, 1, { review: { issues: [] }, log: [], changes: "" });
   assert.match(text, /plan-review\/work-review-2\/review-1\.json/);
   assert.match(text, /later execution phase after the plan has been revised/);
   assert.match(text, /Do not modify any file\./);
+});
+
+// Stage A, decision Q1: a read-only work response gets the review, its phase's log entries and the diff in the prompt.
+test("the work response prompt carries the review, the log entries of its phase only, and the diff verbatim", () => {
+  const review = { issues: [{ id: "W2-R2-1", severity: "major" as const, location: "src/a.ts:3", problem: "the parser drops the last line", evidence: "a.ts reads lines.slice(0, -1)" }] };
+  const entry = (phase: number, id: string) => ({ id, phase, round: 1, problem: `problem of ${id}`, rationale: `rationale of ${id}`, superseded: false, source: "review" as const, severity: "minor" as const, location: "x", evidence: "e", action: "rejected" as const, duplicate_of: null, reverses: null });
+  const log = [entry(1, "W1-R1-1"), entry(2, "W2-R1-1")] as unknown as Parameters<typeof prompts.workRespondPrompt>[2]["log"];
+  const diff = "diff --git a/src/a.ts b/src/a.ts\n+const lines = text.split(\"\\n\");\n";
+  const text = prompts.workRespondPrompt(2, 2, { review, log, changes: diff });
+  assert.ok(text.includes("the parser drops the last line"), "the review");
+  assert.ok(text.includes("rationale of W2-R1-1"), "the phase's log entry");
+  assert.ok(!text.includes("W1-R1-1"), "another phase's log entry");
+  assert.ok(text.includes(diff), "the diff, verbatim");
+  assert.match(text, /Do not modify any file\./);
+  assert.match(text, /cannot use any tool/);
 });
 
 test("the revision prompt after an execution phase names the stop and the work review's outcome", () => {

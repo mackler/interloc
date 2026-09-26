@@ -17,7 +17,7 @@ import type { Wiring } from "../src/program.ts";
 import type { SubjectId } from "../src/artifacts.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
-import { Planner, type PlannerShape, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Store, type StoreShape, Ui, type UiShape } from "../src/services.ts";
+import { Planner, type PlannerShape, type PlanningCapability, type PlanningPurpose, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Store, type StoreShape, Ui, type UiShape } from "../src/services.ts";
 import { type Platform, platformLayer } from "../src/platform.ts";
 import { makeStore, storeLayer } from "../src/store.ts";
 import { FakeSdk } from "./fakeSdk.ts";
@@ -117,12 +117,18 @@ export class ScriptedUi implements UiShape {
 
 /** `hang` makes the call wait until it is interrupted, recording the abort signal it was given. */
 /** `onCall` runs when the call begins, before anything else (a test captures the state the call finds). */
-export type PlanningStep = { output?: unknown; plan?: string; touchProject?: boolean; hang?: boolean; resultText?: string; onCall?: () => void };
+/**
+ * `editRecord` writes a file under plan-review/ during the call, as an agent that bypassed the hook could (stage A's
+ * detection tests); `usage` appends a line to usage.jsonl during the call, as the adapter does.
+ */
+export type PlanningStep = { output?: unknown; plan?: string; touchProject?: boolean; hang?: boolean; resultText?: string; onCall?: () => void; editRecord?: { file: string; content: string | null }; usage?: boolean };
 
 export class ScriptedPlanner implements PlannerShape {
   readonly prompts: string[] = [];
   /** The Effect schema of each planning call, in order. */
   readonly schemas: Schema.Top[] = [];
+  /** The capability of each planning call, in order. */
+  readonly capabilities: PlanningCapability[] = [];
   /** The abort signals of the calls that hang. */
   readonly hangSignals: AbortSignal[] = [];
   private readonly hangs = readiness();
@@ -140,10 +146,11 @@ export class ScriptedPlanner implements PlannerShape {
   }
   readonly sessionId = Effect.succeed("test-session");
   /** Returns the scripted output as it is: the caller decodes it, as with the real agent. */
-  planning(prompt: string, schema: Schema.Top): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }> {
+  planning(prompt: string, schema: Schema.Top, _purpose?: PlanningPurpose, capability: PlanningCapability = "records"): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }> {
     return Effect.suspend(() => {
       this.prompts.push(prompt);
       this.schemas.push(schema);
+      this.capabilities.push(capability);
       const step = this.steps.shift();
       if (!step) return Effect.die(new Error(`no scripted planning step for: ${prompt.slice(0, 60)}`));
       step.onCall?.();
@@ -155,6 +162,16 @@ export class ScriptedPlanner implements PlannerShape {
       }
       if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
       if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
+      const records = path.dirname(this.state.plan);
+      if (step.editRecord !== undefined) {
+        const file = path.join(records, step.editRecord.file);
+        if (step.editRecord.content === null) fs.rmSync(file, { force: true });
+        else {
+          fs.mkdirSync(path.dirname(file), { recursive: true });
+          fs.writeFileSync(file, step.editRecord.content);
+        }
+      }
+      if (step.usage) fs.appendFileSync(path.join(records, "usage.jsonl"), JSON.stringify({ version: 2, agent: "claude", session: "test-session", num_turns: 1, total_cost_usd: 0.1 }) + "\n");
       return Effect.succeed({ output: step.output, resultText: step.resultText ?? "", costUsd: 0.1 });
     });
   }

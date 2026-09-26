@@ -470,3 +470,35 @@ test("an execution call notifies its start with the purpose execution", async ()
   assert.deepEqual(activity(fake.ui)[0], { _tag: "AgentCallStarted", agent: "claude", purpose: "execution" });
   assert.deepEqual(activity(fake.ui).at(-1), { _tag: "AgentCallEnded", agent: "claude", ok: true });
 });
+
+// Stage A (finding 1 of docs/gui-review.md): a work response is read-only by capability, not by a list of tool names.
+test("a read-only planning call registers one hook without a matcher that denies every tool but the structured output", async () => {
+  const fake = await planner([messages(init(), success({}))]);
+  await run(fake.planner.planning("answer the review", schema, "planning", "readOnly"));
+  const options = fake.sdk.calls[0].options;
+  const hooks = options.hooks?.PreToolUse ?? [];
+  assert.equal(hooks.length, 1);
+  assert.equal(hooks[0].matcher, undefined, "a matcher would let an unlisted tool pass");
+  for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "Read", "AskUserQuestion", "FutureTool"]) {
+    assert.equal(decision(await runHook(options, tool, { file_path: path.join(fake.dir, "plan.md"), command: "ls" })), "deny", tool);
+  }
+  assert.equal(decision(await runHook(options, "StructuredOutput", {})), undefined);
+});
+
+test("a read-only planning call's permission callback denies a question without relaying it, and an edit", async () => {
+  const fake = await planner([messages(init(), success({}))]);
+  await run(fake.planner.planning("answer the review", schema, "planning", "readOnly"));
+  const options = fake.sdk.calls[0].options;
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  assert.equal((await permission(options)("AskUserQuestion", { questions }, callContext()))?.behavior, "deny");
+  assert.deepEqual(fake.ui.asked, [], "the question reached the user");
+  assert.equal((await permission(options)("Write", { file_path: path.join(fake.dir, "plan.md") }, callContext()))?.behavior, "deny");
+});
+
+test("each call carries its own capability: a read-only call and then a records call on the same planner", async () => {
+  const fake = await planner([messages(init(), success({})), messages(init(), success({}))]);
+  await run(fake.planner.planning("answer the review", schema, "planning", "readOnly"));
+  await run(fake.planner.planning("write the plan", schema));
+  assert.equal(decision(await runHook(fake.sdk.calls[0].options, "Write", { file_path: path.join(fake.dir, "plan.md") })), "deny");
+  assert.equal(decision(await runHook(fake.sdk.calls[1].options, "Write", { file_path: path.join(fake.dir, "plan.md") })), undefined);
+});

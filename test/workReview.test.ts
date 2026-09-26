@@ -256,3 +256,66 @@ test("(k) a stop and a work review that leaves with revise: planning 2's prompt 
   assert.match(probe.planner.prompts[2], /user's input for this stop/);
   assert.match(probe.planner.prompts[2], /Work review 1 ended in round 1/);
 });
+
+// Stage A (finding 1 of docs/gui-review.md): a work response is read-only. The hook denies the edit (test/claude.test.ts);
+// these detection tests bypass the hook deliberately and show that the program halts on the change it finds.
+const rejectingResponse = (step: object = {}) => ({ output: respond([["W1-R1-1", "rejected"]]), ...step });
+const workResponseRun = (step: object, extraReviews: object[] = []) =>
+  testLayer(tempRepo(), { steps: [planWrite("v1"), rejectingResponse(step)], reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, ...extraReviews] as never, execs: [finished] });
+
+test("(A) a work response and its repair turn are read-only calls; the plan's calls keep their records capability", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [planWrite("v1"), { output: { not: "a response" } }, rejectingResponse()],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(layer), 1);
+  assert.deepEqual(probe.planner.capabilities, ["records", "readOnly", "readOnly"]);
+});
+
+for (const [label, file, content] of [
+  ["plan.md", "plan.md", "a replacement plan"],
+  ["requirements.md", "requirements.md", "new requirements"],
+  ["changes.diff", "work-review-1/changes.diff", "a forged diff"],
+  ["checkpoint.json", "checkpoint.json", "{}"],
+  ["a new file", "notes/new.md", "n"],
+  ["a deleted record", "work-review-1/review-1.json", null],
+] as const) {
+  test(`(A) a work response that changes ${label} halts the run with RecordsChanged`, async () => {
+    const { layer } = workResponseRun({ editRecord: { file, content } });
+    await runFails(layer, "RecordsChanged", new RegExp(file.replace(/[.]/g, "\\.")));
+  });
+}
+
+test("(A) a plan response that rewrites plan.md is not a read-only call and passes", async () => {
+  const { layer } = testLayer(tempRepo(), {
+    steps: [planWrite("v1"), { output: respond([["P1-R1-1", "accepted"]]), editRecord: { file: "plan.md", content: "v2" } }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(layer), 1);
+});
+
+test("(A) the program's own writes during a read-only call do not halt it: usage.jsonl and the invalid reply before a repair", async () => {
+  const { layer } = testLayer(tempRepo(), {
+    steps: [planWrite("v1"), { output: { not: "a response" }, usage: true }, rejectingResponse({ usage: true })],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(layer), 1);
+});
+
+test("(A, Q1) the work response of round 2 receives the round-2 review, the round-1 log entry and the current changes.diff", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [planWrite("v1"), rejectingResponse(), { output: respond([["W1-R2-1", "rejected"]]) }],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1", "first problem")] }, { issues: [issue("W1-R2-1", "second problem")] }, { issues: [] }],
+    execs: [finished],
+    answers: [""],
+  });
+  assert.equal(await runTask(layer), 1);
+  const prompt = probe.planner.prompts[2];
+  assert.ok(prompt.includes("second problem"), "the round-2 review");
+  assert.ok(prompt.includes("rationale W1-R1-1"), "the round-1 log entry");
+  assert.ok(prompt.includes(read(probe.dir, "work-review-1/changes.diff")), "the current changes.diff");
+  assert.match(prompt, /\+implemented/);
+});

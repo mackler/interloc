@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { type Artifact, LOG_SUBJECTS, pathOf, phaseOf, recordPath, reviewedFile, subjectDir, subjectOf } from "../src/artifacts.ts";
+import { type Artifact, guardedRecord, LOG_SUBJECTS, pathOf, phaseOf, recordPath, reviewedFile, subjectDir, subjectOf } from "../src/artifacts.ts";
 
 // Finding 28: one catalog of the records; every path the program writes or names comes from `pathOf`.
 test("pathOf gives every record its path under plan-review/", () => {
@@ -49,4 +49,24 @@ test("the work review subject: directory, phase, log, reviewed file, baseline an
   assert.equal(pathOf({ kind: "changes", phase: 3 }), "work-review-3/changes.diff");
   assert.deepEqual(reviewedFile({ work: 3 }), { kind: "changes", phase: 3 });
   assert.ok(LOG_SUBJECTS.some((s) => typeof s === "object" && "work" in s), "LOG_SUBJECTS lacks the work review log");
+});
+
+// Stage A (finding 1 of docs/gui-review.md): the records a read-only call must leave unchanged.
+test("guardedRecord exempts only the program's own writes during a call and the archives of earlier runs", () => {
+  const exempt: Artifact[] = [{ kind: "usage" }, { kind: "invalidReply", agent: "claude", n: 1 }, { kind: "invalidReply", agent: "codex", n: 12 }];
+  for (const a of exempt) assert.equal(guardedRecord(pathOf(a)), false, pathOf(a));
+  assert.equal(guardedRecord("archive-2026-09-26T08-10-39-966Z/plan.md"), false);
+  assert.equal(guardedRecord("archive-2026-09-26T08-10-39-966Z-2/work-review-1/changes.diff"), false);
+  // Every other kind of the catalog is guarded; a kind added later is guarded unless it is exempted by name.
+  const guarded: Artifact[] = [
+    { kind: "conversation" }, { kind: "decisions" }, { kind: "feedback" }, { kind: "questions" }, { kind: "requirements" }, { kind: "plan" },
+    { kind: "checkpoint" }, { kind: "config" }, { kind: "baseline" }, { kind: "changes", phase: 1 },
+    ...LOG_SUBJECTS.map((subject): Artifact => ({ kind: "log", subject })),
+    ...LOG_SUBJECTS.flatMap((subject) => (["review", "response", "round"] as const).map((kind): Artifact => ({ kind, subject, round: 1 }))),
+    { kind: "planWrite", phase: 1 }, { kind: "execution", phase: 2 },
+  ];
+  for (const a of guarded) assert.equal(guardedRecord(pathOf(a)), true, pathOf(a));
+  assert.equal(guardedRecord("notes/new.md"), true, "an unknown new file");
+  assert.equal(guardedRecord("usage.jsonl.bak"), true);
+  assert.equal(guardedRecord("invalid-repliesx/a.json"), true);
 });

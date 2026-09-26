@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import { platformLayer } from "../src/platform.ts";
 import type { StoreShape } from "../src/services.ts";
 import { makeStore } from "../src/store.ts";
+import { compareRecords } from "../src/snapshot.ts";
 import { tempRepo } from "./helpers.ts";
 
 // Plan step 2.3 (decision Q7; P1-R1-5, P1-R2-1, P1-R2-2, P4-R1-1): the baseline tree at init, the change
@@ -93,4 +94,25 @@ test("changeRecord rewrites the file; fileHash of the work subject follows the p
   // For the other subjects the two hashes are the same.
   fs.writeFileSync(store.plan, "plan\n");
   assert.equal(await run(store.recordHash({ plan: 1 })), await run(store.fileHash({ plan: 1 })));
+});
+
+// Stage A (finding 1 of docs/gui-review.md): the records snapshot that a read-only call is checked with.
+test("recordsSnapshot changes with every guarded record and not with usage.jsonl or invalid-replies/", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  const dir = path.join(repo, "plan-review");
+  for (const [name, text] of [["plan.md", "p"], ["requirements.md", "r"], ["work-review-1/changes.diff", "d"], ["work-review-1/round-1.json", "{}"], ["checkpoint.json", "{}"]] as const) write(dir, name, text);
+  const moved = async (change: () => void): Promise<number> => {
+    const before = await run(store.recordsSnapshot());
+    change();
+    return compareRecords(before, await run(store.recordsSnapshot())).length;
+  };
+  for (const name of ["plan.md", "requirements.md", "work-review-1/changes.diff", "work-review-1/round-1.json", "checkpoint.json", "baseline.json"]) {
+    assert.equal(await moved(() => fs.appendFileSync(path.join(dir, name), "x")), 1, `rewritten: ${name}`);
+  }
+  assert.equal(await moved(() => fs.rmSync(path.join(dir, "requirements.md"))), 1, "deleted");
+  assert.equal(await moved(() => write(dir, "notes/new.md", "n")), 2, "a new file and its new directory");
+  assert.equal(await moved(() => fs.appendFileSync(path.join(dir, "usage.jsonl"), "{}\n")), 0, "usage.jsonl");
+  assert.equal(await moved(() => write(dir, "invalid-replies/claude-1.json", "{}")), 0, "invalid-replies/");
 });

@@ -29,7 +29,7 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     heading: subjectHeading(id),
     fileLabel: "questions.json",
     reviewPrompt: prompts.questionReviewPrompt,
-    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output) },
+    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records" },
     applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output) },
     amend: null,
     proceed: "proceed to the interview with the question list as it is",
@@ -47,7 +47,7 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
     heading: subjectHeading(id),
     fileLabel: "requirements.md",
     reviewPrompt: prompts.requirementsReviewPrompt,
-    respond: { prompt: prompts.requirementsRespondPrompt, schema: S.PlannerResponse, after: null },
+    respond: { prompt: prompts.requirementsRespondPrompt, schema: S.PlannerResponse, after: null, capability: "records" },
     applyDecisions: { prompt: prompts.requirementsApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
     amend: (_review, response, round) => {
       const ids = response.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
@@ -68,7 +68,7 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
     heading: subjectHeading(id),
     fileLabel: "plan.md",
     reviewPrompt: (round) => prompts.planReviewPrompt(phase, round, withRequirements),
-    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlannerResponse, after: null },
+    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlannerResponse, after: null, capability: "records" },
     applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
     amend: null,
     proceed: "proceed to execution with the plan as it is",
@@ -90,7 +90,7 @@ export function workSubject(phase: number, withRequirements: boolean): Subject<P
     heading: subjectHeading(id),
     fileLabel: "changes.diff",
     reviewPrompt: (round) => prompts.workReviewPrompt(phase, round, withRequirements),
-    respond: { prompt: (round) => prompts.workRespondPrompt(phase, round), schema: S.PlannerResponse, after: null },
+    respond: { prompt: (round, context) => prompts.workRespondPrompt(phase, round, context), schema: S.PlannerResponse, after: null, capability: "readOnly" },
     // Never issued: leaveOnDecision ends the loop instead of a planning call (G-R1-1); typed as the plan's.
     applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
     amend: null,

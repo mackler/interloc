@@ -5,14 +5,14 @@
 import { Cause, Clock, Effect, Exit, FileSystem, Layer, Option, Path, type PlatformError, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createHash } from "node:crypto";
-import { type Artifact, LOG_SUBJECTS, pathOf, recordPath, reviewedFile, type SubjectId } from "./artifacts.ts";
+import { type Artifact, guardedRecord, LOG_SUBJECTS, pathOf, recordPath, reviewedFile, type SubjectId } from "./artifacts.ts";
 import { FileSystemError, GitError } from "./errors.ts";
 import type { LogEntry, UsageRecord } from "./schema.ts";
 import type { Platform } from "./platform.ts";
 import { Baseline, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
 import { renderDecision, renderFeedback, subjectHeading } from "./render.ts";
 import { type ProjectPath, type RecordPath, Store, type StoreError, type StoreShape } from "./services.ts";
-import { decodeStatusV2, excluded, excludedIndexPaths, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
+import { decodeStatusV2, excluded, excludedIndexPaths, type RecordsSnapshot, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
 import { decodeText } from "./state.ts";
 
 /** The store of one project. `ignorePaths` are the paths the change detection ignores (config). */
@@ -234,6 +234,11 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           : recordHash(subject),
       recordHash,
       /** Written to a temporary name and renamed into place, like the JSON records. */
+      readChangeRecord: (phase) =>
+        Effect.gen(function* () {
+          const file = at({ kind: "changes", phase });
+          return (yield* exists(file)) ? yield* readText(file) : "";
+        }),
       changeRecord: (phase) =>
         Effect.gen(function* () {
           const file = at({ kind: "changes", phase });
@@ -276,6 +281,18 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           const entries = new Map<string, { record: (typeof records)[number]; content: WorkingTreeEntry }>();
           for (const record of records) entries.set(record.path, { record, content: yield* inspect(record.path) });
           return { entries };
+        }),
+      /** Every guarded path under plan-review/ with what is there; the relative paths use "/" (guardedRecord). */
+      recordsSnapshot: (): Effect.Effect<RecordsSnapshot, StoreError> =>
+        Effect.gen(function* () {
+          if (!(yield* exists(dir))) return new Map();
+          const listed = (yield* io("list", dir, fs.readDirectory(dir, { recursive: true }))).map((p) => p.split(path.sep).join("/")).filter(guardedRecord);
+          const entries = new Map<string, string>();
+          for (const relative of listed.sort()) {
+            const entry = yield* inspect(path.join("plan-review", relative));
+            entries.set(relative, entry.type === "file" ? `file:${entry.hash}` : entry.type === "link" ? `link:${entry.target}` : entry.type);
+          }
+          return entries;
         }),
     };
   });

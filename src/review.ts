@@ -4,24 +4,26 @@
 
 import { Effect, Ref, Schema } from "effect";
 import { phaseOf, type SubjectId, subjectDir } from "./artifacts.ts";
-import { AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
+import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
-import { decisionPrompt, limitNoProceedPrompt, limitPrompt, repairReplyPrompt } from "./prompts.ts";
+import { decisionPrompt, limitNoProceedPrompt, limitPrompt, repairReplyPrompt, type RespondContext } from "./prompts.ts";
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
-import { Planner, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
-import { compareSnapshots } from "./snapshot.ts";
+import { Planner, type PlanningCapability, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
+import { compareRecords, compareSnapshots } from "./snapshot.ts";
 
 /** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
 const ReviewText = Schema.fromJsonString(S.Review);
 
 /** One planning call of a subject: its prompt, the schema of its output, and what is done with the output. */
 export type Operation<T> = Readonly<{
-  prompt: (round: number) => string;
+  prompt: (round: number, context: RespondContext) => string;
   schema: Schema.Decoder<T>;
   /** Runs after every such call, for output that the program writes to the file; null when there is nothing to do. */
   after: ((output: T) => Effect.Effect<void, RunError, Store>) | null;
+  /** What the call may do (finding 1 of docs/gui-review.md): "readOnly" for a work response, "records" otherwise. */
+  capability: PlanningCapability;
 }>;
 
 /** What the review procedure is applied to. `R` is the response to a review, `D` the output of applying decisions (finding 12). */
@@ -107,17 +109,26 @@ export const decodeWithRepair = <Out extends Schema.Decoder<unknown>, E, R>(
 /** The decoded output of a planning call, the free text and cost of the call that produced it, and whether a repair turn was needed. */
 export type PlanningCall<Out> = Readonly<{ output: Out; resultText: string; costUsd: number | null; repaired: boolean }>;
 
-/** A call in which Claude Code may write only under plan-review/. Halts if the project changed. */
-export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning"): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner> =>
+/**
+ * A call in which Claude Code may write only under plan-review/ ("records"), or change nothing ("readOnly", a work
+ * response). Halts if the project changed; a read-only call, its repair turn included, also halts if a guarded record
+ * under plan-review/ changed (RecordsChanged; the program's own writes are not guarded, src/artifacts.ts).
+ */
+export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records"): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const planner = yield* Planner;
     const call = (text: string) =>
       Effect.gen(function* () {
         const before = yield* store.projectSnapshot();
-        const result = yield* planner.planning(text, schema, purpose);
+        const recordsBefore = capability === "readOnly" ? yield* store.recordsSnapshot() : null;
+        const result = yield* planner.planning(text, schema, purpose, capability);
         const changes = compareSnapshots(before, yield* store.projectSnapshot());
         if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "planning", fileLabel: null, changes }));
+        if (recordsBefore !== null) {
+          const records = compareRecords(recordsBefore, yield* store.recordsSnapshot());
+          if (records.length > 0) return yield* Effect.fail(new RecordsChanged({ changes: records }));
+        }
         return result;
       });
     const first = yield* call(prompt);
@@ -226,7 +237,10 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             return { kind: "ReviewDecoded", review };
           }
           case "CallPlanner": {
-            const call = yield* planningCall(subject.respond.prompt(command.round), subject.respond.schema);
+            // A read-only response cannot read the records, so they are in its prompt (decision Q1 of the stage-A task).
+            const changes = typeof id === "object" && "work" in id && subject.respond.capability === "readOnly" ? yield* store.readChangeRecord(id.work) : null;
+            const context: RespondContext = { review: state.current.review!, log: state.log, changes };
+            const call = yield* planningCall(subject.respond.prompt(command.round, context), subject.respond.schema, "planning", subject.respond.capability);
             return { kind: "ResponseDecoded", response: call.output, resultText: call.resultText, costUsd: call.costUsd };
           }
           case "ApplyDecisions":

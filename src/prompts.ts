@@ -1,6 +1,7 @@
 // Prompt texts. All paths are relative to the project directory.
 
 import { pathOf } from "./artifacts.ts";
+import type { LogEntry, Review } from "./schema.ts";
 
 const SEVERITY = `Severity: blocking = the work cannot succeed with the file as written; major = the file as written will produce a defect or omits something required; minor = everything else.`;
 
@@ -243,11 +244,32 @@ Put the file path, with a line number where it helps, in the location field.
 ${logRules(log, prefix, round)}`;
 }
 
-export function workRespondPrompt(phase: number, round: number): string {
+/**
+ * What a response to a review is given besides the round (decision Q1 of the stage-A task): the review of the round,
+ * the subject's log entries, and the change record of a work review (null for the other subjects).
+ */
+export type RespondContext = Readonly<{ review: Review; log: readonly LogEntry[]; changes: string | null }>;
+
+/**
+ * A work response is read-only (finding 1 of docs/gui-review.md): it may call no tool, so the prompt carries the
+ * review, the entries of this work review's phase in the work-review log, and changes.diff verbatim.
+ */
+export function workRespondPrompt(phase: number, round: number, context: RespondContext): string {
+  const entries = context.log.filter((e) => e.phase === phase);
   return `plan-review/${pathOf({ kind: "review", subject: { work: phase }, round })} contains a review of the work done in the project (the diff in plan-review/${pathOf({ kind: "changes", phase })}).
+You cannot use any tool in this response: the review, the earlier entries of this work review's log and the diff are below, and what you did in the execution phase is in your context. Answer with the final structured output only.
 ${respondRules("the correction will be made in a later execution phase after the plan has been revised; do not modify any file")}
 Every correction, including one that a self-correction calls for, is made in a later execution phase; state in the rationale what the correction requires.
-Do not modify any file.`;
+Do not modify any file.
+
+The review (${pathOf({ kind: "review", subject: { work: phase }, round })}):
+${JSON.stringify(context.review, null, 2)}
+
+The earlier entries of work review ${phase} in plan-review/${pathOf({ kind: "log", subject: { work: phase } })}:
+${entries.length === 0 ? "(none)" : JSON.stringify(entries, null, 2)}
+
+The diff (plan-review/${pathOf({ kind: "changes", phase })}):
+${context.changes ?? "(not available)"}`;
 }
 
 export function revisePlanAfterExecutionPrompt(phase: number, end: Readonly<{ stopped: boolean; workReview: WorkReviewEnd }>): string {

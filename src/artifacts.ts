@@ -75,3 +75,11 @@ export const pathOf = (artifact: Artifact): string => {
 export const recordPath = (artifact: Artifact): string => `${RECORDS_DIR}/${pathOf(artifact)}`;
 /** The four issue logs (one subject of each). */
 export const LOG_SUBJECTS: readonly SubjectId[] = [{ plan: 1 }, "questions", "requirements", { work: 1 }];
+
+/**
+ * Whether a path under plan-review/ is a record that a read-only call must leave unchanged (finding 1 of
+ * docs/gui-review.md). Exempt: what the program itself writes during a call (usage.jsonl; invalid-replies/, written
+ * before a repair turn) and the archives of earlier runs. Every other path is guarded, a kind added later included.
+ */
+export const guardedRecord = (relPath: string): boolean =>
+  relPath !== pathOf({ kind: "usage" }) && relPath !== "invalid-replies" && !relPath.startsWith("invalid-replies/") && !/^archive-[^/]+(\/|$)/.test(relPath);

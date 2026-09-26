@@ -81,3 +81,16 @@ export const excluded = (path: string, ignorePaths: readonly string[]): boolean 
 
 /** The paths of an index listing that a work-review tree leaves out: those `excluded` selects, taken literally (plan 2.3). */
 export const excludedIndexPaths = (paths: readonly string[], ignorePaths: readonly string[]): readonly string[] => paths.filter((p) => excluded(p, ignorePaths));
+
+/** The records under plan-review/ that a read-only call is checked with: each guarded path and what is there ("file:<hash>", "directory", "link:<target>"). */
+export type RecordsSnapshot = ReadonlyMap<string, string>;
+/** The differences between two records snapshots, in path order. */
+export const compareRecords = (before: RecordsSnapshot, after: RecordsSnapshot): readonly Change[] =>
+  [...new Set([...before.keys(), ...after.keys()])].sort().flatMap((path): Change[] => {
+    const b = before.get(path);
+    const a = after.get(path);
+    if (b === a) return [];
+    if (b === undefined) return [{ kind: "added", path }];
+    if (a === undefined) return [{ kind: "removed", path }];
+    return [{ kind: "content_changed", path }];
+  });

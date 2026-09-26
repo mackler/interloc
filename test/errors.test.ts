@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ConfigInvalid, decodeRunError, GitError, haltMessage, ProjectChanged } from "../src/errors.ts";
+import { ConfigInvalid, decodeRunError, GitError, haltMessage, ProjectChanged, RecordsChanged } from "../src/errors.ts";
 
 test("haltMessage reports a typed error with its description", () => {
   const error = new ProjectChanged({ during: "planning", fileLabel: null, changes: [{ kind: "content_changed", path: "a.txt" }] });
@@ -32,4 +32,14 @@ test("decodeRunError accepts an instance and a plain payload alike, and haltMess
   assert.equal(decodeRunError(plain)?._tag, "GitError");
   assert.equal(haltMessage(plain), "HALTED: git status failed: not a repository");
   assert.equal(decodeRunError(null), null);
+});
+
+// Stage A (finding 1 of docs/gui-review.md).
+test("RecordsChanged names the changed records, round-trips through decodeRunError and is rendered by haltMessage", () => {
+  const error = new RecordsChanged({ changes: [{ kind: "content_changed", path: "plan.md" }, { kind: "added", path: "notes/x.md" }] });
+  const message = haltMessage(error);
+  assert.match(message ?? "", /^HALTED: a record under plan-review\/ changed during a read-only response/);
+  assert.match(message ?? "", /content changed: plan\.md/);
+  assert.match(message ?? "", /added: notes\/x\.md/);
+  assert.deepEqual(decodeRunError({ _tag: "RecordsChanged", changes: [{ kind: "removed", path: "requirements.md" }] }), { _tag: "RecordsChanged", changes: [{ kind: "removed", path: "requirements.md" }] });
 });

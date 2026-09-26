@@ -11,7 +11,7 @@ import { chooseOption } from "./input.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as prompts from "./prompts.ts";
 import * as S from "./schema.ts";
-import { Planner, type PlannerShape, RunConfig, Sdk, Store, type StoreError, Ui } from "./services.ts";
+import { Planner, type PlannerShape, type PlanningCapability, RunConfig, Sdk, Store, type StoreError, Ui } from "./services.ts";
 
 const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
@@ -43,6 +43,19 @@ const questionsOf = (input: unknown): Effect.Effect<readonly Question[], ClaudeC
   return Result.isSuccess(decoded) ? Effect.succeed(decoded.success) : Effect.fail(new ClaudeCallFailed({ message: `AskUserQuestion input not understood: ${decoded.failure}` }));
 };
 const deny = (message: string): PermissionResult => ({ behavior: "deny", message });
+const READ_ONLY_REASON = "This response may not use any tool: answer the review from the prompt with the final structured output only, and do not modify any file.";
+
+/**
+ * A read-only call (finding 1 of docs/gui-review.md): a hook without a matcher, so that every tool, known today or
+ * not, reaches it, and it permits only the structured output. A capability rather than a list of tool names.
+ */
+const denyAllButOutput: HookCallback = async (input) => {
+  const pre = input as PreToolUseHookInput;
+  if (pre.tool_name === "StructuredOutput") return {};
+  return { hookSpecificOutput: { hookEventName: pre.hook_event_name, permissionDecision: "deny", permissionDecisionReason: READ_ONLY_REASON } };
+};
+/** The permission callback of a read-only call: nothing is permitted, and a question is not relayed. */
+const readOnlyPermission: CanUseTool = async () => deny(READ_ONLY_REASON);
 
 /** The Planner service over the SDK, Ui, Store and RunConfig services. */
 export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | Store | RunConfig> = Effect.gen(function* () {
@@ -280,7 +293,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     );
 
   return {
-    planning: (prompt, schema, purpose = "planning") =>
+    planning: (prompt, schema, purpose = "planning", capability: PlanningCapability = "records") =>
       Effect.gen(function* () {
         const outcome = yield* call(
           prompt,
@@ -289,9 +302,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           {
             permissionMode: "default",
             outputFormat: { type: "json_schema", schema: agentJsonSchema(schema) },
-            hooks: { PreToolUse: [{ matcher: EDIT_TOOLS.join("|"), hooks: [restrictEdits] }] },
+            hooks: { PreToolUse: capability === "readOnly" ? [{ hooks: [denyAllButOutput] }] : [{ matcher: EDIT_TOOLS.join("|"), hooks: [restrictEdits] }] },
           },
-          planningPermission,
+          capability === "readOnly" ? () => readOnlyPermission : planningPermission,
         );
         if (outcome.error !== null) return yield* Effect.fail(new ClaudeCallFailed({ message: outcome.error }));
         return { output: outcome.structured, resultText: outcome.resultText, costUsd: outcome.costUsd };

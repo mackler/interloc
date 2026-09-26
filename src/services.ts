@@ -11,7 +11,7 @@ import type { Config, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, Q
 import type { UiEvent } from "./uiEvents.ts";
 import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
-import type { Snapshot } from "./snapshot.ts";
+import type { RecordsSnapshot, Snapshot } from "./snapshot.ts";
 
 export type StoreError = FileSystemError | StateFileInvalid | GitError;
 export type PlannerError = ClaudeCallFailed | UserStopped | StoreError;
@@ -31,9 +31,17 @@ export class Ui extends Context.Service<Ui, UiShape>()("plan-review/Ui") {}
 /** What a planning call is for, as the activity line names it; the interview also prints its tool use in the terminal. */
 export type PlanningPurpose = "planning" | "interview";
 export type PlanningResult = Readonly<{ output: unknown; resultText: string; costUsd: number | null }>;
+/**
+ * What a planning call may do (finding 1 of docs/gui-review.md): "records" may edit only under plan-review/ (behaviour 3);
+ * "readOnly" may call no tool but the structured output (a work response, behaviour 12), its repair turn included.
+ */
+export type PlanningCapability = "records" | "readOnly";
 export interface PlannerShape {
-  /** A call in which Claude Code may write only under plan-review/. The output is returned as produced; the caller decodes it. */
-  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose): Effect.Effect<PlanningResult, PlannerError>;
+  /**
+   * A call in which Claude Code may write only under plan-review/ ("records", the default), or call no tool but the
+   * structured output ("readOnly"). The output is returned as produced; the caller decodes it.
+   */
+  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability?: PlanningCapability): Effect.Effect<PlanningResult, PlannerError>;
   /** A call in which Claude Code implements the plan. */
   executing(prompt: string): Effect.Effect<ExecOutcome, PlannerError>;
   readonly sessionId: Effect.Effect<string | null>;
@@ -99,8 +107,12 @@ export interface StoreShape {
   recordHash(subject: SubjectId): Effect.Effect<string, StoreError>;
   /** Writes work-review-<phase>/changes.diff: the diff of the project from the baseline tree to the current one (Q7). */
   changeRecord(phase: number): Effect.Effect<void, StoreError>;
+  /** The text of work-review-<phase>/changes.diff, for the prompt of a read-only work response ("" when it does not exist). */
+  readChangeRecord(phase: number): Effect.Effect<string, StoreError>;
   saveInvalidReply(agent: "claude" | "codex", content: string): Effect.Effect<string, StoreError>;
   projectSnapshot(): Effect.Effect<Snapshot, StoreError>;
+  /** The guarded records under plan-review/ (src/artifacts.ts guardedRecord): the second check of a read-only call. */
+  recordsSnapshot(): Effect.Effect<RecordsSnapshot, StoreError>;
   /** Replaces plan-review/checkpoint.json atomically with the last committed transition (Q6). */
   checkpoint(point: CheckpointPoint): Effect.Effect<void, StoreError>;
 }

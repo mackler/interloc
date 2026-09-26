@@ -6,6 +6,8 @@ import { type Change, renderChange } from "./snapshot.ts";
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
 export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: readonly Change[] }> {}
 export class ReviewedFileChanged extends Data.TaggedError("ReviewedFileChanged")<{ readonly fileLabel: string; readonly changes: readonly Change[] }> {}
+/** A record under plan-review/ changed during a read-only call (a work response; finding 1 of docs/gui-review.md). */
+export class RecordsChanged extends Data.TaggedError("RecordsChanged")<{ readonly changes: readonly Change[] }> {}
 export class PlanNotWritten extends Data.TaggedError("PlanNotWritten")<{ readonly file: string }> {}
 export class AcceptedWithoutChange extends Data.TaggedError("AcceptedWithoutChange")<{ readonly fileLabel: string; readonly accepted: number }> {}
 /** A review or a response whose structure is invalid: decision Q3 of the functional design review, a halt without a repair turn. */
@@ -35,6 +37,7 @@ export type RunError =
   | UserStopped
   | ProjectChanged
   | ReviewedFileChanged
+  | RecordsChanged
   | PlanNotWritten
   | AcceptedWithoutChange
   | RoundInvalid
@@ -62,6 +65,8 @@ export const describe = (error: RunErrorFields): string => {
         : `the project or ${error.fileLabel} changed during a Codex review. Either Codex changed it, or another process did.${indent(error.changes)}`;
     case "ReviewedFileChanged":
       return `the project or ${error.fileLabel} changed during a Codex review. Either Codex changed it, or another process did.${indent(error.changes)}`;
+    case "RecordsChanged":
+      return `a record under plan-review/ changed during a read-only response of Claude Code (a work response may not change any file). Either Claude Code changed it, or another process did.${indent(error.changes)}`;
     case "PlanNotWritten":
       return `Claude Code did not write ${error.file}`;
     case "AcceptedWithoutChange":
@@ -118,6 +123,7 @@ const RunErrorData = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("UserStopped"), where: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("ProjectChanged"), during: Schema.Literals(["planning", "review"]), fileLabel: Schema.NullOr(Schema.String), changes: Schema.Array(ChangeData) }),
   Schema.Struct({ _tag: Schema.Literal("ReviewedFileChanged"), fileLabel: Schema.String, changes: Schema.Array(ChangeData) }),
+  Schema.Struct({ _tag: Schema.Literal("RecordsChanged"), changes: Schema.Array(ChangeData) }),
   Schema.Struct({ _tag: Schema.Literal("PlanNotWritten"), file: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("AcceptedWithoutChange"), fileLabel: Schema.String, accepted: Schema.Number }),
   Schema.Struct({

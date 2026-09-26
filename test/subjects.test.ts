@@ -17,7 +17,7 @@ test("the type of a subject's handler follows the type of its schema (compile-ti
     id: "questions",
     heading: "h",
     fileLabel: "f",
-    respond: { prompt: () => "p", schema: S.PlannerResponse, after: null },
+    respond: { prompt: () => "p", schema: S.PlannerResponse, after: null, capability: "records" },
     // @ts-expect-error the handler must take the decoded type of the operation's schema
     applyDecisions: { prompt: "p", schema: S.QuestionList, after: (output: S.ExecOutcome) => Effect.sync(() => void output) },
     amend: null,
@@ -49,10 +49,12 @@ test("the work subject: its id, file, prompts and policies", () => {
   assert.equal(work.heading, "Work review 2");
   assert.equal(work.fileLabel, "changes.diff");
   assert.match(work.reviewPrompt(1), /work-review-2\/changes\.diff/);
-  assert.match(work.respond.prompt(1), /work-review-2\/review-1\.json/);
+  assert.match(work.respond.prompt(1, { review: { issues: [] }, log: [], changes: "" }), /work-review-2\/review-1\.json/);
   assert.deepEqual([work.proceed, work.leaveOnAcceptance, work.leaveOnDecision, work.amend], [null, true, true, null]);
   assert.notEqual(work.prepare, null);
+  assert.equal(work.respond.capability, "readOnly", "a work response is read-only (finding 1 of docs/gui-review.md)");
   for (const other of [planSubject(1, true), questionSubject("t"), requirementsSubject()]) {
+    assert.equal(other.respond.capability, "records");
     assert.equal(typeof other.proceed, "string");
     assert.deepEqual([other.leaveOnAcceptance, other.leaveOnDecision, other.prepare], [false, false, null]);
   }
