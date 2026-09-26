@@ -112,7 +112,7 @@ followed by hand.
 
 Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect).
 
-- Agent SDK 0.3.283 (bundles Claude Code 2.1.283; upgraded from 0.3.278 on 26 Sep 2026 because Opus 5.5 requires Claude Code 2.1.280 or newer — the SDK's bundled Claude Code, not the container's `claude`, is what a run uses) uses the container's existing login; no API key. The prototype and the real run of the upgrade procedure are pending at the time of the commit.
+- Agent SDK 0.3.283 (bundles Claude Code 2.1.283; upgraded from 0.3.278 on 26 Sep 2026 because Opus 5.5 requires Claude Code 2.1.280 or newer — the SDK's bundled Claude Code, not the container's `claude`, is what a run uses) uses the container's existing login; no API key. The prototype `prototypes/proto.ts` passed on 0.3.283 (26 Sep 2026: login credentials, hook denial, `AskUserQuestion` and permission requests in `canUseTool`); the real run of the upgrade procedure is the next run.
 - `AskUserQuestion` reaches `canUseTool` under `auto` mode. Resuming one session with a different permission mode per call works.
 - Structured output is delivered through a tool named `StructuredOutput`; a hook that denies all tools also denies the final report.
 - Codex SDK 0.155.1: one thread keeps context across turns, and each turn accepts its own `outputSchema`.
