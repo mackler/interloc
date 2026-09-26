@@ -80,6 +80,9 @@ export const emptyRun = (id: number): RunView => ({
 const message = (run: RunView, author: Author, body: string, format: Message["format"], heading: string | null = null): Message => ({ key: `${run.id}-${run.nextSeq}`, author, heading, body, format });
 const withLeft = (run: RunView, m: Message): RunView => ({ ...run, left: [...run.left, m] });
 
+/** The half of a round as conversation.md has it, without its "### Codex" / "### Claude Code" heading, which the message's author shows. */
+const withoutAuthorHeading = (markdown: string): string => markdown.replace(/^### [^\n]*\n+/, "").trim();
+
 /** The timeline after a round began: the round in its subject's open group of the current entry. */
 const roundBegan = (timeline: readonly TimelineEntry[], subject: SubjectId, round: number, limit: number): readonly TimelineEntry[] => {
   const last = timeline[timeline.length - 1];
@@ -103,10 +106,12 @@ const notifiedEvent = (run: RunView, event: UiEvent): RunView => {
       return { ...run, timeline: roundBegan(run.timeline, event.subject, event.round, event.limit) };
     case "LoopFinished":
       return { ...run, timeline: run.timeline.map((e) => ({ ...e, groups: e.groups.map((g) => (sameSubject(g.subject, event.subject) ? { ...g, done: true } : g)) })) };
-    case "ReviewReceived":
-      return { ...run, right: [...run.right, message(run, "codex", renderReview(event.review), "markdown", `${subjectHeading(event.subject)}, round ${event.round}`)] };
+    case "ReviewReceived": {
+      const body = event.review.issues.length === 0 ? "No issue: the review has converged." : withoutAuthorHeading(renderReview(event.review));
+      return { ...run, right: [...run.right, message(run, "codex", body, "markdown", `${subjectHeading(event.subject)}, round ${event.round}`)] };
+    }
     case "ResponseReceived":
-      return { ...run, right: [...run.right, message(run, "claude", renderResponse(event.response), "markdown", `${subjectHeading(event.subject)}, round ${event.round}`)] };
+      return { ...run, right: [...run.right, message(run, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", `${subjectHeading(event.subject)}, round ${event.round}`)] };
     case "PlanWritten": {
       const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q}`).join("\n")}`;
       const body = `**Claude Code wrote the plan (planning phase ${event.phase}).**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;

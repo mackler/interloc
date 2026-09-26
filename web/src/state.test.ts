@@ -67,6 +67,10 @@ describe("ordering and the panels", () => {
     const s = fold(live([started, notified({ _tag: "ReviewReceived", subject: { plan: 1 }, round: 2, review, counted: 1 }), notified({ _tag: "ResponseReceived", subject: { plan: 1 }, round: 2, response, resultText: "" })]));
     expect(s.run?.right.map((m) => [m.author, m.heading])).toEqual([["codex", "Planning phase 1, round 2"], ["claude", "Planning phase 1, round 2"]]);
     expect(s.run?.right[0].body).toMatch(/\*\*\[A\]\*\*/);
+    // The author is the message's; the body does not repeat it (aesthetic and minimalist design).
+    expect(s.run?.right.map((m) => m.body)).not.toContainEqual(expect.stringMatching(/^### /));
+    const none = fold(live([started, notified({ _tag: "ReviewReceived", subject: { plan: 1 }, round: 3, review: { issues: [] }, counted: 0 })]));
+    expect(none.run?.right[0].body).toBe("No issue: the review has converged.");
   });
 });
 

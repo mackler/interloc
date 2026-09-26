@@ -22,7 +22,7 @@
         <span class="m3-font-label-large" data-label>{entry.label}</span>
         {#each entry.groups as group, g (g)}
           <div class="group {group.done ? 'done' : ''}">
-            {#if entry.groups.length > 1 || group.heading !== entry.label}<span class="m3-font-label-medium">{group.heading}</span>{/if}
+            {#if entry.groups.length > 1}<span class="m3-font-label-medium">{group.heading}</span>{/if}
             <ul>
               {#each group.rounds as r (r.round)}<li class="m3-font-body-small">round {r.round} of {r.limit}</li>{/each}
             </ul>

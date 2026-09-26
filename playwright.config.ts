@@ -1,0 +1,22 @@
+// The end-to-end tests (plan step 5.1): three servers over the scripted agents, one per scenario; chromium only.
+// `npm test` builds the page before it runs these.
+import { defineConfig } from "@playwright/test";
+
+const PORTS = { converge: 8101, decision: 8102, stop: 8103 } as const;
+
+export default defineConfig({
+  testDir: "e2e",
+  timeout: 30_000,
+  fullyParallel: false,
+  workers: 1,
+  reporter: "list",
+  use: { browserName: "chromium", headless: true },
+  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  webServer: Object.entries(PORTS).map(([scenario, port]) => ({
+    command: `node e2e/server.ts`,
+    env: { SCENARIO: scenario, PORT: String(port) },
+    url: `http://127.0.0.1:${port}/`,
+    reuseExistingServer: false,
+    timeout: 30_000,
+  })),
+});

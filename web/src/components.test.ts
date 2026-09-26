@@ -111,6 +111,9 @@ describe("TimelineRail", () => {
     const entries = [...root.querySelectorAll("[data-state]")].map((e) => `${e.getAttribute("data-state")}:${e.querySelector("[data-label]")?.textContent?.trim()}`);
     expect(entries).toEqual(["done:Question phase", "active:Planning 1"]);
     expect(root.textContent).toMatch(/round 2 of 5/);
+    // A phase with one review loop does not repeat its name as a sub-heading.
+    expect(root.textContent).not.toMatch(/Planning phase 1/);
+    expect(root.textContent).not.toMatch(/Question review/);
     expect(root.querySelector("[data-busy]")).not.toBe(null);
   });
 });
