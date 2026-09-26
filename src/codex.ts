@@ -1,30 +1,61 @@
 // Codex through the Codex SDK, as the Reviewer service. One thread per review loop.
 
-import { Effect, Layer } from "effect";
+import type { ThreadEvent } from "@openai/codex-sdk";
+import { Effect, Exit, Layer } from "effect";
 import { CodexCallFailed } from "./errors.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as S from "./schema.ts";
+import { reduceTurn, toolEventOf } from "./codexEvents.ts";
 import type { SdkThread } from "./sdk.ts";
-import { Reviewer, type ReviewerShape, type ReviewSession, RunConfig, Sdk, Store, type StoreShape } from "./services.ts";
+import { Reviewer, type ReviewerShape, type ReviewSession, RunConfig, Sdk, Store, type StoreShape, Ui, type UiShape } from "./services.ts";
 
-/** The session over one thread: the thread is a closed-over value, so a call before the start is impossible. */
-const session = (store: StoreShape, thread: SdkThread): ReviewSession => ({
+const failedWith = (e: unknown): CodexCallFailed => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) });
+
+/**
+ * The session over one thread: the thread is a closed-over value, so a call before the start is impossible.
+ * A turn is streamed and its events consumed inside the Effect, as the Claude Code messages are: the tool uses
+ * go to the activity line as they arrive, and on every early exit the turn is aborted and the stream closed.
+ */
+const session = (store: StoreShape, ui: UiShape, thread: SdkThread): ReviewSession => ({
   review: (prompt) =>
     Effect.gen(function* () {
-      // The signal of tryPromise is aborted when the fiber is interrupted; the SDK cancels the turn.
-      const turn = yield* Effect.tryPromise({
-        try: (signal) => thread.run(prompt, { outputSchema: agentJsonSchema(S.Review), signal }),
-        catch: (e: unknown) => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) }),
+      yield* ui.notify({ _tag: "AgentCallStarted", agent: "codex", purpose: "review" });
+      const controller = new AbortController();
+      const streamed = yield* Effect.tryPromise({
+        try: () => thread.runStreamed(prompt, { outputSchema: agentJsonSchema(S.Review), signal: controller.signal }),
+        catch: failedWith,
+      }).pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())));
+      const events = streamed.events;
+      const seen: ThreadEvent[] = [];
+      const reported = new Set<string>();
+      const consume = Effect.gen(function* () {
+        for (;;) {
+          const step = yield* Effect.tryPromise({ try: () => events.next(), catch: failedWith });
+          if (step.done === true) return;
+          seen.push(step.value);
+          const tool = toolEventOf(reported, step.value);
+          if (tool !== null) {
+            reported.add(tool.id);
+            yield* ui.notify(tool.event);
+          }
+        }
       });
-      const usage = turn.usage as { input_tokens?: number; output_tokens?: number } | null | undefined;
-      yield* store.recordUsage({ agent: "codex", thread: thread.id, inputTokens: usage?.input_tokens ?? 0, outputTokens: usage?.output_tokens ?? 0 });
-      return turn.finalResponse;
-    }),
+      const close = Effect.promise(async () => {
+        controller.abort();
+        await events.return(undefined).catch(() => undefined);
+      });
+      yield* consume.pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : close)));
+      const outcome = reduceTurn(seen);
+      if (outcome.kind === "failed") return yield* Effect.fail(new CodexCallFailed({ message: outcome.message }));
+      if (outcome.usage !== null) yield* store.recordUsage({ agent: "codex", thread: thread.id, inputTokens: outcome.usage.input_tokens, outputTokens: outcome.usage.output_tokens });
+      return outcome.finalResponse;
+    }).pipe(Effect.onExit((exit) => ui.notify({ _tag: "AgentCallEnded", agent: "codex", ok: Exit.isSuccess(exit) }))),
 });
 
 /** The Reviewer service over the SDK, Store and RunConfig services. */
-export const makeCodexReviewer: Effect.Effect<ReviewerShape, never, Sdk | Store | RunConfig> = Effect.gen(function* () {
+export const makeCodexReviewer: Effect.Effect<ReviewerShape, never, Sdk | Store | Ui | RunConfig> = Effect.gen(function* () {
   const sdk = yield* Sdk;
+  const ui = yield* Ui;
   const store = yield* Store;
   const config = yield* RunConfig;
 
@@ -42,8 +73,8 @@ export const makeCodexReviewer: Effect.Effect<ReviewerShape, never, Sdk | Store 
           ...(config.codexModel !== null ? { model: config.codexModel } : {}),
         }),
       catch: (e: unknown) => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) }),
-    }).pipe(Effect.map((thread) => session(store, thread))),
+    }).pipe(Effect.map((thread) => session(store, ui, thread))),
   };
 });
 
-export const codexReviewerLayer: Layer.Layer<Reviewer, never, Sdk | Store | RunConfig> = Layer.effect(Reviewer, makeCodexReviewer);
+export const codexReviewerLayer: Layer.Layer<Reviewer, never, Sdk | Store | Ui | RunConfig> = Layer.effect(Reviewer, makeCodexReviewer);

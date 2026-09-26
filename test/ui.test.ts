@@ -118,3 +118,9 @@ test("Ctrl+C in a terminal reaches the process as SIGINT while the interface is 
   assert.deepEqual(signals, ["SIGINT"]);
   await Effect.runPromise(Fiber.interrupt(fiber));
 });
+
+test("notify writes nothing to the terminal", async () => {
+  const io = streams();
+  await withUi(io, (ui) => ui.notify({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }));
+  assert.equal(io.written(), "");
+});

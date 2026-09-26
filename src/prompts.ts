@@ -85,7 +85,7 @@ Return in 'questions' the complete question list of plan-review/questions.json, 
 const INTERVIEW_RULES = `Rules for the interview.
 Each of your turns produces these output fields. message_to_user: the text that the program shows to the user; plain text without Markdown tables. answered_ids: the ids of the agreed questions that the user has answered so far. complete: true only when every agreed question has been answered and you need nothing further from the user. summary: an empty string while complete is false.
 When complete is true, summary contains the complete requirements document in Markdown: the task; every decision with the id of its question; the further information and constraints that the user gave; and open points, each with the default that will be assumed.
-Ask one question per message. For an agreed question, show the proposed answers with numbers, name the default, and state the reason in one sentence. The user may answer with a number, a label, or free text.
+Ask one question per message. For an agreed question, show each proposed answer on its own line in the form \`<n>. <answer>\`, numbered from 1, name the default, and state the reason in one sentence. The user may answer with a number, a label, or free text.
 You may ask any follow-up question that the conversation makes necessary. The user may raise any subject and may ask you questions; answer them, and inspect the codebase without changing it where that is needed.
 Do not use the AskUserQuestion tool; the program relays the conversation. Do not modify any file. Do not write a plan.`;
 
@@ -192,3 +192,31 @@ export function repairReplyPrompt(issue: string): string {
 ${issue}
 Return the complete output again, corrected. Do not modify any file.`;
 }
+
+// ---- prompts to the user ------------------------------------------------------------------------
+// The texts the program shows when it waits for the user. src/userPrompts.ts maps each to its widget.
+
+/** A decision at a pause (behaviour 7) or on a question from Claude Code. */
+export function decisionPrompt(subject: string): string {
+  return `Decision on: ${subject} (Enter = none, q = quit) > `;
+}
+/** The round limit, with the choice to proceed without convergence. */
+export function limitPrompt(limit: number, proceedLabel: string): string {
+  return `${limit} rounds completed without convergence. Number = additional rounds; p = ${proceedLabel}; 0 = stop > `;
+}
+/** The round limit of a subject without a proceed choice (the work review, Q13). */
+export function limitNoProceedPrompt(limit: number): string {
+  return `${limit} rounds completed without convergence. Number = additional rounds; 0 = stop > `;
+}
+/** The user's input at a stop of an execution phase whose report carried none. */
+export const execInputPrompt = "Your input for Claude Code (q = quit) > ";
+/** The answer to a question that Claude Code asked with AskUserQuestion. */
+export const optionOrTextPrompt = "Number or free text (q = quit) > ";
+/** A permission request of Claude Code. */
+export const permissionPrompt = "Allow? (y = yes, anything else = no, q = quit) > ";
+/** A message of the interview. */
+export const interviewMessagePrompt = "You > ";
+/** The confirmation of the interview's summary. */
+export const confirmSummaryPrompt = "Enter = confirm the summary; any other text continues the conversation > ";
+/** The choice after an empty agreed question list (behaviour 2). */
+export const startOrTalkPrompt = "\nClaude Code and Codex agree that no question is needed. Enter = start planning; any other text opens a conversation with Claude Code > ";

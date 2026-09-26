@@ -63,6 +63,7 @@ export const terminalUi = (
 
     return {
       say: (text) => Effect.sync(() => void output.write(text + "\n")),
+      notify: () => Effect.void,
       ask: (prompt) =>
         Effect.gen(function* () {
           yield* showPrompt(prompt);

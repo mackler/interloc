@@ -5,6 +5,7 @@ import { Effect } from "effect";
 import type { RunError } from "./errors.ts";
 import { parseInterviewMessage } from "./input.ts";
 import * as prompts from "./prompts.ts";
+import { interviewSays } from "./render.ts";
 import { planningCall } from "./review.ts";
 import * as S from "./schema.ts";
 import { normalizeTurn } from "./schemaNormalize.ts";
@@ -23,13 +24,15 @@ export const interview = (opening: string, heading: string): Effect.Effect<void,
     yield* store.converse(`## ${heading}\n\n`);
     let prompt = opening;
     for (;;) {
-      const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, true)).output);
-      yield* ui.say(`\n${turn.message}\n`);
+      const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, "interview")).output);
+      const [messageLine, ...summaryLines] = interviewSays(turn);
+      yield* ui.notify({ _tag: "InterviewTurn", heading, message: turn.message, summary: turn.kind === "summary_proposed" ? turn.summary : null });
+      yield* ui.say(messageLine);
       yield* store.converse(`**Claude Code:** ${turn.message}\n\n`);
 
       if (turn.kind === "summary_proposed") {
-        yield* ui.say(`Summary proposed by Claude Code:\n\n${turn.summary}\n`);
-        const reply = parseInterviewMessage(yield* ui.askMessage("Enter = confirm the summary; any other text continues the conversation > "));
+        for (const line of summaryLines) yield* ui.say(line);
+        const reply = parseInterviewMessage(yield* ui.askMessage(prompts.confirmSummaryPrompt));
         if (reply.kind !== "text") {
           yield* store.writeRequirements(turn.summary.trimEnd() + "\n");
           yield* store.converse(`**User:** confirmed the summary.\n\n### Confirmed summary\n\n${turn.summary}\n\n`);
@@ -40,7 +43,7 @@ export const interview = (opening: string, heading: string): Effect.Effect<void,
         continue;
       }
 
-      const reply = parseInterviewMessage(yield* askNonEmpty((p) => ui.askMessage(p), "You > "));
+      const reply = parseInterviewMessage(yield* askNonEmpty((p) => ui.askMessage(p), prompts.interviewMessagePrompt));
       if (reply.kind === "empty") continue;
       yield* store.converse(`**User:** ${reply.kind === "done" ? "/done" : reply.text}\n\n`);
       prompt = reply.kind === "done" ? prompts.interviewDonePrompt : prompts.interviewUserMessage(reply.text);

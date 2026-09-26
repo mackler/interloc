@@ -10,6 +10,8 @@ import { renderRound } from "./render.ts";
 import { type IssueId, validateReview, validateRound, type ValidatedReview, type ValidatedRound } from "./round.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { Config, LogEntry, PlannerResponse, Review } from "./schema.ts";
+import type { SubjectId } from "./artifacts.ts";
+import type { UiEvent } from "./uiEvents.ts";
 import { Result } from "effect";
 
 export type Stage = "start" | "response" | "decision";
@@ -20,6 +22,7 @@ export type DecisionEvent = Readonly<{ subject: string; id: IssueId | null; deci
 /** What the loop asks the interpreter to do. A batch ends with at most one command that yields an event. */
 export type ReviewCommand =
   | Readonly<{ kind: "Say"; text: string }>
+  | Readonly<{ kind: "Notify"; event: UiEvent }>
   | Readonly<{ kind: "Converse"; markdown: string }>
   | Readonly<{ kind: "RecordDecision"; decision: DecisionEvent }>
   | Readonly<{ kind: "RecordFeedback"; round: number; text: string }>
@@ -51,6 +54,8 @@ export type ReviewEvent =
 
 /** What the loop is set up with: the subject's names and the configuration. */
 export type ReviewSetup = Readonly<{
+  /** The subject, as the Ui events name it. */
+  subject: SubjectId;
   heading: string;
   fileLabel: string;
   /** The subject directory under plan-review/, recorded in the round records. */
@@ -130,6 +135,7 @@ export const initialState = (setup: ReviewSetup, config: Pick<Config, "maxRounds
 // ---- rendering ----------------------------------------------------------------------------------
 
 const say = (text: string): ReviewCommand => ({ kind: "Say", text });
+const notify = (event: UiEvent): ReviewCommand => ({ kind: "Notify", event });
 const show = (value: unknown): string => JSON.stringify(value, null, 2);
 const describeObservation = (o: Observation): string => (o.stage === "decision" ? `round ${o.round} (after the user's decision)` : `round ${o.round}`);
 
@@ -159,14 +165,17 @@ const startRound = (s: ReviewState): Transition => {
   }
   return {
     state: { ...s, round: n, step: { name: "awaitingReview" }, current: freshRound },
-    commands: [say(`\n${heading}, round ${n} (limit ${s.limit}): Codex review ...`), { kind: "CallReviewer", round: n }],
+    commands: [notify({ _tag: "RoundBegan", subject: s.setup.subject, round: n, limit: s.limit }), say(`\n${heading}, round ${n} (limit ${s.limit}): Codex review ...`), { kind: "CallReviewer", round: n }],
   };
 };
 
 const onLimitAnswer = (s: ReviewState, answer: string): Transition => {
   const { heading, proceedLabel } = s.setup;
   if (answer === "p") {
-    return done(s, { kind: "Finish", result: "proceed" }, [{ kind: "Converse", markdown: `**User decision:** ${proceedLabel} without convergence after round ${s.round} of ${heading}.\n\n` }]);
+    return done(s, { kind: "Finish", result: "proceed" }, [
+      { kind: "Converse", markdown: `**User decision:** ${proceedLabel} without convergence after round ${s.round} of ${heading}.\n\n` },
+      notify({ _tag: "LoopFinished", subject: s.setup.subject, result: "proceed" }),
+    ]);
   }
   const added = parseExtraRounds(answer);
   if (added === null) return halt(s, new RoundLimitStop({ heading }));
@@ -195,10 +204,11 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
   const before: ReviewCommand[] = [
     { kind: "SaveReview", round: n, review },
     { kind: "SaveRound", record: { kind: "no_response", subject: s.setup.dirName, phase: s.setup.phase, round: n, reconstructed: false, review: checked.success } },
+    notify({ _tag: "ReviewReceived", subject: s.setup.subject, round: n, review, counted }),
     say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`),
   ];
   if (counted === 0) {
-    return done(state, { kind: "Finish", result: "converged" }, [...before, { kind: "Converse", markdown: `## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n` }, checkpoint(state, "reviewed")]);
+    return done(state, { kind: "Finish", result: "converged" }, [...before, { kind: "Converse", markdown: `## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n` }, checkpoint(state, "reviewed"), notify({ _tag: "LoopFinished", subject: s.setup.subject, result: "converged" })]);
   }
   const reraised: Ask[] = log.reraisedIds(s.log, review).map((id) => ({
     say: [`\nCodex has raised again an issue that Claude Code did not accept in full:`, show(s.log.filter((e) => e.id === id)), show(review.issues.find((i) => i.id === id))],
@@ -232,6 +242,7 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
         notes: round.notes,
       },
     },
+    notify({ _tag: "ResponseReceived", subject: s.setup.subject, round: n, response, resultText }),
     { kind: "Converse", markdown: renderRound(heading, n, review, response) },
     ...round.notes.map((note): ReviewCommand => {
       const why = note.reason === "unknown" ? "names no current entry of the issue log" : "names an issue whose current disposition is not an accepted correction";

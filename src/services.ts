@@ -8,6 +8,7 @@ import type { SubjectId } from "./artifacts.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { Config, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, Review } from "./schema.ts";
+import type { UiEvent } from "./uiEvents.ts";
 import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
 import type { Snapshot } from "./snapshot.ts";
@@ -22,13 +23,17 @@ export interface UiShape {
   readonly ask: (prompt: string) => Effect.Effect<string, UserStopped>;
   /** Reads one message of the interview (see TerminalUi). The message "/quit" fails with UserStopped. */
   readonly askMessage: (prompt: string) => Effect.Effect<string, UserStopped>;
+  /** A structured event of the run (decision Q5). The terminal prints nothing for it; the records do not depend on it. */
+  readonly notify: (event: UiEvent) => Effect.Effect<void>;
 }
 export class Ui extends Context.Service<Ui, UiShape>()("plan-review/Ui") {}
 
+/** What a planning call is for, as the activity line names it; the interview also prints its tool use in the terminal. */
+export type PlanningPurpose = "planning" | "interview";
 export type PlanningResult = Readonly<{ output: unknown; resultText: string; costUsd: number | null }>;
 export interface PlannerShape {
   /** A call in which Claude Code may write only under plan-review/. The output is returned as produced; the caller decodes it. */
-  planning(prompt: string, schema: Schema.Top, progress?: boolean): Effect.Effect<PlanningResult, PlannerError>;
+  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose): Effect.Effect<PlanningResult, PlannerError>;
   /** A call in which Claude Code implements the plan. */
   executing(prompt: string): Effect.Effect<ExecOutcome, PlannerError>;
   readonly sessionId: Effect.Effect<string | null>;

@@ -323,3 +323,26 @@ test("the run announces the Codex model it was configured with, or the login's d
   await runTask(byDefault.layer);
   assert.ok(byDefault.probe.ui.said.includes("Codex model: the default of the Codex login"));
 });
+
+// Plan step 1.5 (decision Q5): the run reports its phases, plan writes and execution outcomes to the Ui.
+test("the run notifies the phases, the plan write and the execution outcome in order", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1", resultText: "plan written" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+  });
+  await runTask(layer);
+  const phaseLevel = new Set(["PhaseBegan", "PhaseEnded", "PlanWritten", "ExecutionEnded", "LoopFinished"]);
+  assert.deepEqual(
+    probe.ui.notified.filter((e) => phaseLevel.has(e._tag)),
+    [
+      { _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } },
+      { _tag: "PlanWritten", phase: 1, questions: [], resultText: "plan written" },
+      { _tag: "LoopFinished", subject: { plan: 1 }, result: "converged" },
+      { _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" },
+      { _tag: "PhaseBegan", phase: { kind: "execution", n: 1 } },
+      { _tag: "ExecutionEnded", phase: 1, outcome: finished },
+      { _tag: "PhaseEnded", phase: { kind: "execution", n: 1 }, result: "finished" },
+    ],
+  );
+});

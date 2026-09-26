@@ -3,28 +3,29 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
-import type { TurnOptions } from "@openai/codex-sdk";
+import type { ThreadEvent, TurnOptions } from "@openai/codex-sdk";
 import { Cause, Effect, Exit, Fiber, Layer, Option } from "effect";
 import { makeCodexReviewer } from "../src/codex.ts";
 import { describe, type RunError } from "../src/errors.ts";
 import type { AgentSdk } from "../src/sdk.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
-import { type ReviewerShape, RunConfig, Sdk, Store } from "../src/services.ts";
+import { type ReviewerShape, RunConfig, Sdk, Store, Ui } from "../src/services.ts";
 import { platformLayer } from "../src/platform.ts";
 import { makeStore } from "../src/store.ts";
-import { FakeSdk, turn, type TurnAnswer } from "./fakeSdk.ts";
-import { tempRepo } from "./helpers.ts";
+import { command, FakeSdk, fileChange, turn, turnFailed, type TurnAnswer, webSearch } from "./fakeSdk.ts";
+import { ScriptedUi, tempRepo } from "./helpers.ts";
 
 const run = Effect.runPromise;
 
 /** A Codex reviewer over a fake SDK and a store on a temporary repository. */
-const reviewer = async (turns: TurnAnswer[], config: Partial<typeof S.Config.Type> = {}): Promise<{ reviewer: ReviewerShape; sdk: FakeSdk; dir: string; project: string }> => {
+const reviewer = async (turns: TurnAnswer[], config: Partial<typeof S.Config.Type> = {}): Promise<{ reviewer: ReviewerShape; sdk: FakeSdk; ui: ScriptedUi; dir: string; project: string }> => {
   const store = await run(makeStore(tempRepo(), []).pipe(Effect.provide(platformLayer)));
   await run(store.init("task"));
   const sdk = new FakeSdk([], turns);
-  const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Sdk, sdk), Layer.succeed(RunConfig, { ...S.defaultConfig, ...config }));
-  return { reviewer: await run(makeCodexReviewer.pipe(Effect.provide(deps))), sdk, dir: store.dir, project: store.project };
+  const ui = new ScriptedUi([]);
+  const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Sdk, sdk), Layer.succeed(Ui, ui), Layer.succeed(RunConfig, { ...S.defaultConfig, ...config }));
+  return { reviewer: await run(makeCodexReviewer.pipe(Effect.provide(deps))), sdk, ui, dir: store.dir, project: store.project };
 };
 
 const tag = (e: unknown): string => (e as RunError)._tag;
@@ -105,24 +106,32 @@ test("a startThread that throws makes startPhase fail with CodexCallFailed, not 
   const store = await run(makeStore(tempRepo(), []).pipe(Effect.provide(platformLayer)));
   const fake = new FakeSdk();
   const sdk: AgentSdk = { query: (params) => fake.query(params), startThread: () => { throw new Error("spawn codex ENOENT"); } };
-  const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Sdk, sdk), Layer.succeed(RunConfig, S.defaultConfig));
+  const deps = Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Sdk, sdk), Layer.succeed(Ui, new ScriptedUi([])), Layer.succeed(RunConfig, S.defaultConfig));
   const codex = await run(makeCodexReviewer.pipe(Effect.provide(deps)));
   const error = await typedFailure(codex.startPhase);
   assert.equal(error._tag, "CodexCallFailed");
   assert.match(describe(error), /spawn codex ENOENT/);
 });
 
-test("interrupting a review aborts the Codex turn", async () => {
+test("interrupting a review aborts the Codex turn and returns the event generator", async () => {
   let sawAbort = false;
-  const waitForAbort = (options: TurnOptions | undefined) =>
-    new Promise<never>((_, reject) => {
-      const signal = options?.signal;
-      if (signal === undefined) return reject(new Error("the turn has no abort signal"));
-      signal.addEventListener("abort", () => {
-        sawAbort = true;
-        reject(new Error("The operation was aborted"));
-      });
-    });
+  let returned = false;
+  const waitForAbort = (options: TurnOptions | undefined): AsyncGenerator<ThreadEvent> =>
+    (async function* () {
+      try {
+        yield { type: "turn.started" } as ThreadEvent;
+        await new Promise<never>((_, reject) => {
+          const signal = options?.signal;
+          if (signal === undefined) return reject(new Error("the turn has no abort signal"));
+          signal.addEventListener("abort", () => {
+            sawAbort = true;
+            reject(new Error("The operation was aborted"));
+          });
+        });
+      } finally {
+        returned = true;
+      }
+    })();
   const fake = await reviewer([waitForAbort]);
   const session = await run(fake.reviewer.startPhase);
   const reached = fake.sdk.nextCall();
@@ -131,4 +140,41 @@ test("interrupting a review aborts the Codex turn", async () => {
   await sleep(10);
   await run(Fiber.interrupt(fiber));
   assert.equal(sawAbort, true, "the Codex turn was not aborted");
+  assert.equal(returned, true, "the event generator was not closed");
+  assert.deepEqual(fake.ui.notified.at(-1), { _tag: "AgentCallEnded", agent: "codex", ok: false });
+});
+
+// Plan step 1.8: the turn is streamed, so the activity line can show Codex's tool use.
+test("a streamed turn notifies its start, one tool use per item, and its end, in order", async () => {
+  const events = [...command("c1", "git diff"), ...fileChange("f1", "a.ts", "b.ts"), ...webSearch("w1", "effect v4")];
+  const fake = await reviewer([turn(JSON.stringify({ issues: [] }), undefined, events)]);
+  const session = await run(fake.reviewer.startPhase);
+  await run(session.review("review"));
+  assert.deepEqual(fake.ui.notified, [
+    { _tag: "AgentCallStarted", agent: "codex", purpose: "review" },
+    { _tag: "ToolUsed", agent: "codex", tool: "command", target: "git diff" },
+    { _tag: "ToolUsed", agent: "codex", tool: "edit", target: "a.ts, b.ts" },
+    { _tag: "ToolUsed", agent: "codex", tool: "search", target: "effect v4" },
+    { _tag: "AgentCallEnded", agent: "codex", ok: true },
+  ]);
+});
+
+test("the final response is the text of the last agent message", async () => {
+  const earlier = [{ type: "item.completed", item: { id: "m0", type: "agent_message", text: "thinking" } }] as ThreadEvent[];
+  const fake = await reviewer([turn("final", undefined, earlier)]);
+  const session = await run(fake.reviewer.startPhase);
+  assert.equal(await run(session.review("review")), "final");
+});
+
+test("turn.failed, a stream error event, and a turn without an agent message fail with CodexCallFailed", async () => {
+  const noReply = [{ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }] as ThreadEvent[];
+  const streamError = [{ type: "error", message: "stream lost" }] as ThreadEvent[];
+  for (const [events, text] of [[turnFailed("rate limited"), /rate limited/], [streamError, /stream lost/], [noReply, /no reply/]] as const) {
+    const fake = await reviewer([[...events]]);
+    const session = await run(fake.reviewer.startPhase);
+    const error = await typedFailure(session.review("review"));
+    assert.equal(error._tag, "CodexCallFailed");
+    assert.match(describe(error), text);
+    assert.deepEqual(fake.ui.notified.at(-1), { _tag: "AgentCallEnded", agent: "codex", ok: false });
+  }
 });

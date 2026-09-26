@@ -58,3 +58,34 @@ test("a default answer that names no proposed answer is recorded as null, with a
   assert.equal(file.questions[0].default_answer, null);
   assert.match(read(probe.dir, "conversation.md"), /default answer.*Q1.*C/i);
 });
+
+// Plan step 1.5: the question phase is a phase of the progress display, and each interview turn is an event
+// emitted before the terminal's lines of that turn, which stay unchanged.
+test("the question phase notifies its beginning and end and every interview turn before its lines", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["hi", "more", ""],
+    steps: [
+      { output: { questions: [] } },
+      { output: turn("Anything to add?", false, "") },
+      { output: turn("Done.", true, "# Requirements\n\nNone.") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: { questionPhase: true },
+  });
+  await runTask(layer);
+  const tags = probe.ui.notified.map((e) => e._tag);
+  assert.equal(tags[0], "PhaseBegan");
+  assert.deepEqual(probe.ui.notified[0], { _tag: "PhaseBegan", phase: { kind: "questions" } });
+  const turns = probe.ui.notified.filter((e) => e._tag === "InterviewTurn");
+  assert.deepEqual(turns, [
+    { _tag: "InterviewTurn", heading: "Conversation before planning", message: "Anything to add?", summary: null },
+    { _tag: "InterviewTurn", heading: "Conversation before planning", message: "Done.", summary: "# Requirements\n\nNone." },
+  ]);
+  assert.ok(probe.ui.notified.some((e) => e._tag === "PhaseEnded" && e.phase.kind === "questions"));
+  assert.ok(tags.indexOf("PhaseEnded") < tags.lastIndexOf("PhaseBegan"), "the question phase ends before planning begins");
+  // The terminal lines of the turns are unchanged.
+  assert.ok(probe.ui.said.includes("\nAnything to add?\n"));
+  assert.ok(probe.ui.said.includes("Summary proposed by Claude Code:\n\n# Requirements\n\nNone.\n"));
+});

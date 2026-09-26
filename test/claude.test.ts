@@ -398,3 +398,75 @@ test("two questions with identical text are answered separately; the later answe
   assert.deepEqual(edge.duplicates, ["Same?"]);
   assert.deepEqual(toSdkAnswers([{ question: "X?" }, { question: "Y?" }], new Map([[0, "a"], [1, "b"]])), { answers: { "X?": "a", "Y?": "b" }, duplicates: [] });
 });
+
+// Plan step 1.7 (decision Q5): the adapter reports its activity; the terminal keeps its lines for the interview only.
+const activity = (ui: ScriptedUi) => ui.notified.filter((e) => e._tag === "AgentCallStarted" || e._tag === "ToolUsed" || e._tag === "AgentCallEnded" || e._tag === "QuestionAsked");
+
+test("a planning call notifies its start, every tool use other than StructuredOutput, and its end", async () => {
+  const fake = await planner([messages(init(), assistantTool("Read", { file_path: "/x" }), assistantTool("Grep", { pattern: "foo" }), assistantTool("StructuredOutput", {}), success({ questions_for_user: [] }))]);
+  await run(fake.planner.planning("write the plan", schema, "planning"));
+  assert.deepEqual(activity(fake.ui), [
+    { _tag: "AgentCallStarted", agent: "claude", purpose: "planning" },
+    { _tag: "ToolUsed", agent: "claude", tool: "Read", target: "/x" },
+    { _tag: "ToolUsed", agent: "claude", tool: "Grep", target: "foo" },
+    { _tag: "AgentCallEnded", agent: "claude", ok: true },
+  ]);
+  assert.ok(!fake.ui.said.some((l) => l.includes("[claude: Read")), "a planning call printed its tool use");
+});
+
+test("an interview call keeps its terminal lines for the tool use", async () => {
+  const fake = await planner([messages(init(), assistantTool("Read", { file_path: "/x" }), success({}))]);
+  await run(fake.planner.planning("interview", schema, "interview"));
+  assert.ok(fake.ui.said.includes("  [claude: Read /x]"));
+  assert.deepEqual(activity(fake.ui)[0], { _tag: "AgentCallStarted", agent: "claude", purpose: "interview" });
+});
+
+test("a call that fails ends with AgentCallEnded ok false", async () => {
+  const fake = await planner([messages(init(), failure("error_during_execution"))]);
+  await run(Effect.result(fake.planner.planning("write the plan", schema, "planning")));
+  assert.deepEqual(activity(fake.ui).at(-1), { _tag: "AgentCallEnded", agent: "claude", ok: false });
+});
+
+test("a stream failure ends the call with AgentCallEnded ok false", async () => {
+  const script: Script = () => (async function* () {
+    yield init();
+    throw new Error("stream broke");
+  })();
+  const fake = await planner([script]);
+  await run(Effect.result(fake.planner.planning("write the plan", schema, "planning")));
+  assert.deepEqual(activity(fake.ui).at(-1), { _tag: "AgentCallEnded", agent: "claude", ok: false });
+});
+
+test("an interrupted call ends with AgentCallEnded ok false", async () => {
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await aborted(call.options);
+    throw new Error("The operation was aborted");
+  })();
+  const fake = await planner([script]);
+  const reached = fake.sdk.nextCall();
+  const fiber = Effect.runFork(fake.planner.planning("write the plan", schema, "planning"));
+  await reached;
+  await sleep(10);
+  await run(Fiber.interrupt(fiber));
+  assert.deepEqual(activity(fake.ui).at(-1), { _tag: "AgentCallEnded", agent: "claude", ok: false });
+});
+
+test("a relayed question is notified with its options before the user is asked", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    yield success({});
+  })();
+  const fake = await planner([script], ["2"]);
+  await run(fake.planner.planning("write the plan", schema, "planning"));
+  assert.deepEqual(activity(fake.ui).filter((e) => e._tag === "QuestionAsked"), [{ _tag: "QuestionAsked", question: "A or B?", options: questions[0].options }]);
+});
+
+test("an execution call notifies its start with the purpose execution", async () => {
+  const fake = await planner([messages(init(), success({ status: "finished", summary: "s", question: "", remaining_work: "" }))]);
+  await run(fake.planner.executing("go"));
+  assert.deepEqual(activity(fake.ui)[0], { _tag: "AgentCallStarted", agent: "claude", purpose: "execution" });
+  assert.deepEqual(activity(fake.ui).at(-1), { _tag: "AgentCallEnded", agent: "claude", ok: true });
+});

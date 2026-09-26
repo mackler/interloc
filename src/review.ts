@@ -5,11 +5,11 @@
 import { Effect, Ref, Schema } from "effect";
 import { phaseOf, type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
-import { repairReplyPrompt } from "./prompts.ts";
+import { decisionPrompt, limitPrompt, repairReplyPrompt } from "./prompts.ts";
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
-import { Planner, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
+import { Planner, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
 import { compareSnapshots } from "./snapshot.ts";
 
 /** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
@@ -47,7 +47,7 @@ export const askDecision = (subject: string, phase: number, round: number): Effe
   Effect.gen(function* () {
     const ui = yield* Ui;
     const store = yield* Store;
-    const decision = yield* ui.ask(`Decision on: ${subject} (Enter = none, q = quit) > `);
+    const decision = yield* ui.ask(decisionPrompt(subject));
     if (decision !== "") yield* store.appendDecision({ subject, id: null, decision, phase, round });
     return decision;
   });
@@ -101,14 +101,14 @@ export const decodeWithRepair = <Out extends Schema.Decoder<unknown>, E, R>(
 export type PlanningCall<Out> = Readonly<{ output: Out; resultText: string; costUsd: number | null; repaired: boolean }>;
 
 /** A call in which Claude Code may write only under plan-review/. Halts if the project changed. */
-export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, progress = false): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner> =>
+export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning"): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const planner = yield* Planner;
     const call = (text: string) =>
       Effect.gen(function* () {
         const before = yield* store.projectSnapshot();
-        const result = yield* planner.planning(text, schema, progress);
+        const result = yield* planner.planning(text, schema, purpose);
         const changes = compareSnapshots(before, yield* store.projectSnapshot());
         if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "planning", fileLabel: null, changes }));
         return result;
@@ -166,6 +166,9 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
           case "Say":
             yield* ui.say(command.text);
             return null;
+          case "Notify":
+            yield* ui.notify(command.event);
+            return null;
           case "Converse":
             yield* store.converse(command.markdown);
             return null;
@@ -196,9 +199,9 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
           case "Finish":
             return { finished: command.result };
           case "AskLimit":
-            return { kind: "LimitAnswer", answer: yield* ui.ask(`${command.limit} rounds completed without convergence. Number = additional rounds; p = ${subject.proceedLabel}; 0 = stop > `) };
+            return { kind: "LimitAnswer", answer: yield* ui.ask(limitPrompt(command.limit, subject.proceedLabel)) };
           case "AskDecision":
-            return { kind: "DecisionGiven", text: yield* ui.ask(`Decision on: ${command.subject} (Enter = none, q = quit) > `) };
+            return { kind: "DecisionGiven", text: yield* ui.ask(decisionPrompt(command.subject)) };
           case "CallReviewer": {
             const review: Review = yield* decodeWithRepair("codex", ReviewText, yield* reviewCall(subject.reviewPrompt(command.round)), reviewCall);
             return { kind: "ReviewDecoded", review };
@@ -229,6 +232,6 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
         return yield* Effect.die(new Error("the review loop ended a batch without an event"));
       });
 
-    const setup: ReviewSetup = { heading, fileLabel, dirName: subjectDir(id), phase, proceedLabel: subject.proceedLabel, hasAmend: subject.amend !== null, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
+    const setup: ReviewSetup = { subject: id, heading, fileLabel, dirName: subjectDir(id), phase, proceedLabel: subject.proceedLabel, hasAmend: subject.amend !== null, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
     return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: yield* store.fileHash(id), log: yield* store.loadLog(id) }));
   });

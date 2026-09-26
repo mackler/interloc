@@ -4,6 +4,7 @@
 import type { SubjectId } from "./artifacts.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import type { DecisionEvent } from "./reviewState.ts";
+import type { TurnVariant } from "./schemaNormalize.ts";
 
 /** A question list as the agents exchange it or as the program records it (a recorded default may be null). */
 export type RenderableQuestions = Readonly<{
@@ -14,15 +15,7 @@ export type RenderableQuestions = Readonly<{
 export const subjectHeading = (subject: SubjectId): string => (subject === "questions" ? "Question review" : subject === "requirements" ? "Requirements review" : `Planning phase ${subject.plan}`);
 
 export function renderRound(heading: string, round: number, review: Review, response: PlannerResponse): string {
-  const issues = review.issues.map((i) => `- **[${i.id}]** (${i.severity}, ${i.location}) ${i.problem}\n  Evidence: ${i.evidence}`);
-  const answers = response.dispositions.map((d) => {
-    const dup = d.duplicate_of !== "" ? ` (duplicate of ${d.duplicate_of})` : "";
-    const rev = d.reverses !== "" ? ` (reverses ${d.reverses})` : "";
-    return `- **[${d.id}]** ${d.action}${dup}${rev}: ${d.rationale}`;
-  });
-  const self = response.self_corrections.map((s) => `- **Self-correction** (${s.new_action}, issue "${s.id}"): ${s.explanation}`);
-  const feedback = response.reviewer_feedback !== "" ? [`- **Feedback to the reviewer:** ${response.reviewer_feedback}`] : [];
-  return `## ${heading}, round ${round}\n\n### Codex\n\n${issues.join("\n")}\n\n### Claude Code\n\n${[...answers, ...self, ...feedback].join("\n")}\n\n`;
+  return `## ${heading}, round ${round}\n\n${renderReview(review)}${renderResponse(response)}`;
 }
 
 /** The lines of one decision: for user-decisions.md and for conversation.md. */
@@ -44,3 +37,22 @@ export function renderQuestions(list: RenderableQuestions): string {
       .join("\n") + "\n"
   );
 }
+
+/** The terminal lines of an interview turn, in order; the page shows the turn once and absorbs these lines (plan 4.2). */
+export const interviewSays = (turn: TurnVariant): readonly string[] =>
+  turn.kind === "summary_proposed" ? [`\n${turn.message}\n`, `Summary proposed by Claude Code:\n\n${turn.summary}\n`] : [`\n${turn.message}\n`];
+
+/** Codex's half of a round (the page shows it as Codex's message). */
+export const renderReview = (review: Review): string =>
+  `### Codex\n\n${review.issues.map((i) => `- **[${i.id}]** (${i.severity}, ${i.location}) ${i.problem}\n  Evidence: ${i.evidence}`).join("\n")}\n\n`;
+/** Claude Code's half of a round. */
+export const renderResponse = (response: PlannerResponse): string => {
+  const answers = response.dispositions.map((d) => {
+    const dup = d.duplicate_of !== "" ? ` (duplicate of ${d.duplicate_of})` : "";
+    const rev = d.reverses !== "" ? ` (reverses ${d.reverses})` : "";
+    return `- **[${d.id}]** ${d.action}${dup}${rev}: ${d.rationale}`;
+  });
+  const self = response.self_corrections.map((s) => `- **Self-correction** (${s.new_action}, issue "${s.id}"): ${s.explanation}`);
+  const feedback = response.reviewer_feedback !== "" ? [`- **Feedback to the reviewer:** ${response.reviewer_feedback}`] : [];
+  return `### Claude Code\n\n${[...answers, ...self, ...feedback].join("\n")}\n\n`;
+};

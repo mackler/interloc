@@ -9,6 +9,7 @@ import { type CallOutcome, decodeQuestions, decodeToolTarget, interpretExecution
 import { ClaudeCallFailed, type UserStopped } from "./errors.ts";
 import { chooseOption } from "./input.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
+import * as prompts from "./prompts.ts";
 import * as S from "./schema.ts";
 import { Planner, type PlannerShape, RunConfig, Sdk, Store, type StoreError, Ui } from "./services.ts";
 
@@ -82,10 +83,11 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     Effect.gen(function* () {
       const answers = new Map<number, string>();
       for (const [index, q] of questions.entries()) {
+        yield* ui.notify({ _tag: "QuestionAsked", question: q.question, options: q.options });
         yield* ui.say(`\nQuestion from Claude Code: ${q.question}`);
         for (const [i, o] of q.options.entries()) yield* ui.say(`  ${i + 1}. ${o.label} - ${o.description}`);
         let reply = "";
-        while (reply === "") reply = yield* ui.ask("Number or free text (q = quit) > ");
+        while (reply === "") reply = yield* ui.ask(prompts.optionOrTextPrompt);
         const chosen = chooseOption(reply, q.options.length);
         const answer = chosen === null ? reply : q.options[chosen].label;
         answers.set(index, answer);
@@ -180,7 +182,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       const allowed = await inCallback(
         Effect.gen(function* () {
           yield* ui.say(`\nClaude Code requests permission: ${toolName} ${JSON.stringify(input)}`);
-          const reply = yield* ui.ask("Allow? (y = yes, anything else = no, q = quit) > ");
+          const reply = yield* ui.ask(prompts.permissionPrompt);
           return reply.toLowerCase() === "y";
         }),
         false,
@@ -197,8 +199,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
    * callback still rejects the callback's Promise. The messages are shown and the usage recorded as
    * they arrive; the outcome is the pure reduction of the list at the end.
    */
-  const call = (prompt: string, show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallOutcome, CallbackError> =>
+  const call = (prompt: string, purpose: "planning" | "interview" | "execution", show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallOutcome, CallbackError> =>
     Effect.gen(function* () {
+      yield* ui.notify({ _tag: "AgentCallStarted", agent: "claude", purpose });
       const controller = new AbortController();
       const callbackFailure = yield* Deferred.make<never, CallbackError>();
       const inCallback: InCallback = (effect, fallback) =>
@@ -246,12 +249,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
               yield* ui.say(`Claude Code model: ${message.model}`);
               yield* Ref.set(announcedModel, message.model);
             }
-          } else if (message.type === "assistant" && show !== "none") {
+          } else if (message.type === "assistant") {
             for (const block of message.message.content) {
               if (show === "text" && block.type === "text" && block.text.trim() !== "") yield* ui.say(`[claude] ${block.text.trim()}`);
-              if (show === "tools" && block.type === "tool_use" && block.name !== "StructuredOutput") {
+              if (block.type === "tool_use" && block.name !== "StructuredOutput") {
                 const input = block.input as Record<string, unknown>;
-                yield* ui.say(`  [claude: ${block.name} ${String(input?.file_path ?? input?.pattern ?? input?.command ?? "")}]`);
+                const target = String(input?.file_path ?? input?.pattern ?? input?.command ?? "");
+                yield* ui.notify({ _tag: "ToolUsed", agent: "claude", tool: block.name, target });
+                if (show === "tools") yield* ui.say(`  [claude: ${block.name} ${target}]`);
               }
             }
           } else if (message.type === "result") {
@@ -269,14 +274,18 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       yield* consume.pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.succeed(undefined) : close)));
       if (yield* Deferred.isDone(callbackFailure)) return yield* Deferred.await(callbackFailure);
       return reduceMessages(seen, streamError);
-    });
+    }).pipe(
+      // Every exit ends the activity: a call error, a typed failure and an interruption are ok: false.
+      Effect.onExit((exit) => ui.notify({ _tag: "AgentCallEnded", agent: "claude", ok: Exit.isSuccess(exit) && exit.value.error === null })),
+    );
 
   return {
-    planning: (prompt, schema, progress = false) =>
+    planning: (prompt, schema, purpose = "planning") =>
       Effect.gen(function* () {
         const outcome = yield* call(
           prompt,
-          progress ? "tools" : "none",
+          purpose,
+          purpose === "interview" ? "tools" : "none",
           {
             permissionMode: "default",
             outputFormat: { type: "json_schema", schema: agentJsonSchema(schema) },
@@ -292,6 +301,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         const stop = yield* Ref.make<Stop | null>(null);
         const outcome = yield* call(
           prompt,
+          "execution",
           "text",
           {
             permissionMode: config.execPermissionMode,

@@ -16,6 +16,7 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
     const store = yield* Store;
     const ui = yield* Ui;
 
+    yield* ui.notify({ _tag: "PhaseBegan", phase: { kind: "questions" } });
     yield* ui.say("Question phase: Claude Code generates the question list ...");
     const generated = yield* planningCall(prompts.questionListPrompt(task), S.QuestionList);
     yield* writeQuestions(task, generated.output);
@@ -27,10 +28,11 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
     yield* store.converse(`## Agreed question list\n\n${renderQuestions({ questions: agreed })}\n`);
 
     if (agreed.length === 0) {
-      const first = yield* ui.askMessage("\nClaude Code and Codex agree that no question is needed. Enter = start planning; any other text opens a conversation with Claude Code > ");
+      const first = yield* ui.askMessage(prompts.startOrTalkPrompt);
       if (first === "" || first === "/done") {
         yield* store.writeRequirements(`# Requirements\n\n## Task\n\n${task}\n\nNo question was needed, and the user added no information.\n`);
         yield* store.converse("**User:** started planning without a conversation.\n\n");
+        yield* ui.notify({ _tag: "PhaseEnded", phase: { kind: "questions" }, result: "no conversation" });
         return;
       }
       yield* store.converse(`**User:** ${first}\n\n`);
@@ -40,5 +42,6 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
       yield* interview(prompts.interviewOpenPrompt, "Interview");
     }
 
-    yield* reviewLoop(requirementsSubject());
+    const reviewed = yield* reviewLoop(requirementsSubject());
+    yield* ui.notify({ _tag: "PhaseEnded", phase: { kind: "questions" }, result: reviewed });
   });

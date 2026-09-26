@@ -2,7 +2,7 @@
 // credentials. The message and turn objects carry only the fields the adapters read.
 
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-import type { RunResult, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
+import type { ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 import type { AgentSdk, SdkThread } from "../src/sdk.ts";
 
 export type Call = { prompt: string; options: Options };
@@ -30,12 +30,30 @@ export const messages = (...list: SDKMessage[]): Script =>
     for (const message of list) yield message;
   })();
 
-export const turn = (finalResponse: string, usage: unknown = { input_tokens: 10, output_tokens: 5 }): RunResult =>
-  ({ items: [], finalResponse, usage }) as unknown as RunResult;
+/** A completed turn as its streamed events: the final agent message, then turn.completed with the usage. */
+export const turn = (finalResponse: string, usage: unknown = { input_tokens: 10, output_tokens: 5 }, before: readonly ThreadEvent[] = []): ThreadEvent[] =>
+  [...before, { type: "item.completed", item: { id: "msg-1", type: "agent_message", text: finalResponse } }, { type: "turn.completed", usage }] as unknown as ThreadEvent[];
+/** A command execution item, reported started and completed (the SDK emits both). */
+export const command = (id: string, cmd: string): ThreadEvent[] =>
+  [
+    { type: "item.started", item: { id, type: "command_execution", command: cmd, aggregated_output: "", status: "in_progress" } },
+    { type: "item.completed", item: { id, type: "command_execution", command: cmd, aggregated_output: "ok", exit_code: 0, status: "completed" } },
+  ] as ThreadEvent[];
+/** A file change, which the SDK reports only on completion. */
+export const fileChange = (id: string, ...paths: string[]): ThreadEvent[] => [{ type: "item.completed", item: { id, type: "file_change", changes: paths.map((p) => ({ path: p, kind: "update" })), status: "completed" } }] as ThreadEvent[];
+export const webSearch = (id: string, query: string): ThreadEvent[] =>
+  [
+    { type: "item.started", item: { id, type: "web_search", query } },
+    { type: "item.completed", item: { id, type: "web_search", query } },
+  ] as ThreadEvent[];
+export const turnFailed = (message: string): ThreadEvent[] => [{ type: "turn.failed", error: { message } }] as ThreadEvent[];
 
 export type ThreadCall = { input: string; turnOptions: TurnOptions | undefined };
-/** An answer of `thread.run`: a turn, an error to reject with, or a function of the turn options (to observe the abort signal). */
-export type TurnAnswer = RunResult | Error | ((turnOptions: TurnOptions | undefined) => Promise<RunResult>);
+/**
+ * An answer of `thread.runStreamed`: the events of the turn, an error to reject with, or a function of the turn
+ * options that returns the event generator (to observe the abort signal and the generator's return).
+ */
+export type TurnAnswer = ThreadEvent[] | Error | ((turnOptions: TurnOptions | undefined) => AsyncGenerator<ThreadEvent>);
 
 export class FakeSdk implements AgentSdk {
   readonly calls: Call[] = [];
@@ -74,14 +92,18 @@ export class FakeSdk implements AgentSdk {
     const answers = this.turns;
     return {
       id,
-      run: async (input: string, turnOptions?: TurnOptions): Promise<RunResult> => {
+      runStreamed: async (input: string, turnOptions?: TurnOptions): Promise<{ events: AsyncGenerator<ThreadEvent> }> => {
         record.calls.push({ input, turnOptions });
         this.signal();
         const answer = answers.shift();
         if (answer === undefined) throw new Error("no scripted Codex turn");
         if (answer instanceof Error) throw answer;
-        if (typeof answer === "function") return answer(turnOptions);
-        return answer;
+        if (typeof answer === "function") return { events: answer(turnOptions) };
+        return {
+          events: (async function* () {
+            for (const event of answer) yield event;
+          })(),
+        };
       },
     };
   }

@@ -10,10 +10,11 @@ import { issue, respond } from "./helpers.ts";
 // state machine. The scenario tests of test/run.test.ts remain the behavioural specification; these
 // examples pin each transition.
 
-const setup: ReviewSetup = { heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceedLabel: "proceed to execution with the plan as it is", hasAmend: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceedLabel: "proceed to execution with the plan as it is", hasAmend: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
 const start = (config: Partial<{ maxRounds: number; maxIdleRounds: number; countMinor: boolean }> = {}, log: LogEntry[] = []): Transition =>
   advance(initialState(setup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", log });
-const kinds = (t: Transition): string[] => t.commands.map((c) => c.kind);
+// Notify commands are pinned by their own tests below; the sequences of the other commands ignore them.
+const kinds = (t: Transition): string[] => t.commands.filter((c) => c.kind !== "Notify").map((c) => c.kind);
 const last = (t: Transition): ReviewCommand => t.commands[t.commands.length - 1];
 const says = (t: Transition): string => t.commands.flatMap((c) => (c.kind === "Say" ? [c.text] : [])).join("\n");
 const halt = (t: Transition): RunError => {
@@ -218,4 +219,41 @@ test("a checkpoint follows the records of each transition: reviewed, responded, 
   const decided = advance(asked.state, { kind: "DecisionGiven", text: "keep it" });
   assert.deepEqual(kinds(decided).slice(0, 2), ["RecordDecision", "Checkpoint"]);
   assert.deepEqual(points(decided), [{ subject: "planning-1", phase: 1, round: 1, stage: "decided" }]);
+});
+
+// Plan step 1.4 (decision Q5): the loop reports its progress to the Ui through Notify commands.
+const notified = (t: Transition): string[] => t.commands.flatMap((c) => (c.kind === "Notify" ? [c.event._tag] : []));
+const indexOf = (t: Transition, pred: (c: ReviewCommand) => boolean): number => t.commands.findIndex(pred);
+
+test("Notify: a round begins with RoundBegan before its Say", () => {
+  const t = start();
+  const at = indexOf(t, (c) => c.kind === "Notify" && c.event._tag === "RoundBegan");
+  assert.ok(at >= 0, "no Notify command in the transition");
+  assert.deepEqual((t.commands[at] as Extract<ReviewCommand, { kind: "Notify" }>).event, { _tag: "RoundBegan", subject: { plan: 1 }, round: 1, limit: 5 });
+  assert.ok(at < indexOf(t, (c) => c.kind === "Say"));
+});
+
+test("Notify: a review is reported after its round record, and convergence finishes the loop", () => {
+  const counted = run(start(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } });
+  const at = indexOf(counted, (c) => c.kind === "Notify" && c.event._tag === "ReviewReceived");
+  assert.ok(at > indexOf(counted, (c) => c.kind === "SaveRound"), "no Notify command in the transition after SaveRound");
+  assert.equal((counted.commands[at] as Extract<ReviewCommand, { kind: "Notify" }>).event._tag === "ReviewReceived" && (counted.commands[at] as { event: { counted: number } }).event.counted, 1);
+  const converged = run(start(), { kind: "ReviewDecoded", review: { issues: [] } });
+  assert.deepEqual(notified(converged), ["ReviewReceived", "LoopFinished"]);
+  assert.ok(indexOf(converged, (c) => c.kind === "Notify" && c.event._tag === "LoopFinished") < indexOf(converged, (c) => c.kind === "Finish"));
+});
+
+test("Notify: a response is reported after its round record", () => {
+  const t = run(start(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]));
+  const at = indexOf(t, (c) => c.kind === "Notify" && c.event._tag === "ResponseReceived");
+  assert.ok(at > indexOf(t, (c) => c.kind === "SaveRound"), "no Notify command in the transition after SaveRound");
+});
+
+test("Notify: proceeding at the round limit finishes the loop with proceed", () => {
+  const atLimit = run(start({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const proceed = advance(atLimit.state, { kind: "LimitAnswer", answer: "p" });
+  assert.deepEqual(
+    proceed.commands.filter((c) => c.kind === "Notify").map((c) => (c as { event: unknown }).event),
+    [{ _tag: "LoopFinished", subject: { plan: 1 }, result: "proceed" }],
+  );
 });

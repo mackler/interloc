@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import type { UiEvent } from "../src/uiEvents.ts";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
@@ -72,6 +73,7 @@ const readiness = (): { wait: () => Promise<void>; signal: () => void } => {
 export class ScriptedUi implements UiShape {
   readonly said: string[] = [];
   readonly asked: string[] = [];
+  readonly notified: UiEvent[] = [];
   private readonly answers: ScriptedAnswer[];
   private readonly asks = readiness();
   constructor(answers: readonly ScriptedAnswer[]) {
@@ -80,6 +82,9 @@ export class ScriptedUi implements UiShape {
   /** Resolves when the next prompt is asked. */
   nextAsk(): Promise<void> {
     return this.asks.wait();
+  }
+  notify(event: UiEvent): Effect.Effect<void> {
+    return Effect.sync(() => void this.notified.push(event));
   }
   say(text: string): Effect.Effect<void> {
     return Effect.sync(() => void this.said.push(text));
@@ -111,7 +116,7 @@ export class ScriptedUi implements UiShape {
 }
 
 /** `hang` makes the call wait until it is interrupted, recording the abort signal it was given. */
-export type PlanningStep = { output?: unknown; plan?: string; touchProject?: boolean; hang?: boolean };
+export type PlanningStep = { output?: unknown; plan?: string; touchProject?: boolean; hang?: boolean; resultText?: string };
 
 export class ScriptedPlanner implements PlannerShape {
   readonly prompts: string[] = [];
@@ -148,7 +153,7 @@ export class ScriptedPlanner implements PlannerShape {
       }
       if (step.plan !== undefined) fs.writeFileSync(this.state.plan, step.plan);
       if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
-      return Effect.succeed({ output: step.output, resultText: "", costUsd: 0.1 });
+      return Effect.succeed({ output: step.output, resultText: step.resultText ?? "", costUsd: 0.1 });
     });
   }
   executing(): Effect.Effect<ExecOutcome> {

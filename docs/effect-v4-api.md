@@ -14,6 +14,7 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Effect.succeed` | 1414 | `<A>(value: A) => Effect<A>` |
 | `Effect.fail` | 2056 | `<E>(error: E) => Effect<never, E>` |
 | `Effect.sync` | 1578 | `<A>(thunk: LazyArg<A>) => Effect<A>` |
+| `Effect.void` | 1579 (`void_ as void`, 1587) | `Effect<void>`: succeeds with nothing; the terminal Ui's `notify` |
 | `Effect.die` | 2179 | `(defect: unknown) => Effect<never>` |
 | `Effect.try` | 2180 (`try_ as try`) | `({ try: LazyArg<A>, catch: (error: unknown) => E }) => Effect<A, E>`. Used where a synchronous call of foreign code may throw (`sdk.query(...)` starting the CLI): a bare call inside `Effect.gen` turns a throw into a defect (found by a Codex review, 25 Sep) |
 | `Effect.tryPromise` | 1242 | `({ try: (signal: AbortSignal) => PromiseLike<A>, catch: (error: unknown) => E }) => Effect<A, E>`. The `signal` is aborted when the fiber is interrupted. This is how SDK calls get their abort signal. |

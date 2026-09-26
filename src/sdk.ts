@@ -3,13 +3,13 @@
 // untested code of the pair (plan U1).
 
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
-// `Turn` is not exported; `RunResult` is its alias (node_modules/@openai/codex-sdk/dist/index.d.ts).
-import type { RunResult, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
+import type { ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
 
 /** One Codex thread. `Thread` of the Codex SDK satisfies this. */
 export type SdkThread = {
   readonly id: string | null;
-  run(input: string, turnOptions?: TurnOptions): Promise<RunResult>;
+  /** One turn, streamed (the activity line shows its tool use); `RunStreamedResult` of the Codex SDK is `{ events }`. */
+  runStreamed(input: string, turnOptions?: TurnOptions): Promise<{ events: AsyncGenerator<ThreadEvent> }>;
 };
 
 export type AgentSdk = {
