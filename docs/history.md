@@ -294,6 +294,9 @@ thread's context growing with every round). Resume is not implemented, so the re
   at any one persistence step of a scripted run, the checkpoint never names incomplete records. The
   `liveSdk()` factory of finding 29 and `src/convert.ts` of stage 4 were written after the developer
   approved their texts (25 Sep 2026).
+- 26 Sep 2026: the Agent SDK pin moved from 0.3.278 to 0.3.283 (Claude Code 2.1.283), because the model
+  the developer chose, Opus 5.5, is refused by Claude Code 2.1.278 ("version 2.1.280 or newer is
+  required"); the model name reached the API, so the name itself is right.
 - 26 Sep 2026: the run prints the models it uses — the model Claude Code's init message reports,
   once per change, and the configured Codex model — after a planning run consumed a Claude session
   limit on the login's default model without showing it.
