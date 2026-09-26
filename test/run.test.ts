@@ -308,3 +308,18 @@ test("the checkpoint names the last committed transition: the execution phase af
   await runFails(halted.layer, "RoundInvalid", /B/);
   assert.deepEqual(point(halted.probe.dir), { subject: "planning-1", phase: 1, round: 1, stage: "logged" });
 });
+
+// The Codex model is the configured one; the SDK does not report which model answered.
+test("the run announces the Codex model it was configured with, or the login's default", async () => {
+  const configured = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }],
+    execs: [finished],
+    config: { codexModel: "gpt-test" },
+  });
+  await runTask(configured.layer);
+  assert.ok(configured.probe.ui.said.includes("Codex model: gpt-test"), configured.probe.ui.said.slice(0, 3).join(" | "));
+  const byDefault = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }], execs: [finished] });
+  await runTask(byDefault.layer);
+  assert.ok(byDefault.probe.ui.said.includes("Codex model: the default of the Codex login"));
+});

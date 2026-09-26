@@ -50,6 +50,8 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   const store = yield* Store;
   const config = yield* RunConfig;
   const session = yield* Ref.make<string | null>(null);
+  /** The model Claude Code last announced for the session; the announcement is repeated only when it changes. */
+  const announcedModel = yield* Ref.make<string | null>(null);
 
   /**
    * The real location of a path that may not exist yet: its nearest existing ancestor resolved through
@@ -240,6 +242,10 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           seen.push(message);
           if (message.type === "system" && message.subtype === "init") {
             yield* Ref.set(session, message.session_id);
+            if ((yield* Ref.get(announcedModel)) !== message.model) {
+              yield* ui.say(`Claude Code model: ${message.model}`);
+              yield* Ref.set(announcedModel, message.model);
+            }
           } else if (message.type === "assistant" && show !== "none") {
             for (const block of message.message.content) {
               if (show === "text" && block.type === "text" && block.text.trim() !== "") yield* ui.say(`[claude] ${block.text.trim()}`);

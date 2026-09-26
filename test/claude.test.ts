@@ -121,6 +121,18 @@ test("a planning call denies every tool other than an edit or a question", async
   assert.equal(result?.behavior, "deny");
 });
 
+// The model that serves the session is announced once, and again when it changes.
+test("the model reported by Claude Code's init message is said once per change", async () => {
+  const fake = await planner([
+    messages(init("s-1", "claude-test-1"), success({})),
+    messages(init("s-1", "claude-test-1"), success({})),
+    messages(init("s-1", "claude-test-2"), success({})),
+  ]);
+  for (let i = 0; i < 3; i++) await run(fake.planner.planning("plan", schema));
+  const announced = fake.ui.said.filter((line) => line.startsWith("Claude Code model: "));
+  assert.deepEqual(announced, ["Claude Code model: claude-test-1", "Claude Code model: claude-test-2"]);
+});
+
 test("the session id of the first call is resumed by the next call", async () => {
   const fake = await planner([messages(init("session-3"), success({})), messages(init("session-3"), success({}))]);
   await run(fake.planner.planning("first", schema));

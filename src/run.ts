@@ -19,6 +19,8 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
     const config = yield* RunConfig;
     const planner = yield* Planner;
     yield* store.init(task);
+    // The SDK does not report which model answered a Codex turn; the configured one is all that can be said.
+    yield* ui.say(`Codex model: ${config.codexModel ?? "the default of the Codex login"}`);
     const withRequirements = config.questionPhase;
     if (withRequirements) yield* questionPhase(task);
 

@@ -9,8 +9,8 @@ export type Call = { prompt: string; options: Options };
 /** One scripted Claude Code call: the messages it produces, possibly after calling back. */
 export type Script = (call: Call) => AsyncIterable<SDKMessage>;
 
-export const init = (sessionId = "session-1"): SDKMessage =>
-  ({ type: "system", subtype: "init", session_id: sessionId }) as unknown as SDKMessage;
+export const init = (sessionId = "session-1", model = "claude-fake"): SDKMessage =>
+  ({ type: "system", subtype: "init", session_id: sessionId, model }) as unknown as SDKMessage;
 
 export const success = (structured: unknown, text = "", costUsd: number | null = 0.25, turns = 3): SDKMessage =>
   ({ type: "result", subtype: "success", structured_output: structured, result: text, total_cost_usd: costUsd, num_turns: turns }) as unknown as SDKMessage;
