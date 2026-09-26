@@ -16,6 +16,7 @@ is one Effect program over five services, and the edges (files, git, terminal, S
 - `npm test` — type check, then the tests (`npm run test:unit`; `test:web`, the build and `test:e2e` join as their first tests exist): scenario tests with scripted agents, the adapters over a fake SDK, the store on a temporary git repository, and `test/deps.test.ts`, which checks that the pinned versions are installed. A type error fails the tests before any test runs. No credentials needed; requires `git`. The Playwright tests need Chromium and its system libraries in the container: a fresh container needs `npx playwright install chromium` as the user and `npx playwright install-deps chromium` as root, until the container image provides them.
 - Real run, inside a project container that has both agents' credentials and network access:
   `node /opt/plan-review/src/main.ts "task description" [project directory]`
+- Web GUI in such a container: `node /opt/plan-review/src/web.ts [port]` (default 8090; needs `npm run build` first), then open the page and start tasks there.
 
 The program itself has no build step: Node.js (22.18 or later) runs the `.ts` files directly by removing the types. Only the page is built (`npm run build`).
 
@@ -44,7 +45,13 @@ recommendations of `docs/functional-design-review.md` are the reference for what
 
 | File | Content |
 |---|---|
-| `src/main.ts` | Entry point: the live wiring and the platform runner (`NodeRuntime.runMain`) applied to the program; the only untested code besides `src/sdkLive.ts` |
+| `src/main.ts` | Entry point: the live wiring and the platform runner (`NodeRuntime.runMain`) applied to the program; untested, like `src/sdkLive.ts` and `src/web.ts` |
+| `src/web.ts` | The web GUI's entry point, `node src/web.ts [port]` (default 8090): the web server over the live wiring per run, under the platform runner; refuses to start without `web/dist/index.html`; untested wiring |
+| `src/webArgs.ts` | The pure parts of `src/web.ts`: `parsePort`, the usage and the missing-build message |
+| `src/webServer.ts` | The HTTP handler: the built page from `web/dist`, and one WebSocket per tab (hello, the replay, then the live events without those the replay holds; the page's start, answer, stop and list) |
+| `src/runManager.ts` | One run at a time for the web GUI: start (the project path checked), answer and stop checked against the current run's id, the events of the current and the last run, broadcast with their per-run seq |
+| `src/webUi.ts` | The `Ui` of a run in the page: every call becomes a `RunEvent`; a prompt waits for the first answer of any tab, interpreted as in the terminal |
+| `src/protocol.ts` | The messages between the page and the server as Effect schemas (pure, also imported by the browser); `inSnapshot`, the replay boundary per replayed run |
 | `src/program.ts` | `program(args, wiring)`: arguments, configuration, the services from the wiring, the run, and what is printed at the end; `exitCodeOf` |
 | `src/run.ts` | Question phase, then alternation of planning phase K and execution phase K |
 | `src/review.ts` | `reviewLoop` as the interpreter of `src/reviewState.ts` (it executes the commands against the services and feeds the events back); `planningCall`; `decodeWithRepair`; generic over a `Subject<R, D>` whose two planning operations are typed by their schemas |
@@ -171,7 +178,7 @@ current with all five, which are released often, and does not want it to fall be
 
 - Test first, without exception. Before application code is written or changed, the test that specifies it is written, run, and seen to fail for the reason the change is meant to fix (a failed assertion, or a type error naming the signature being changed; never a missing module or a typo). Then the least code that makes it pass. A new module may first be scaffolded with its final signature and a body that does nothing useful, so that the test fails on its assertion. The observed failure is recorded in the commit message.
 - Every change to behaviour gets a scenario test in `test/` that runs the procedure against the test layers of `test/helpers.ts` (`testLayer`, `testWiring`). `src/issueLog.ts` stays free of I/O and of Effect services so that it can be tested directly.
-- `src/claude.ts` and `src/codex.ts` receive the SDKs through the `Sdk` service and are tested with `test/fakeSdk.ts`. Only `src/sdkLive.ts` (the binding) and `src/main.ts` (the wiring and the runner) are untested; their text is shown to the developer before it is written. No scaffolding may reach a real agent: a scaffold of an adapter makes the SDK call impossible. Verify SDK option names against the type declarations in `node_modules`, not from memory.
+- `src/claude.ts` and `src/codex.ts` receive the SDKs through the `Sdk` service and are tested with `test/fakeSdk.ts`. Only `src/sdkLive.ts` (the binding), `src/main.ts` and `src/web.ts` (the wirings and the runner) are untested; their text is shown to the developer before it is written. No scaffolding may reach a real agent: a scaffold of an adapter makes the SDK call impossible. Verify SDK option names against the type declarations in `node_modules`, not from memory.
 - Do not add a dependency without the developer's instruction. Permitted besides the two SDKs: `effect`, `@effect/platform-node`, and these devDependencies, each pinned exactly and checked by `test/deps.test.ts`: `fast-check` (property tests); for the web GUI (instructed 26 Sep 2026) `svelte` (the page), `vite` and `@sveltejs/vite-plugin-svelte` (the build), `vitest` (component tests), `jsdom` (the DOM for Vitest), `svelte-check` (type check of `.svelte` files), `@playwright/test` (end-to-end tests), `marked` and `dompurify` (Markdown rendering and sanitising in the page), `m3-svelte` (Material Design 3 components) and `vite-plugin-functions-mixins` (the CSS `@function`/`@mixin` of m3-svelte's components, resolved at build time).
 - This directory is the development clone. The installed program is `~/work/plan-review` on the host, which project containers mount read-only at `/opt/plan-review`. A change here takes effect in real runs only after the developer merges it there with `git pull`, runs `npm ci` there when `package-lock.json` changed, and `npm run build` for the page.
 - `bin/dev-claude` starts the development container (`compose.cc.yaml`); it is not part of the program.

@@ -35,6 +35,9 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Effect.context` | 10549 | `<R>() => Effect<Context.Context<R>, never, R>` (v3 `Effect.context`/`runtime`) |
 | `Effect.contextWith` | 10607 | `(f: (context: Context<R>) => Effect)` |
 | `Effect.forkChild` | 16245 | `(self) => Effect<Fiber<A, E>, never, R>` (v3 `fork`; there is no `Effect.fork` in v4) |
+| `Effect.forkDetach` (read 26 Sep, web GUI stage 3.3) | 16401 | `forkDetach(options?: { startImmediately?, uninterruptible? })` or `forkDetach(effect, options?)` → `Effect<Fiber<A, E>, never, R>`: the fiber is attached to the global scope and outlives the fiber that forked it (the run manager's runs). **Observed**: without `startImmediately: true`, a fiber interrupted before it first ran never runs its `onExit`; the manager starts it at once |
+| `Effect.forEach(items, f, { discard: true })` (read 26 Sep, web GUI stage 3.3) | 939 | runs `f` for every item in order; with `discard: true` the result is `void` (the run manager's broadcast) |
+| `Effect.asVoid` (read 26 Sep, web GUI stage 3.3) | 3823 | `(self) => Effect<void, E, R>` |
 | `Effect.runFork` | 16530 | `(effect: Effect<A, E, never>, options?: RunOptions) => Fiber<A, E>` |
 | `Effect.runPromise` | 16701 | `(effect: Effect<A, E>, options?: RunOptions) => Promise<A>` |
 | `Effect.runPromiseExit` | 16769 | `(effect, options?) => Promise<Exit<A, E>>` |
@@ -80,6 +83,7 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Cause.squash` | Cause.d.ts:827 | `(self) => unknown` |
 | `Cause.pretty` | Cause.d.ts:1192 | `(cause) => string` |
 | `Ref.make` / `get` / `set` / `update` | Ref.d.ts:149 / 175 / 210 / 587 | `make(value) => Effect<Ref<A>>`; `set(self, value)`; `update(self, f)` |
+| `Ref.modify` (read 26 Sep, web GUI stage 3.2) | Ref.d.ts:397 | dual: `(self, f: (a) => readonly [B, A]) => Effect<B>`: reads and replaces in one step (the web Ui's prompt table, the run manager's state) |
 
 ## Services and Layers
 
@@ -105,6 +109,7 @@ new name. Material online describes v3 in most cases and is not a source.
 |---|---|---|
 | `Result.succeed` / `Result.fail` | 262 / 288 | `Result<A, E> = Success<A, E> \| Failure<A, E>` (line 57); the value is `.success`, the error `.failure` |
 | `Result.isSuccess` / `Result.isFailure` | 668 / 637 | type guards. A `Result` is not yieldable in `Effect.gen`: a failure is lifted with `Effect.fail(result.failure)` |
+| `Result.try` (read 26 Sep, web GUI stage 3.1) | Result.d.ts:540 (`try_ as try`, 578) | `({ try: LazyArg<A>, catch: (error: unknown) => E }) => Result<A, E>`; `JSON.parse` of a frame in src/protocol.ts |
 | `Effect.fromResult` | Effect.d.ts:2355 | `(result: Result<A, E>) => Effect<A, E>`: lifts a decoder's `Result` (src/store.ts, review stage 4.4; replaces the throw-based `lift`) |
 | `Effect.result` | Effect.d.ts:3422 | `(self: Effect<A, E, R>) => Effect<Result<A, E>, never, R>`: the typed failure as a value (used in `src/claude.ts` for the synchronous start of a call; review stage 4.3) |
 
@@ -115,6 +120,7 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Deferred.make` | 146 | `<A, E = never>() => Effect<Deferred<A, E>>`; `export * as Deferred` in index.d.ts:116 |
 | `Deferred.fail` | 551 | dual: `(self, error: E) => Effect<boolean>` (false when already completed: the first failure wins) |
 | `Deferred.isDone` | 1285 | `(self) => Effect<boolean>` |
+| `Deferred.succeed` (read 26 Sep, web GUI stage 3.2) | 1363 | dual: `(self, value: A) => Effect<boolean>` (false when already completed: the first answer to a prompt wins) |
 | `Deferred.await` | 147 (`_await`, exported as `await` at 183) | `(self) => Effect<A, E>`: fails with the kept error. The typed channel for a callback failure in `src/claude.ts` (finding 10) |
 | `Effect.as` / `Effect.andThen` | Effect.d.ts:3726 / 2780 | `as(value)` replaces the success value; `andThen(effect)` sequences |
 
@@ -142,6 +148,7 @@ new name. Material online describes v3 in most cases and is not a source.
 | Name | Line | Notes |
 |---|---|---|
 | `Schema.Struct` | 2843 | `Struct(fields)`; `.fields` for spreading into a new Struct (there is no `extend`; `fieldsAssign` also exists) |
+| `Schema.Struct.Fields` (read 26 Sep, web GUI stage 3.1) | 2637 | the type of a struct's field record; the protocol's `tagged`/`typed` helpers take `F extends Schema.Struct.Fields` and spread it after the tag |
 | `Schema.String` / `Number` / `Boolean` / `Unknown` | 2454 / 2477 / 2498 / 2407 | constants |
 | `Schema.Finite` / `Int` | 5555 / 5812 | Use `Finite` for numbers in agent schemas: `Number` generates `anyOf [number, "Infinity"/"-Infinity"/"NaN"]` (observed in a probe). |
 | `Schema.Literal` / `Literals` | 2140 / 3960 | `Literals(["a", "b"])` generates `{type: "string", enum: [...]}` (observed) |
@@ -250,3 +257,22 @@ program as a tested function and as the fallback if a future Effect version gene
 
 No JSON Schema keyword of the generated documents was rejected. `definitions` was empty for all seven,
 so nothing had to be inlined.
+
+## HTTP server and WebSocket (read 26 Sep 2026, web GUI stage 3.4)
+
+Imports: `import { HttpPlatform, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"`
+(index.d.ts:63–87), `import type { Socket } from "effect/unstable/socket"`, `import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"`.
+`src/webServer.ts` dispatches on the request itself (method and path) rather than through `HttpRouter`, whose
+`add` carries `Request.From` requirement types that the three routes do not need.
+
+| Name | File:line | Notes |
+|---|---|---|
+| `HttpServerRequest.HttpServerRequest` | unstable/http/HttpServerRequest.d.ts:24, 40 | service and interface: `url`, `method`, `upgrade: Effect<Socket.Socket, HttpServerError>` |
+| `HttpServerResponse.text(body, { status })` / `empty()` / `file(path)` | unstable/http/HttpServerResponse.d.ts:46 / 43 / 59 | `file` is `Effect<HttpServerResponse, PlatformError, HttpPlatform>` |
+| `HttpServer.serve(app)` / `serveEffect(app)` | unstable/http/HttpServer.d.ts:27 / 33 | `serve` gives a `Layer<never, never, HttpServer \| …>`; `serveEffect` the same as a scoped Effect (the tests) |
+| `HttpServer.HttpServer` | unstable/http/HttpServer.d.ts:14–21 | service with `serve` and `address: NetAddress.SocketAddress` (`InetAddressV4 \| InetAddressV6` with `port`, or `UnixPathAddress`; NetAddress.d.ts:167–216) |
+| `NodeHttpServer.layer(() => createServer(), { port })` / `layerTest` | platform-node/dist/NodeHttpServer.d.ts | `layer` provides `HttpServer`, `NodeServices`, `HttpPlatform`, `Etag.Generator`; `layerTest` an ephemeral port plus `FileSystem`, `Path`, `HttpPlatform`, `HttpClient` |
+| `Socket.Socket` | unstable/socket/Socket.d.ts:15–27 | `reader: Effect<Reader, SocketError, Scope>` with `pull: Effect<NonEmptyReadonlyArray<Uint8Array \| string>, SocketError>`; `writer: Effect<Writer, never, Scope>` with `write(chunk \| CloseEvent)`. **Observed** (Socket.js `fromWebSocket`, and a hang in the first server test): the WebSocket upgrade is accepted only when `reader` is acquired, and `write` waits until then, so a session acquires the reader before it writes |
+| `Queue.unbounded` / `offer` / `take` | Queue.d.ts:90 / 91 / 111 | the per-connection buffer of broadcast events |
+| `Effect.forkScoped` | Effect.d.ts:16368 | the connection's forwarding fiber and a stop's interruption, ended with the connection's scope |
+| `Effect.option` | Effect.d.ts:3464 | `Effect<Option<A>, never, R>`: an upgrade or reader failure ends the session quietly |
