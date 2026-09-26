@@ -305,6 +305,42 @@ thread's context growing with every round). Resume is not implemented, so the re
   version-2 shape is read; the old records of earlier runs stay as they are and are not readable by
   the program. The version marker stays, so that a later change of shape can be told apart.
 
+## The web GUI and the work review (26 Sep 2026)
+
+The task: a web page for the program next to the terminal, and a new review phase, in stages, test first.
+The question phase settled what the task left open (`plan-review/requirements.md` of that run):
+marked + dompurify (Q1), m3-svelte (Q2), a vertical timeline rail for the progress (Q3), the port as a
+command-line argument with 8090 as the default (Q4), one `notify(event)` on the Ui for everything the page
+shows beyond the terminal's lines (Q5), the work review's changes as a diff between two git trees built in
+a temporary index (Q7), a directory browser in the page (Q8), WebSocket in both directions (Q9), everything
+in `npm test` (Q10), jsdom (Q11) and svelte-check (Q12) as further devDependencies, no "p" at a work
+review's round limit (Q13), leaving the work review at the first accepted issue before the observation
+(Q14), and any user decision at a work-review pause leading back to planning (G-R1-1).
+
+- Stage 0: the pins. `m3-svelte` 7 writes its styles with CSS `@function`/`@mixin`, so the developer
+  added `vite-plugin-functions-mixins`; that plugin requires Vite 7, so `vite` stays on 7.x and
+  `@sveltejs/vite-plugin-svelte` on 6.x (developer's decision). The Codex SDK stayed on 0.155.1 although
+  0.157.1 was out (developer's decision). Chromium's system libraries were installed by the developer as root.
+- Stage 1: `UiEvent` and `UiShape.notify`; the prompts to the user moved into `src/prompts.ts`, with the
+  widget catalog `src/userPrompts.ts`; the interview prompt now prescribes numbered answers as `<n>. <answer>`
+  so that the page can offer them as buttons; Codex turns are streamed (`runStreamed`) for the activity line.
+- Stage 2: the work review (behaviour 12). Codex's review of the plan found, in five rounds, the decision
+  exits that would have written checkpoints `readCheckpoint` rejects, the replay boundary per run, stale
+  diffs, tracked files matching `.gitignore` lost from the trees, `ignorePaths` read as git patterns, and
+  an edit of `changes.diff` itself passing the guard; each was corrected in the plan before the code.
+- Stage 3: the server. Two facts were found by the tests: a detached fiber interrupted before it first ran
+  never runs its `onExit` (hence `forkDetach({ startImmediately: true })`), and Effect's WebSocket accepts
+  the upgrade only once its reader is acquired, so a session that writes first waits forever.
+- Stage 4: the page. The review against Nielsen's heuristics (`docs/ui-review.md`) replaced the terminal's
+  key conventions in the page's prompts (`pagePromptText`) and added a help text to the form; m3-svelte
+  leaves the density function to the app (`web/src/theme.css`).
+- Stage 5: four Playwright tests against the real server over the scripted agents.
+
+Rejected or deferred in this work: `HttpRouter` (a dispatcher on the request needs fewer names for three
+routes), the SSE module (Q9), a confirmation for Stop (behaviour 1), an icon set for the timeline (a further
+dependency), and persistence of the page's runs beyond the records (the server keeps the current and the
+last run in memory).
+
 ## Rejected or deferred
 
 - `--permission-mode plan` and `plansDirectory` for the planning phases: the location of the

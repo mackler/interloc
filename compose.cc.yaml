@@ -20,6 +20,10 @@ services:
       - ${HOME}/work/plan-review:/opt/plan-review:ro
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN
+    # The web GUI (node /opt/plan-review/src/web.ts, default port 8090), reached from the host's browser at
+    # http://localhost:8090/ without a token or login. A new ports line takes effect when the container is recreated.
+    ports:
+      - "8090:8090"
     # Keeps the container running between sessions; the image's own CMD would start
     # claude without a terminal, which exits at once.
     command: sleep infinity
