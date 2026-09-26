@@ -1,1 +1,5 @@
-{ "ignorePaths": [".devcontainer/claude.json"] }
+{
+    "ignorePaths": [".devcontainer/claude.json"],
+    "claudeModel": "claude-opus-5-5",
+    "codexModel": "gpt-6-astra"
+}
