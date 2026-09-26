@@ -111,3 +111,35 @@ The rule audit has limits. Commit messages record the required observed red fail
 I partially agree with `docs/ui-review.md`: the authorship separation, readable reviews, status rail, fixed-choice buttons, direct Stop, default directory, and introductory task explanation are useful. The long-transcript probe supports its scrolling claim. Its assessment is too categorical about error prevention, input efficiency, recovery, and removal of terminal conventions, and omits adaptive layout and multi-tab drafts. In terms of Nielsen's ten heuristics: status, familiar conversation structure, user control, and recognition have solid foundations; consistency and minimalism are broadly successful on a wide window; prevention, efficient input, recovery, and contextual help need the fixes above. That is a heuristic assessment, not a substitute for keyboard, assistive-technology, contrast, and reduced-motion testing. [Nielsen's ten heuristics](https://www.nngroup.com/articles/ten-usability-heuristics/).
 
 The documented open question about streamed thread context is deliberately not a finding. Dependency freshness was checked without upgrading anything: Codex SDK 0.157.1 was available versus pinned 0.155.1; Effect's `rc` tag remained 4.0.0-rc.117.
+
+## Disposition
+
+Applied 26 Sep 2026 in the stages of `docs/gui-review-response.md`, which is the agreed disposition of every finding.
+Stage A was committed first and alone; the rest ran through plan-review itself (decision D2), from the installed
+copy at `/opt/plan-review`, which did not yet contain stage A. Row 15 was found by the developer after the review.
+
+| # | Severity | Outcome | Commit |
+|---|---|---|---|
+| 1 | High | Done: a work response and its repair turn run under a `readOnly` capability, one `PreToolUse` hook without a matcher that denies every tool but `StructuredOutput`; the review, the phase's log entries and `changes.diff` are in the prompt (decision Q1); a changed guarded record halts with `RecordsChanged`, a changed project with `ProjectChanged`. Behaviour 12's wording of the two halts corrected after work review 1 (W1-R1-1) | `a8a3924`, `45c4c67` |
+| 2 | Medium | Done: `requestTarget` decodes the target with `Result.try`; a malformed URL or escape is a 400, traversal stays 404 | `ca03527` |
+| 3 | Medium | Done: `web/src/storage.ts` guards the acquisition of `localStorage`, the read and the write; the form falls back to the server's directory and Start always starts | `ca03527`, `061f499` |
+| 4 | Medium | Done: the project must be a worktree's top-level directory; a subdirectory is refused with the root named, a bare repository is refused, before anything is archived or initialised | `45c4c67` |
+| 5 | Medium | Done: the draft is keyed by (incarnation, run, prompt) and reconciled with the view after every message, live or replayed; another tab's answer withdraws it with a notice that quotes it; a two-tab browser scenario | `837b954`, `061f499` |
+| 6 | Medium | Done: a composing Enter does not send; persistent field labels, a hint and a visible Send | `837b954`, `061f499` |
+| 7 | Medium | Done (decision D1: in scope; decision Q3: selectable panels): below 840 px a progress disclosure, one panel at a time with a badge, a prompt selecting "You and plan-review", a wrapping top bar; layout tests at 390 × 844, 640 × 400 and 1280 × 800 | `9aa731e` |
+| 8 | Low | Done: the interview's opening is the event `InterviewOpened`, rendered by the terminal with `"""` and by the page with Shift+Enter; an interview scenario in the browser | `837b954`, `061f499` |
+| 9 | Medium | Done: the vacuous exclusion property deleted and replaced by one against an independent path policy; the driver's script selection fixed; the first exit, its round and its pauses checked against an independent model, and nothing after a correction's logged checkpoint but the exit | `061f499` |
+| 10 | Medium | Done: every browser test fails on an uncaught or console error in any page of its context; scenarios for the interview, a work correction through phase 2, two tabs with a draft, a dropped socket, a long transcript, refused storage and composition | `061f499`, `9aa731e` |
+| 11 | High | Done: publication (record and offer) is one serialized, uninterruptible step; Start reserves the run with its fiber in one uninterruptible region; an answer is taken, published and delivered in one; interruption-injection tests at each transition | `45c4c67` |
+| 12 | High | Done, rating kept (refinement 6): an incarnation per start of the server in `hello`, `answer` and `stop`; the manager refuses and the page discards, with a notice, the actions of an earlier incarnation; stale answers tested as well as a stale Stop | `45c4c67` |
+| 13 | Medium | Done in part, as agreed: each tab's queue is bounded at 1,000 and a tab that falls behind is told, closed and recovers by replay. Chunked storage not needed at the measured size (decision Q4): 10,030 events, a 1.55 MB replay delivered in 45–51 ms, about 4 MB retained, about 230 ms to publish them with copying, against a criterion of 1 s or 50 MB | `061f499` |
+| 14 | Low | Done: `makeRenderer` builds a private DOMPurify instance with the link hook; the imported singleton is never configured | `ca03527` |
+| 15 | Medium (developer, 26 Sep 2026) | Done: the server's finalizer, registered after `serveEffect`, tells every tab `closing` and closes its socket, so Ctrl+C ends the server with tabs open; the page says the server has ended | `45c4c67` |
+
+Decisions of the developer: D1, finding 7 is in scope (the adaptive layout was kept in the task); D2, the stages after A
+went through plan-review as one task. Decisions of the task's question phase (`plan-review/requirements.md` of that
+run): Q1, the work response's prompt carries the review, the phase's log entries and the diff; Q2, finding 15 in
+stage C; Q3, selectable panels below 840 px; Q4, chunked storage only if the measurement exceeds 1 s or 50 MB.
+
+Not done by this task: one real run through the work review in the terminal and one in the page, which the response
+document's verification asks for after the last stage.
