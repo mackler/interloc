@@ -2,6 +2,9 @@
   // The top app bar: the title, the task, the connection, and Stop [user control and freedom; error prevention by
   // placement away from the prompt, an outlined button labelled "Stop task", disabled without a run; consistency
   // with the terminal: like Ctrl+C, without a confirmation, which behaviour 1 permits only where a decision is required].
+  // Below M3's expanded width (finding 7 of docs/gui-review.md) the bar wraps: the title, the connection and Stop stay
+  // on the first line, and the project and the task move to a secondary line [visibility of system status: nothing
+  // that says what runs or whether the page is connected is dropped].
   import { Button } from "m3-svelte";
   import type { RunView } from "../state.ts";
 
@@ -25,9 +28,18 @@
 
 <style>
   .bar { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 1rem; background: var(--m3c-surface-container); box-shadow: var(--m3-elevation-2); position: relative; z-index: 1; }
-  h1 { margin: 0; }
+  h1 { margin: 0; white-space: nowrap; }
   .task { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   .summary { color: var(--m3c-on-surface-variant); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .connection { padding: 0.25rem 0.75rem; border-radius: var(--m3-shape-full); background: var(--m3c-surface-container-highest); }
+  @media (max-width: 839px) {
+    .bar { flex-wrap: wrap; gap: 0.25rem 0.75rem; }
+    h1 { flex: 1; }
+    .task { order: 2; flex-basis: 100%; }
+  }
+  /* A compact window: M3's title size for a small top app bar (22 px), so that Stop stays on the first line. */
+  @media (max-width: 599px) {
+    h1 { font-size: 1.375rem; line-height: 1.75rem; }
+  }
   .connection.reconnecting, .connection.connecting { background: var(--m3c-error-container); color: var(--m3c-on-error-container); }
 </style>

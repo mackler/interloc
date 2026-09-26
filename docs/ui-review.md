@@ -27,3 +27,25 @@ as CLAUDE.md's section "User interface" requires. "Changed" names what this revi
 - **States**: disabled, hover, focus and pressed states come from m3-svelte's buttons; the hand-styled directory rows and answer fields have hover and focus-visible states in the scheme's colours.
 - **Motion**: the progress indicator's animation (m3-svelte, reduced when the user prefers reduced motion).
 - **Deviations**: m3-svelte has no indeterminate linear progress indicator, so `LinearProgressEstimate` (its indicator for work of unknown length) stands in for it. The phase marks of the timeline are text glyphs (✓ ● ■) rather than Material Symbols, because an icon set would be another dependency. The answer fields are m3-svelte's outlined text fields with persistent labels; Enter sends, Shift+Enter adds a line in a message, and a filled Send button sits beside them.
+
+## Layout across window sizes (finding 7 of `docs/gui-review.md`, 26 Sep 2026)
+
+The page was a fixed grid of a 14rem rail and two equal panels. At 390 px each panel was 59 px wide and the page
+overflowed sideways; at a 200 % zoom of a desktop window (a 640 × 400 CSS viewport) the panels were 184 px wide. The
+layout now follows M3's window size classes (`web/src/layout.ts`, `App.svelte`, `TopBar.svelte`):
+
+- **Expanded (840 px and wider)**: unchanged, the rail and both panels side by side.
+- **Below 840 px**: the rail becomes a one-line disclosure ("Progress: Planning 1, round 2 of 5") that opens the whole
+  rail [visibility of system status: the current phase stays in view; aesthetic and minimalist design: the detail
+  is one tap away]. One panel is shown at a time, chosen in an M3 segmented group labelled with the panels' own titles
+  [consistency and standards: the same names as the wide page; recognition rather than recall]. The hidden panel's
+  button counts its new messages ("· 3 new") [visibility of system status], and a new prompt selects "You and
+  plan-review", where it is answered; otherwise only the user changes the panel [user control and freedom]. Below
+  that height the page scrolls vertically, and a panel keeps at least 12.5rem.
+- **The top bar** wraps: the title, the connection and Stop stay on the first line (the title at M3's 22 px below
+  600 px), and the project and the task move to a second line.
+- **The answer field** has the full width in every window, with the hint and Send on the row beneath it.
+
+`e2e/layout.spec.ts` checks, at 390 × 844 and at 640 × 400, that nothing overflows sideways, that the shown panel is
+at least 300 px wide (and 400 or 200 px high) and the answer field at least 280 px wide, the panel switch, the badge
+and the selection by a prompt; and at 1280 × 800 that the rail and both panels stand side by side.

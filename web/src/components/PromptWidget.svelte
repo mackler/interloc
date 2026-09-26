@@ -29,15 +29,15 @@
     {#if widget.asked.free !== "none"}
       <!-- A persistent label and a visible Send beside the keyboard shortcut [recognition rather than recall;
            flexibility and efficiency of use: Enter for the keyboard, the button for touch and discovery]. -->
-      <div class="free-row">
-        {#if widget.asked.free === "line"}
-          <div class="free"><TextFieldOutlined label="Your answer" name="answer" bind:value={text} onkeydown={(e: KeyboardEvent) => { if (e.key === "Enter" && !composing(e)) { e.preventDefault(); send(text); } }} /></div>
-        {:else}
-          <div class="free"><TextFieldOutlinedMultiline label="Your message" name="answer" rows={3} bind:value={text} onkeydown={(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey && !composing(e)) { e.preventDefault(); send(text); } }} /></div>
-        {/if}
+      {#if widget.asked.free === "line"}
+        <TextFieldOutlined label="Your answer" name="answer" bind:value={text} onkeydown={(e: KeyboardEvent) => { if (e.key === "Enter" && !composing(e)) { e.preventDefault(); send(text); } }} />
+      {:else}
+        <TextFieldOutlinedMultiline label="Your message" name="answer" rows={3} bind:value={text} onkeydown={(e: KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey && !composing(e)) { e.preventDefault(); send(text); } }} />
+      {/if}
+      <div class="send-row">
+        <p class="hint m3-font-body-small">{widget.asked.free === "line" ? "Enter sends." : "Enter sends; Shift+Enter starts a new line."}</p>
         <Button variant="filled" type="button" name="send" disabled={text === ""} onclick={() => send(text)}>Send</Button>
       </div>
-      <p class="hint m3-font-body-small">{widget.asked.free === "line" ? "Enter sends." : "Enter sends; Shift+Enter starts a new line."}</p>
     {/if}
   </div>
 {/if}
@@ -45,7 +45,7 @@
 <style>
   .prompt { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; border-top: 1px solid var(--m3c-outline-variant); background: var(--m3c-surface-container); }
   .choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  .free-row { display: flex; gap: 0.5rem; align-items: flex-end; }
-  .free { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  /* The field has the full width in every window (finding 7); the hint and Send share the row below it. */
+  .send-row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; }
   .hint { margin: 0; color: var(--m3c-on-surface-variant); }
 </style>
