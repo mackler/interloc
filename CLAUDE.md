@@ -86,6 +86,13 @@ recommendations of `docs/functional-design-review.md` are the reference for what
 | `src/state.ts` | The decoders of the program's own JSON records, returning `Result` |
 | `prototypes/classify.ts` | The classification of one call of the schema acceptance prototype (tested; the prototype counts `accepted && decoded` only) |
 | `src/ui.ts` | The `Ui` layer: one readline interface as a scoped resource; the dialogue is serialized (a second concurrent `ask` waits) |
+| `web/` | The page: `index.html`, `vite.config.ts` (build into `web/dist`, the CSS mixins of m3-svelte, Vitest in jsdom), `tsconfig.json` (DOM lib) |
+| `web/src/state.ts` | The page's pure reducer over the server's messages: the two panels, the pending prompt with its choices, the activity line, the timeline rail; replay and live events fold alike |
+| `web/src/socket.ts` | The page's WebSocket: reconnection with backoff, the queue of actions until the hello (an action for an ended run is discarded with a notice) |
+| `web/src/markdown.ts` | The agents' Markdown rendered with marked and sanitised with DOMPurify |
+| `web/src/components/*.svelte` | The components over m3-svelte: `App`, `TopBar`, `StartForm`, `DirectoryDialog`, `TimelineRail`, `ChatPanel`, `Message`, `PromptWidget`, `ActivityLine`; `web/src/theme.css` (M3 styles, the tonal-spot scheme, the density function) |
+| `web/src/*.test.ts` | Vitest: the reducer (with a fast-check property), the socket over a fake WebSocket, the Markdown, the components mounted in jsdom (`test-setup.ts` supplies `matchMedia` and the dialog methods jsdom lacks) |
+| `docs/ui-review.md` | The review of the page against Nielsen's ten heuristics and Material Design 3 |
 | `test/store.test.ts` | The work review's records in the store over a temporary repository: the baseline tree, `changes.diff`, the two hashes of the work subject |
 | `test/workReview.test.ts` | Scenario tests of the work review: convergence, revise after an accepted issue or a self-correction, the three decision exits with `readCheckpoint`, the round limit without "p", the guards, stops before the work review |
 | `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer` (the services, scripted), `testLayer`, `testWiring`, temporary git repository |

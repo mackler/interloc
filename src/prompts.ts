@@ -261,3 +261,36 @@ Revise plan-review/plan.md: keep the completed steps and their markers, add step
 If no change to the plan is required, leave the file unchanged. Do not modify any other file. Do not implement anything.
 Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.`;
 }
+
+/**
+ * A prompt to the user in the web page's words: the same question without the terminal's key conventions, which
+ * the page's buttons replace (plan step 4.7). `kind` is the prompt's kind in src/userPrompts.ts.
+ */
+export function pagePromptText(kind: string, text: string): string {
+  const decision = decisionPrompt("\u0000").split("\u0000");
+  switch (kind) {
+    case "decision":
+      return `Decision on: ${text.slice(decision[0].length, text.length - decision[1].length)}`;
+    case "limit":
+    case "limitNoProceed": {
+      const rounds = /^[0-9]+/.exec(text)?.[0] ?? "The";
+      return kind === "limit"
+        ? `${rounds} rounds completed without convergence. Add rounds, proceed without convergence, or stop.`
+        : `${rounds} rounds completed without convergence. Add rounds or stop.`;
+    }
+    case "execInput":
+      return "Your input for Claude Code";
+    case "optionOrText":
+      return "Choose one of the options, or type your own answer.";
+    case "permission":
+      return "Allow this action?";
+    case "interviewMessage":
+      return "Your reply";
+    case "confirmSummary":
+      return "Confirm the summary, or write what should change.";
+    case "startOrTalk":
+      return "Claude Code and Codex agree that no question is needed. Start planning, or write a message to open a conversation with Claude Code.";
+    default:
+      return text.replace(/\s*>\s*$/, "").trim();
+  }
+}

@@ -1,0 +1,16 @@
+@import "m3-svelte/etc/styles.css";
+@import "m3-svelte/etc/recommended-styles.css";
+@import "m3-svelte/etc/livetheme/tonalspot2025.css";
+
+/* The source colour of the M3 scheme; light and dark follow the system (prefers-color-scheme through color-scheme). */
+/* The density scale of m3-svelte's components: the default density, sizes as specified by M3. */
+@function --m3-density(--size) {
+  result: var(--size);
+}
+
+:root {
+  --m3v-source: #4a64a8;
+  color-scheme: light dark;
+}
+html, body { margin: 0; }
+body { font-family: "Roboto Flex", Roboto, system-ui, sans-serif; }

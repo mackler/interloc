@@ -1,0 +1,29 @@
+# Review of the web page (plan step 4.7, 26 Sep 2026)
+
+The page (`web/src/`) checked against Jakob Nielsen's ten usability heuristics and against Material Design 3,
+as CLAUDE.md's section "User interface" requires. "Changed" names what this review changed; each change has a test.
+
+## Nielsen's heuristics
+
+| Heuristic | Where the page satisfies it | Changed in this review |
+|---|---|---|
+| 1. Visibility of system status | Timeline rail with every phase done, active or stopped, and the rounds per review loop; progress indicator while an agent works; activity line with the current agent call and its last tool use; the connection chip in the app bar ("connected", "reconnecting…"); a notice when a queued action was discarded | — |
+| 2. Match between the system and the real world | Two chat panels like a messaging app, with the authors named (plan-review, You, Codex, Claude Code); the agents' Markdown rendered | Prompts were shown with the terminal's key conventions ("Enter = none, q = quit >"), which do not exist in the page; they are now stated in the page's words (`pagePromptText` in `src/prompts.ts`), and the buttons carry the choices |
+| 3. User control and freedom | Stop task at any time (like Ctrl+C); Quit at every prompt, as in the terminal; the chat does not scroll away from a user who has scrolled up (a "new messages" chip instead); New task after the end | — |
+| 4. Consistency and standards | Every button sends exactly the text the terminal would receive; one top app bar; M3 components and colour roles throughout | — |
+| 5. Error prevention | Start is disabled until the directory and the task are filled and no run is active; the path is checked by the server before a run starts; Stop is outlined, labelled "Stop task", placed in the app bar away from the prompt, and disabled without a run (no confirmation dialog, which behaviour 1 excludes) | — |
+| 6. Recognition rather than recall | The directory browser; the last project path remembered; the choices of a prompt as buttons, including the interview's numbered answers and the options of a relayed question | — |
+| 7. Flexibility and efficiency of use | Buttons for the fixed choices and typing where free text is meaningful; Enter sends (Shift+Enter for a new line in a message) | — |
+| 8. Aesthetic and minimalist design | Only the newest run is shown; the agents' exchange is in its own panel; blank terminal lines and the interview's duplicated lines are not shown | — |
+| 9. Help users recognize, diagnose, and recover from errors | The server's refusal (a missing path, not a git repository, a run in progress) is the field's error text; halts and interruptions appear as the program's messages with the terminal's text, naming where the state is kept; answers made for an ended run are reported as not sent | — |
+| 10. Help and documentation | The form's supporting texts; the placeholders of the answer fields | The form did not say what happens after Start; it now explains the procedure in two sentences, where the records are kept, and what Stop task does |
+
+## Material Design 3
+
+- **Components** (m3-svelte 7.2.1): `Button` (filled for the primary action, tonal for other choices, outlined for Stop, Quit and Browse, text for Cancel), `TextFieldOutlined`, `TextFieldOutlinedMultiline`, `Dialog` (the directory browser), `Chip` (assist, elevated: "new messages"), `LinearProgressEstimate`.
+- **Colour roles** from the tonal-spot 2025 scheme of m3-svelte's live theme (`--m3v-source`), light and dark through `color-scheme` / `light-dark()`: surface and surface containers for the panels, secondary container for the active phase, primary container for the user's messages, tertiary and secondary containers for Codex and Claude Code, error container for the reconnecting chip and the notices.
+- **Typography**: the M3 type scale classes (`m3-font-title-large` for the app bar, `title-small` for panel headings, `body-*` for messages, `label-*` for authors and the chip).
+- **Elevation**: the app bar at level 2; the dialog at m3-svelte's dialog elevation; the "new messages" chip elevated.
+- **States**: disabled, hover, focus and pressed states come from m3-svelte's buttons; the hand-styled directory rows and answer fields have hover and focus-visible states in the scheme's colours.
+- **Motion**: the progress indicator's animation (m3-svelte, reduced when the user prefers reduced motion).
+- **Deviations**: m3-svelte has no indeterminate linear progress indicator, so `LinearProgressEstimate` (its indicator for work of unknown length) stands in for it. The phase marks of the timeline are text glyphs (✓ ● ■) rather than Material Symbols, because an icon set would be another dependency. The answer field is a plain input styled with the scheme's tokens, so that Enter can send while Shift+Enter adds a line.

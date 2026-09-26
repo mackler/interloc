@@ -30,6 +30,6 @@
     "test:unit": "node --test test/*.test.ts",
     "test:web": "vitest run --config web/vite.config.ts",
     "test:e2e": "playwright test",
-    "test": "npm run check && npm run test:unit"
+    "test": "npm run check && npm run test:unit && npm run test:web"
   }
 }
