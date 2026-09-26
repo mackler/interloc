@@ -1,7 +1,7 @@
 // The run manager of the web GUI (plan step 3.3): one run at a time, started, answered and stopped from the page;
 // the events of the current run and of the last finished one, broadcast to every connected tab.
 
-import { Clock, Deferred, Effect, Exit, Fiber, FileSystem, Ref, type Scope } from "effect";
+import { Clock, Deferred, Effect, Exit, Fiber, FileSystem, Ref, type Scope, Semaphore, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { Platform } from "./platform.ts";
 import { exitCodeOf, program, type Wiring } from "./program.ts";
@@ -16,6 +16,8 @@ export type Refusal = Readonly<{ refused: string }>;
 export type RunManager = Readonly<{
   /** The server's working directory: where the page's directory browser starts. */
   cwd: string;
+  /** This start of the server (finding 12): an action naming another incarnation is refused. */
+  incarnation: string;
   /** Registers a listener for every event appended from now on, until the scope closes. */
   subscribe: (listener: (event: Broadcast) => Effect.Effect<void>) => Effect.Effect<void, never, Scope.Scope>;
   /** The last finished run and the current one, as far as they exist, with all their events. */
@@ -24,16 +26,37 @@ export type RunManager = Readonly<{
   current: Effect.Effect<number | null>;
   /** Starts a run of the program in the project with the task; its id, or why not. */
   start: (project: string, task: string) => Effect.Effect<number | Refusal>;
-  /** Interrupts the run with that id, like Ctrl+C (behaviour 11). */
-  stop: (run: number) => Effect.Effect<Refusal | null>;
-  /** The answer to a pending prompt of the run with that id. */
-  answer: (run: number, prompt: number, text: string) => Effect.Effect<Refusal | null>;
+  /** Interrupts the run with that id of that incarnation, like Ctrl+C (behaviour 11). */
+  stop: (incarnation: string, run: number) => Effect.Effect<Refusal | null>;
+  /** The answer to a pending prompt of the run with that id of that incarnation. */
+  answer: (incarnation: string, run: number, prompt: number, text: string) => Effect.Effect<Refusal | null>;
 }>;
 
-type Run = Readonly<{ id: number; events: readonly RunEvent[]; ui: WebUi; fiber: Fiber.Fiber<number> | null }>;
+/** A subscriber of the broadcast. Its contract: it does not block (it offers to its own queue); slow delivery is its own fiber's. */
+export type Listener<B> = (event: B) => Effect.Effect<void>;
+
+/**
+ * Publication (finding 11 of docs/gui-review.md): `record` computes the event and the next state in one Ref.modify,
+ * and the event is offered to every listener, as one step that is serialized (so every listener receives the events
+ * in the order in which they were recorded) and uninterruptible (so no event is recorded without being offered).
+ * Listeners do not block, so the protected region stays short. Returns the event, or null when `record` produced none.
+ */
+export const makePublisher = <S, B>(state: Ref.Ref<S>, listeners: Ref.Ref<ReadonlySet<Listener<B>>>): Effect.Effect<(record: (s: S) => readonly [B | null, S]) => Effect.Effect<B | null>> =>
+  Semaphore.make(1).pipe(
+    Effect.map((serial) => (record: (s: S) => readonly [B | null, S]) =>
+      Ref.modify(state, record).pipe(
+        Effect.tap((b) => (b === null ? Effect.void : Ref.get(listeners).pipe(Effect.flatMap((set) => Effect.forEach([...set], (listener) => listener(b), { discard: true }))))),
+        serial.withPermits(1),
+        Effect.uninterruptible,
+      ),
+    ),
+  );
+
+type Run = Readonly<{ id: number; events: readonly RunEvent[]; ui: WebUi; fiber: Fiber.Fiber<number> }>;
 type State = Readonly<{ nextId: number; current: Run | null; last: Run | null }>;
 const record = (r: Run): RunRecord => ({ id: r.id, events: r.events });
 const ENDED: Refusal = { refused: "that run has ended" };
+const EARLIER: Refusal = { refused: "that run belongs to an earlier start of the server" };
 
 /**
  * The manager over a wiring per run (the live one of main.ts with the run's web Ui). The state is one Ref: the
@@ -41,31 +64,56 @@ const ENDED: Refusal = { refused: "that run has ended" };
  * appended in one step with its seq and then broadcast, so a listener registered before a snapshot sees every
  * event that the snapshot does not hold (P1-R1-2).
  */
-export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string): Effect.Effect<RunManager, never, Platform> =>
+export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string, incarnation: string): Effect.Effect<RunManager, never, Platform> =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const state = yield* Ref.make<State>({ nextId: 1, current: null, last: null });
-    const listeners = yield* Ref.make<ReadonlySet<(event: Broadcast) => Effect.Effect<void>>>(new Set());
+    const listeners = yield* Ref.make<ReadonlySet<Listener<Broadcast>>>(new Set());
+    const publish = yield* makePublisher(state, listeners);
 
-    const broadcast = (event: Broadcast) => Ref.get(listeners).pipe(Effect.flatMap((set) => Effect.forEach([...set], (listener) => listener(event), { discard: true })));
     /** Appends an event to the current run with the given id and broadcasts it; nothing when that run is not current. */
     const append = (id: number, event: RunEvent): Effect.Effect<void> =>
-      Ref.modify(state, (s): readonly [Broadcast | null, State] => {
+      publish((s): readonly [Broadcast | null, State] => {
         if (s.current === null || s.current.id !== id) return [null, s];
         return [{ run: id, seq: s.current.events.length, event }, { ...s, current: { ...s.current, events: [...s.current.events, event] } }];
-      }).pipe(Effect.flatMap((b) => (b === null ? Effect.void : broadcast(b))));
+      }).pipe(Effect.asVoid);
+    /** Appends Ended and makes the run the last one, in the same step. */
+    const end = (id: number, code: number): Effect.Effect<void> =>
+      publish((s): readonly [Broadcast | null, State] => {
+        if (s.current === null || s.current.id !== id) return [null, s];
+        const event: RunEvent = { _tag: "Ended", code };
+        return [{ run: id, seq: s.current.events.length, event }, { ...s, current: null, last: { ...s.current, events: [...s.current.events, event] } }];
+      }).pipe(Effect.asVoid);
 
-    /** Why the path cannot be a project, or null: it must be a directory in a git repository. */
+    /** One git command in a directory: its exit code and its standard output (-1 and "" when it cannot be spawned). */
+    const git = (dir: string, args: readonly string[]): Effect.Effect<Readonly<{ code: number; out: string }>> =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const handle = yield* spawner.spawn(ChildProcess.make("git", ["-C", dir, ...args]));
+          const [out] = yield* Effect.all([Stream.mkString(Stream.decodeText(handle.stdout)), Stream.runDrain(handle.stderr)], { concurrency: "unbounded" });
+          return { code: yield* handle.exitCode, out: out.trim() };
+        }),
+      ).pipe(Effect.catch(() => Effect.succeed({ code: -1, out: "" })));
+
+    /**
+     * Why the path cannot be a project, or null: it must be the top-level directory of a git worktree (finding 4 of
+     * docs/gui-review.md). A subdirectory would be a different project scope than the baseline tree and the
+     * exclusions assume, so it is refused with the root named rather than silently widened.
+     */
     const invalidProject = (project: string): Effect.Effect<string | null> =>
       Effect.gen(function* () {
         const info = yield* Effect.exit(fs.stat(project));
         if (Exit.isFailure(info)) return `${project} does not exist or cannot be read`;
         if (info.value.type !== "Directory") return `${project} is not a directory`;
-        const code = yield* Effect.scoped(
-          spawner.spawn(ChildProcess.make("git", ["-C", project, "rev-parse", "--git-dir"])).pipe(Effect.flatMap((handle) => handle.exitCode)),
-        ).pipe(Effect.catch(() => Effect.succeed(-1)));
-        return code === 0 ? null : `${project} is not a git repository`;
+        const bare = yield* git(project, ["rev-parse", "--is-bare-repository"]);
+        if (bare.code !== 0) return `${project} is not a git repository`;
+        if (bare.out === "true") return `${project} is a bare repository; choose a directory with a working tree`;
+        const top = yield* git(project, ["rev-parse", "--show-toplevel"]);
+        if (top.code !== 0) return `${project} is not in a git working tree`;
+        const here = yield* fs.realPath(project).pipe(Effect.catch(() => Effect.succeed(project)));
+        const root = yield* fs.realPath(top.out).pipe(Effect.catch(() => Effect.succeed(top.out)));
+        return here === root ? null : `${project} is inside the git repository ${root}; choose its top-level directory, the project that plan-review reviews`;
       });
 
     /** The run with that id, if it is the current one. */
@@ -79,49 +127,55 @@ export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string): Effe
         // The ui's sink needs the id, and the id is taken with the reservation of the run.
         const idRef = yield* Ref.make(0);
         const ui = yield* makeWebUi((event) => Ref.get(idRef).pipe(Effect.flatMap((id) => append(id, event))));
-        const reserved = yield* Ref.modify(state, (s): readonly [number | null, State] =>
-          s.current !== null ? [null, s] : [s.nextId, { ...s, nextId: s.nextId + 1, current: { id: s.nextId, events: [], ui, fiber: null } }],
+        const time = new Date(yield* Clock.currentTimeMillis).toISOString();
+        // The ownership transfer (finding 11 of docs/gui-review.md) is one uninterruptible region: the fiber exists
+        // before the run is reserved, the run is reserved with its fiber in one step, and the gate is released after
+        // Started, so no interruption can leave a run reserved without a fiber or a fiber that never starts.
+        return yield* Effect.uninterruptible(
+          Effect.gen(function* () {
+            // The fiber outlives the request that started it; it waits for the gate. Started at once, so that its
+            // onExit is in place before any stop can interrupt it; a run that was never reserved ends as a no-op
+            // (idRef is 0, which is no run's id).
+            const fiber = yield* Deferred.await(gate).pipe(
+              Effect.andThen(Effect.scoped(program([task, project], wiring(ui)))),
+              Effect.onExit((exit: Exit.Exit<number>) => Ref.get(idRef).pipe(Effect.flatMap((id) => end(id, exitCodeOf(exit))))),
+              Effect.forkDetach({ startImmediately: true }),
+            );
+            const reserved = yield* Ref.modify(state, (s): readonly [number | null, State] =>
+              s.current !== null ? [null, s] : [s.nextId, { ...s, nextId: s.nextId + 1, current: { id: s.nextId, events: [], ui, fiber } }],
+            );
+            if (reserved === null) {
+              yield* Fiber.interrupt(fiber);
+              return { refused: "a run is in progress; stop it or wait for its end" };
+            }
+            yield* Ref.set(idRef, reserved);
+            yield* append(reserved, { _tag: "Started", project, task, time });
+            yield* Deferred.succeed(gate, undefined);
+            return reserved;
+          }),
         );
-        if (reserved === null) return { refused: "a run is in progress; stop it or wait for its end" };
-        const id = reserved;
-        yield* Ref.set(idRef, id);
-        yield* append(id, { _tag: "Started", project, task, time: new Date(yield* Clock.currentTimeMillis).toISOString() });
-        const finish = (exit: Exit.Exit<number>) =>
-          append(id, { _tag: "Ended", code: exitCodeOf(exit) }).pipe(
-            Effect.andThen(Ref.update(state, (s) => (s.current !== null && s.current.id === id ? { ...s, current: null, last: s.current } : s))),
-          );
-        // The fiber outlives the request that started it; it waits for the gate so that stop finds it.
-        const fiber = yield* Deferred.await(gate).pipe(
-          Effect.andThen(Effect.scoped(program([task, project], wiring(ui)))),
-          Effect.onExit(finish),
-          // Started at once, so that its onExit is in place before any stop can interrupt it.
-          Effect.forkDetach({ startImmediately: true }),
-        );
-        yield* Ref.update(state, (s) => (s.current !== null && s.current.id === id ? { ...s, current: { ...s.current, fiber } } : s));
-        yield* Deferred.succeed(gate, undefined);
-        return id;
       });
 
     return {
       cwd,
+      incarnation,
       subscribe: (listener) =>
         Effect.acquireRelease(
-          Ref.update(listeners, (set) => new Set([...set, listener])),
+          Ref.update(listeners, (set): ReadonlySet<Listener<Broadcast>> => new Set([...set, listener])),
           () => Ref.update(listeners, (set) => new Set([...set].filter((l) => l !== listener))),
         ).pipe(Effect.asVoid),
       replay: Ref.get(state).pipe(Effect.map((s) => [s.last, s.current].flatMap((r) => (r === null ? [] : [record(r)])))),
       current: Ref.get(state).pipe(Effect.map((s) => s.current?.id ?? null)),
       start,
-      stop: (id) =>
-        currentRun(id).pipe(
+      stop: (of, id) =>
+        of !== incarnation ? Effect.succeed(EARLIER) : currentRun(id).pipe(
           Effect.flatMap((r) => {
             if (r === null) return Effect.succeed(ENDED);
-            if (r.fiber === null) return Effect.succeed<Refusal>({ refused: "the run is starting; try again" });
             return Fiber.interrupt(r.fiber).pipe(Effect.as(null));
           }),
         ),
-      answer: (id, prompt, text) =>
-        currentRun(id).pipe(
+      answer: (of, id, prompt, text) =>
+        of !== incarnation ? Effect.succeed(EARLIER) : currentRun(id).pipe(
           Effect.flatMap((r) => {
             if (r === null) return Effect.succeed(ENDED);
             return r.ui.answer(prompt, text).pipe(Effect.map((taken): Refusal | null => (taken ? null : { refused: "that question has already been answered" })));

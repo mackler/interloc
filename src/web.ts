@@ -8,6 +8,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as fs from "node:fs";
 import { createServer } from "node:http";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { claudePlannerLayer } from "./claude.ts";
 import { codexReviewerLayer } from "./codex.ts";
@@ -43,9 +44,15 @@ const wiringOf = (ui: WebUi): Wiring => ({
   usage: (text) => Effect.sync(() => void process.stderr.write(text + "\n")),
 });
 
+/** This start of the server (finding 12 of docs/gui-review.md): run and prompt numbers restart, the incarnation does not. */
+const incarnation = `${Date.now().toString(36)}-${randomUUID()}`;
+
 const main = Effect.gen(function* () {
-  const manager = yield* makeRunManager(wiringOf, process.cwd());
-  yield* HttpServer.serveEffect(makeWebServer(manager, distDir));
+  const manager = yield* makeRunManager(wiringOf, process.cwd(), incarnation);
+  const web = yield* makeWebServer(manager, distDir);
+  yield* HttpServer.serveEffect(web.handler);
+  // Registered after serveEffect, so that it runs before the HTTP shutdown, which would wait for the open tabs (finding 15).
+  yield* Effect.addFinalizer(() => web.closeAll);
   yield* Effect.sync(() => void process.stdout.write(
     `plan-review web GUI on http://localhost:${port}/ (working directory ${process.cwd()}); Ctrl+C ends the server.\n`));
   return yield* Effect.never;
@@ -55,5 +62,6 @@ const main = Effect.gen(function* () {
   Effect.provide(platformLayer),
 );
 
-// On SIGINT or SIGTERM the runner interrupts the server; a run in progress ends with the process.
+// On SIGINT or SIGTERM the runner interrupts the server; its finalizer tells each tab and closes its socket, then a
+// run in progress ends with the process.
 NodeRuntime.runMain(main);

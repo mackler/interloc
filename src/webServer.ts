@@ -1,9 +1,9 @@
 // The web server (plan step 3.4): the built page from web/dist, and one WebSocket per tab: on connect the hello
 // and the replay, then the live events; from the page start, answer, stop and list.
 
-import { Effect, Exit, FileSystem, Path, Queue, Result, type Scope } from "effect";
+import { Deferred, Effect, Exit, FileSystem, Path, Queue, Ref, Result, type Scope } from "effect";
 import { HttpPlatform, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
-import type { Socket } from "effect/unstable/socket";
+import { Socket } from "effect/unstable/socket";
 import { type ClientMessage, decodeClient, inSnapshot, type ServerMessage } from "./protocol.ts";
 import type { Broadcast, Refusal, RunManager } from "./runManager.ts";
 
@@ -16,8 +16,33 @@ const notFound = HttpServerResponse.text("not found", { status: 404 });
 export const requestTarget = (url: string): Result.Result<string, "malformed"> =>
   Result.try({ try: () => decodeURIComponent(new URL(url, "http://localhost").pathname), catch: (): "malformed" => "malformed" });
 
+/**
+ * The server: the handler of every request, and `closeAll`, which tells every open tab that the server is ending and
+ * closes its socket (finding 15 of docs/gui-review.md). The wiring registers `closeAll` as a finalizer *after*
+ * `HttpServer.serveEffect`, so that it runs before the HTTP shutdown, which would otherwise wait for the tabs.
+ */
+export type WebServer = Readonly<{ handler: Effect.Effect<HttpServerResponse.HttpServerResponse, never, WebServerServices>; closeAll: Effect.Effect<void> }>;
+/** One open tab: the signal that the server is closing, and the signal that the tab's session has ended. */
+type Open = Readonly<{ closing: Deferred.Deferred<void>; done: Deferred.Deferred<void> }>;
+
+export const makeWebServer = (manager: RunManager, distDir: string): Effect.Effect<WebServer> =>
+  Effect.gen(function* () {
+    const open = yield* Ref.make<ReadonlySet<Open>>(new Set());
+    const closeAll = Ref.get(open).pipe(
+      Effect.flatMap((sessions) =>
+        Effect.forEach([...sessions], (o) => Deferred.succeed(o.closing, undefined), { discard: true }).pipe(
+          Effect.andThen(Effect.forEach([...sessions], (o) => Deferred.await(o.done), { discard: true })),
+          // A session that does not end in time does not hold the server; the HTTP shutdown follows.
+          Effect.timeout("2 seconds"),
+          Effect.ignore,
+        ),
+      ),
+    );
+    return { handler: handlerOf(manager, distDir, open), closeAll };
+  });
+
 /** The handler of every request. */
-export const makeWebServer = (manager: RunManager, distDir: string): Effect.Effect<HttpServerResponse.HttpServerResponse, never, WebServerServices> =>
+const handlerOf = (manager: RunManager, distDir: string, open: Ref.Ref<ReadonlySet<Open>>): Effect.Effect<HttpServerResponse.HttpServerResponse, never, WebServerServices> =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     const fs = yield* FileSystem.FileSystem;
@@ -29,7 +54,7 @@ export const makeWebServer = (manager: RunManager, distDir: string): Effect.Effe
     if (pathname === "/ws") {
       const socket = yield* request.upgrade.pipe(Effect.option);
       if (socket._tag === "None") return HttpServerResponse.text("a WebSocket upgrade was expected", { status: 400 });
-      yield* session(manager, socket.value, fs, path);
+      yield* session(manager, socket.value, fs, path, open);
       return HttpServerResponse.empty();
     }
     // The page: index.html at /, and the build's files; a path that leaves the build is not found.
@@ -47,9 +72,15 @@ export const makeWebServer = (manager: RunManager, distDir: string): Effect.Effe
  * then hello and replay are written, and every buffered and later event except those the snapshot holds
  * (inSnapshot, a boundary per replayed run). The frames of the page are handled in order until the socket closes.
  */
-const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.FileSystem, path: Path.Path): Effect.Effect<void, never, Scope.Scope> =>
+const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.FileSystem, path: Path.Path, open: Ref.Ref<ReadonlySet<Open>>): Effect.Effect<void, never, Scope.Scope> =>
   Effect.scoped(
     Effect.gen(function* () {
+      // Registered for closeAll; `done` is completed however the session ends.
+      const me: Open = { closing: yield* Deferred.make<void>(), done: yield* Deferred.make<void>() };
+      yield* Effect.acquireRelease(
+        Ref.update(open, (set): ReadonlySet<Open> => new Set([...set, me])),
+        () => Ref.update(open, (set): ReadonlySet<Open> => new Set([...set].filter((o) => o !== me))).pipe(Effect.andThen(Deferred.succeed(me.done, undefined))),
+      );
       // The upgrade is accepted when the reader is acquired, and a write waits for that (Socket.fromWebSocket):
       // the reader comes first.
       const reader = yield* socket.reader.pipe(Effect.option);
@@ -59,7 +90,7 @@ const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.File
       const buffered = yield* Queue.unbounded<Broadcast>();
       yield* manager.subscribe((event) => Queue.offer(buffered, event).pipe(Effect.asVoid));
       const runs = yield* manager.replay;
-      yield* send({ type: "hello", cwd: manager.cwd, current: yield* manager.current });
+      yield* send({ type: "hello", cwd: manager.cwd, current: yield* manager.current, incarnation: manager.incarnation });
       yield* send({ type: "replay", runs });
       const forward = Effect.gen(function* () {
         for (;;) {
@@ -75,16 +106,16 @@ const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.File
           case "start":
             return manager.start(message.project, message.task).pipe(Effect.flatMap((r) => (typeof r === "number" ? Effect.void : refuse(r))));
           case "answer":
-            return manager.answer(message.run, message.prompt, message.text).pipe(Effect.flatMap(refuse));
+            return manager.answer(message.incarnation, message.run, message.prompt, message.text).pipe(Effect.flatMap(refuse));
           case "stop":
             // The interruption waits for the run's finalizers; the connection keeps reading meanwhile.
-            return Effect.forkScoped(manager.stop(message.run).pipe(Effect.flatMap(refuse))).pipe(Effect.asVoid);
+            return Effect.forkScoped(manager.stop(message.incarnation, message.run).pipe(Effect.flatMap(refuse))).pipe(Effect.asVoid);
           case "list":
             return listing(message.path, fs, path).pipe(Effect.flatMap(send));
         }
       };
       // Every termination of the socket is a SocketError (Socket.d.ts); it ends the loop.
-      yield* Effect.gen(function* () {
+      const read = Effect.gen(function* () {
         for (;;) {
           for (const chunk of yield* reader.value.pull) {
             const text = typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk);
@@ -93,6 +124,12 @@ const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.File
           }
         }
       }).pipe(Effect.ignore);
+      // The server's end (closeAll): the tab is told, then its socket is closed ("going away").
+      const closed = Deferred.await(me.closing).pipe(
+        Effect.andThen(send({ type: "closing" })),
+        Effect.andThen(writer.write(new Socket.CloseEvent(1001, "the server is shutting down")).pipe(Effect.ignore)),
+      );
+      yield* Effect.race(read, closed);
     }),
   );
 

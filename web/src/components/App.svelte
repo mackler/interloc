@@ -43,7 +43,7 @@
 </script>
 
 <div class="app">
-  <TopBar {run} connection={view.connection} onStop={(id) => send({ type: "stop", run: id })} />
+  <TopBar {run} connection={view.connection} onStop={(id) => send({ type: "stop", incarnation: view.incarnation ?? "", run: id })} />
   {#if showForm}
     <main class="form">
       <StartForm
@@ -60,7 +60,7 @@
       <TimelineRail timeline={run.timeline} busy={run.busy} />
       <div class="left">
         <ChatPanel title="You and plan-review" messages={run.left} empty="The run has started." />
-        <PromptWidget widget={run.pending} onAnswer={(prompt, text) => send({ type: "answer", run: run.id, prompt, text })} />
+        <PromptWidget widget={run.pending} onAnswer={(prompt, text) => send({ type: "answer", incarnation: view.incarnation ?? "", run: run.id, prompt, text })} />
         {#if latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
         {#if run.ended !== null}
           <div class="ended">

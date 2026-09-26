@@ -18,17 +18,23 @@ export type RunEvent =
   | Readonly<{ _tag: "Notified"; event: UiEvent }>
   | Readonly<{ _tag: "Ended"; code: number }>;
 export type RunRecord = Readonly<{ id: number; events: readonly RunEvent[] }>;
+/**
+ * The incarnation (finding 12 of docs/gui-review.md) names one start of the server: run and prompt numbers restart
+ * with the server, so an answer or a stop carries the incarnation it was made in, and the hello says which one is live.
+ */
 export type ClientMessage =
   | Readonly<{ type: "start"; project: string; task: string }>
-  | Readonly<{ type: "answer"; run: number; prompt: number; text: string }>
-  | Readonly<{ type: "stop"; run: number }>
+  | Readonly<{ type: "answer"; incarnation: string; run: number; prompt: number; text: string }>
+  | Readonly<{ type: "stop"; incarnation: string; run: number }>
   | Readonly<{ type: "list"; path: string }>;
 export type ServerMessage =
-  | Readonly<{ type: "hello"; cwd: string; current: number | null }>
+  | Readonly<{ type: "hello"; cwd: string; current: number | null; incarnation: string }>
   | Readonly<{ type: "replay"; runs: readonly RunRecord[] }>
   | Readonly<{ type: "event"; run: number; seq: number; event: RunEvent }>
   | Readonly<{ type: "listing"; path: string; parent: string | null; dirs: readonly string[]; error: string | null }>
-  | Readonly<{ type: "refused"; reason: string }>;
+  | Readonly<{ type: "refused"; reason: string }>
+  /** The server is ending (finding 15 of docs/gui-review.md); the tab's socket is closed after this. */
+  | Readonly<{ type: "closing" }>;
 
 const Int = S.NonNegativeInt;
 const Str = Schema.String;
@@ -78,16 +84,17 @@ const RunRecordSchema = Schema.Struct({ id: Int, events: Schema.Array(RunEventSc
 
 export const ClientMessageSchema = Schema.Union([
   typed("start", { project: Str, task: Str }),
-  typed("answer", { run: Int, prompt: Int, text: Str }),
-  typed("stop", { run: Int }),
+  typed("answer", { incarnation: Str, run: Int, prompt: Int, text: Str }),
+  typed("stop", { incarnation: Str, run: Int }),
   typed("list", { path: Str }),
 ]);
 export const ServerMessageSchema = Schema.Union([
-  typed("hello", { cwd: Str, current: Schema.NullOr(Int) }),
+  typed("hello", { cwd: Str, current: Schema.NullOr(Int), incarnation: Str }),
   typed("replay", { runs: Schema.Array(RunRecordSchema) }),
   typed("event", { run: Int, seq: Int, event: RunEventSchema }),
   typed("listing", { path: Str, parent: Schema.NullOr(Str), dirs: Schema.Array(Str), error: Schema.NullOr(Str) }),
   typed("refused", { reason: Str }),
+  typed("closing", {}),
 ]);
 
 // The declared types and the schemas' types are the same: each is assignable to the other.

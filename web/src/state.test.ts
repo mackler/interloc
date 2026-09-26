@@ -7,7 +7,7 @@ import { promptOf } from "../../src/userPrompts.ts";
 import { initialState, reduce, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
-const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current });
+const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
 const started: RunEvent = { _tag: "Started", project: "/p", task: "the task", time: "t" };
 const said = (text: string): RunEvent => ({ _tag: "Said", text });
 const notified = (event: UiEvent): RunEvent => ({ _tag: "Notified", event });
@@ -172,5 +172,28 @@ describe("runs, replay and gaps", () => {
         expect(incremental.needsReconnect).toBe(false);
       }),
     );
+  });
+});
+
+// Finding 12 of docs/gui-review.md: a hello from another incarnation clears the view of the earlier server's runs.
+describe("a server restart", () => {
+  test("a hello with a new incarnation clears the old run's view; the same incarnation keeps it", () => {
+    const withRun = reduce(reduce(initialState, { type: "hello", cwd: "/w", current: 3, incarnation: "a" }), { type: "replay", runs: [{ id: 3, events: [{ _tag: "Started", project: "/p", task: "t", time: "x" }] }] });
+    expect(withRun.run?.id).toBe(3);
+    expect(withRun.incarnation).toBe("a");
+    expect(reduce(withRun, { type: "hello", cwd: "/w", current: 3, incarnation: "a" }).run?.id).toBe(3);
+    const restarted = reduce(withRun, { type: "hello", cwd: "/w", current: null, incarnation: "b" });
+    expect([restarted.run, restarted.last, restarted.incarnation]).toEqual([null, null, "b"]);
+    const next = reduce(restarted, { type: "event", run: 1, seq: 0, event: { _tag: "Started", project: "/p", task: "u", time: "y" } });
+    expect(next.run?.id).toBe(1);
+  });
+});
+
+// Finding 15 of docs/gui-review.md: the server tells the page that it is ending.
+describe("the server closing", () => {
+  test("closing sets the connection to reconnecting and says so", () => {
+    const next = reduce(reduce(initialState, hello()), { type: "closing" });
+    expect(next.connection).toBe("reconnecting");
+    expect(next.notices.at(-1)).toBe("The server has ended. The page reconnects when it is started again.");
   });
 });

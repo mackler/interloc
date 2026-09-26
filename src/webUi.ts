@@ -20,6 +20,7 @@ export type WebUi = UiShape &
 type Waiting = Readonly<{ asked: Asked; answer: Deferred.Deferred<string> }>;
 type Prompts = Readonly<{ next: number; waiting: Waiting | null }>;
 
+/** `sink` must not block: it records and offers the event (src/runManager.ts, makePublisher), so the answer's protected step stays short. */
 export const makeWebUi = (sink: (event: RunEvent) => Effect.Effect<void>): Effect.Effect<WebUi> =>
   Effect.gen(function* () {
     // The dialogue is serialized as in the terminal: a second concurrent prompt waits for the first answer.
@@ -56,15 +57,19 @@ export const makeWebUi = (sink: (event: RunEvent) => Effect.Effect<void>): Effec
       notify: (event) => sink({ _tag: "Notified", event }),
       ask,
       askMessage,
+      // The take, the Answered event and the completion of the prompt are one uninterruptible step (finding 11 of
+      // docs/gui-review.md): an interruption cannot leave a prompt taken but its asking fiber unresolved.
       answer: (prompt, text) =>
-        Effect.gen(function* () {
-          const taken = yield* Ref.modify(prompts, (p): readonly [Waiting | null, Prompts] =>
-            p.waiting !== null && p.waiting.asked.prompt === prompt ? [p.waiting, { ...p, waiting: null }] : [null, p],
-          );
-          if (taken === null) return false;
-          yield* sink({ _tag: "Answered", prompt, text });
-          return yield* Deferred.succeed(taken.answer, text);
-        }),
+        Effect.uninterruptible(
+          Effect.gen(function* () {
+            const taken = yield* Ref.modify(prompts, (p): readonly [Waiting | null, Prompts] =>
+              p.waiting !== null && p.waiting.asked.prompt === prompt ? [p.waiting, { ...p, waiting: null }] : [null, p],
+            );
+            if (taken === null) return false;
+            yield* sink({ _tag: "Answered", prompt, text });
+            return yield* Deferred.succeed(taken.answer, text);
+          }),
+        ),
       pending: Ref.get(prompts).pipe(Effect.map((p) => p.waiting?.asked ?? null)),
     };
   });

@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
-import { Effect, Result } from "effect";
+import { Deferred, Effect, Exit, Fiber, Result } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { platformLayer } from "../src/platform.ts";
@@ -12,6 +12,7 @@ import { makeRunManager, type RunManager } from "../src/runManager.ts";
 import { makeWebServer, requestTarget } from "../src/webServer.ts";
 import { finished, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
 
+const run = Effect.runPromise;
 // Plan step 3.4: the server over NodeHttpServer.layerTest, with Node's WebSocket as the scripted client.
 const noQuestions = { questions_for_user: [] };
 const converging: TestOptions = { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] };
@@ -19,7 +20,7 @@ const withQuestion: TestOptions = { steps: [{ output: { questions_for_user: ["Wh
 
 const managerOf = async (repo: string, scripts: TestOptions[]): Promise<RunManager> => {
   const queue = [...scripts];
-  return Effect.runPromise(makeRunManager((ui) => ({ ...testWiring(repo, queue.shift() ?? {}).wiring, ui: Effect.succeed(ui) }), repo).pipe(Effect.provide(platformLayer)));
+  return Effect.runPromise(makeRunManager((ui) => ({ ...testWiring(repo, queue.shift() ?? {}).wiring, ui: Effect.succeed(ui) }), repo, "test").pipe(Effect.provide(platformLayer)));
 };
 const dist = (): string => {
   const d = tempDir("pr-dist-");
@@ -28,18 +29,25 @@ const dist = (): string => {
   fs.writeFileSync(path.join(d, "assets", "app.js"), "console.log(1)");
   return d;
 };
+/**
+ * The server as src/web.ts wires it (finding 15 of docs/gui-review.md): the handler, then serveEffect, then the
+ * finalizer that closes the tabs, so that it runs before the HTTP shutdown. `closingFirst` registers that finalizer
+ * before serveEffect instead, to show that the order matters.
+ */
+const server = (manager: RunManager, distDir: string, body: (port: number) => Effect.Effect<void>, closingFirst = false) =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const web = yield* makeWebServer(manager, distDir);
+      if (closingFirst) yield* Effect.addFinalizer(() => web.closeAll);
+      yield* HttpServer.serveEffect(web.handler);
+      if (!closingFirst) yield* Effect.addFinalizer(() => web.closeAll);
+      const address = (yield* HttpServer.HttpServer).address;
+      yield* body(address._tag === "UnixPathAddress" ? 0 : address.port);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest));
 /** Serves the handler on an ephemeral port for the duration of `body`. */
 const serve = (manager: RunManager, distDir: string, body: (port: number) => Promise<void>): Promise<void> =>
-  Effect.runPromise(
-    Effect.scoped(
-      Effect.gen(function* () {
-        yield* HttpServer.serveEffect(makeWebServer(manager, distDir));
-        const address = (yield* HttpServer.HttpServer).address;
-        const port = address._tag === "UnixPathAddress" ? 0 : address.port;
-        yield* Effect.promise(() => body(port));
-      }),
-    ).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
+  Effect.runPromise(server(manager, distDir, (port) => Effect.promise(() => body(port))));
 
 type Client = { messages: ServerMessage[]; send: (m: ClientMessage) => void; close: () => void };
 const connect = (port: number): Promise<Client> =>
@@ -84,7 +92,7 @@ test("on connect: hello and an empty replay", async () => {
   await serve(await managerOf(repo, []), dist(), async (port) => {
     const c = await connect(port);
     await until("two messages", () => c.messages.length >= 2);
-    assert.deepEqual(c.messages.slice(0, 2), [{ type: "hello", cwd: repo, current: null }, { type: "replay", runs: [] }]);
+    assert.deepEqual(c.messages.slice(0, 2), [{ type: "hello", cwd: repo, current: null, incarnation: "test" }, { type: "replay", runs: [] }]);
     c.close();
   });
 });
@@ -150,8 +158,8 @@ test("a client that connects mid-run gets the replay with the pending prompt and
     const asked = pending(late, 1);
     assert.ok(asked !== null && asked._tag === "Asked" && asked.kind === "decision");
     assert.equal((late.messages[0] as { current: number | null }).current, 1);
-    late.send({ type: "answer", run: 1, prompt: asked.prompt, text: "PostgreSQL" });
-    a.send({ type: "answer", run: 1, prompt: asked.prompt, text: "SQLite" });
+    late.send({ type: "answer", incarnation: "test", run: 1, prompt: asked.prompt, text: "PostgreSQL" });
+    a.send({ type: "answer", incarnation: "test", run: 1, prompt: asked.prompt, text: "SQLite" });
     await until("the end", () => hasEnded(a, 1));
     await until("the refusal of the second answer", () => refusals(a).length > 0);
     assert.match(refusals(a)[0], /already been answered/);
@@ -174,7 +182,7 @@ test("an event appended between the subscription and the snapshot reaches the cl
     a.send({ type: "start", project: repo, task: "task" });
     await until("the prompt", () => pending(a, 1) !== null);
     const asked = pending(a, 1)!;
-    hook = real.answer(1, (asked as { prompt: number }).prompt, "PostgreSQL").pipe(Effect.andThen(Effect.sleep("20 millis")), Effect.asVoid);
+    hook = real.answer("test", 1, (asked as { prompt: number }).prompt, "PostgreSQL").pipe(Effect.andThen(Effect.sleep("20 millis")), Effect.asVoid);
     const b = await connect(port);
     hook = Effect.void;
     await until("the end on b", () => hasEnded(b, 1));
@@ -194,7 +202,7 @@ test("a run that ends between the subscription and the snapshot is received once
     const a = await connect(port);
     a.send({ type: "start", project: repo, task: "task" });
     await until("the prompt", () => pending(a, 1) !== null);
-    hook = real.stop(1).pipe(Effect.asVoid);
+    hook = real.stop("test", 1).pipe(Effect.asVoid);
     const b = await connect(port);
     hook = Effect.void;
     await until("b's replay", () => b.messages.some((m) => m.type === "replay"));
@@ -220,7 +228,7 @@ test("a connection kept open across two runs receives run 2 from its Started, wi
     const replay = late.messages.find((m) => m.type === "replay");
     const atConnect = replay?.type === "replay" ? (replay.runs[0]?.events.length ?? 0) : 0;
     assert.ok(atConnect >= 5, `run 1 had only ${atConnect} events at the connection`);
-    a.send({ type: "stop", run: 1 });
+    a.send({ type: "stop", incarnation: "test", run: 1 });
     await until("the end of run 1", () => hasEnded(late, 1));
     assert.equal((perRun(late).get(1) ?? []).find((e) => e.event._tag === "Ended")?.event._tag, "Ended");
     a.send({ type: "start", project: repo, task: "second" });
@@ -243,8 +251,8 @@ test("an answer or a stop naming an ended run is refused; a frame that is not a 
     const a = await connect(port);
     a.send({ type: "start", project: repo, task: "task" });
     await until("the end", () => hasEnded(a, 1));
-    a.send({ type: "answer", run: 1, prompt: 1, text: "late" });
-    a.send({ type: "stop", run: 1 });
+    a.send({ type: "answer", incarnation: "test", run: 1, prompt: 1, text: "late" });
+    a.send({ type: "stop", incarnation: "test", run: 1 });
     await until("two refusals", () => refusals(a).length >= 2);
     assert.deepEqual(refusals(a).slice(0, 2).map((r) => /that run has ended/.test(r)), [true, true]);
     (a as unknown as { send: (m: unknown) => void }).send("not a message" as never);
@@ -272,4 +280,72 @@ test("start with a bad path is refused with the reason; list gives the subdirect
     assert.notEqual((a.messages.filter((m) => m.type === "listing")[1] as { error: string | null }).error, null);
     a.close();
   });
+});
+
+// Finding 11 of docs/gui-review.md, connection cancellation: a start whose connection closes at once leaves either no
+// run or a run that the next tab sees, can stop, and after which it can start another.
+test("a client that sends start and closes at once leaves the server in a state the next client can recover from", async () => {
+  const repo = tempRepo();
+  const hanging: TestOptions = { steps: [{ hang: true }] };
+  await serve(await managerOf(repo, [hanging, hanging, hanging, converging]), dist(), async (port) => {
+    for (let i = 0; i < 3; i++) {
+      const quick = await connect(port);
+      quick.send({ type: "start", project: repo, task: `quick ${i}` });
+      quick.close();
+      await sleep(20 * i);
+      const next = await connect(port);
+      await until("hello", () => next.messages.some((m) => m.type === "hello"));
+      const hello = next.messages.find((m) => m.type === "hello");
+      const current = hello?.type === "hello" ? hello.current : null;
+      if (current !== null) {
+        next.send({ type: "stop", incarnation: "test", run: current });
+        await until(`the end of run ${current}`, () => hasEnded(next, current));
+      }
+      assert.deepEqual(refusals(next), []);
+      next.close();
+    }
+    const last = await connect(port);
+    await until("hello", () => last.messages.some((m) => m.type === "hello"));
+    last.send({ type: "start", project: repo, task: "after" });
+    await until("a started run", () => [...perRun(last).values()].some((events) => events[0]?.event._tag === "Started" && (events[0].event as { task: string }).task === "after"));
+    assert.deepEqual(refusals(last), []);
+    last.close();
+  });
+});
+
+// Finding 15 of docs/gui-review.md: the server can be stopped while a tab holds its WebSocket.
+type Watched = Client & { closedAt: () => number | null };
+const watch = (port: number): Promise<Watched> =>
+  new Promise((resolve, reject) => {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    const messages: ServerMessage[] = [];
+    let closedAt: number | null = null;
+    ws.onmessage = (e) => void messages.push(JSON.parse(String(e.data)));
+    ws.onclose = () => void (closedAt = messages.length);
+    ws.onerror = () => reject(new Error("the WebSocket failed"));
+    ws.onopen = () => resolve({ messages, send: (m) => ws.send(JSON.stringify(m)), close: () => ws.close(), closedAt: () => closedAt });
+  });
+const serving = async (closingFirst: boolean) => {
+  const repo = tempRepo();
+  const portOf = await run(Deferred.make<number>());
+  const fiber = Effect.runFork(server(await managerOf(repo, []), dist(), (port) => Deferred.succeed(portOf, port).pipe(Effect.andThen(Effect.never)), closingFirst));
+  const client = await watch(await run(Deferred.await(portOf)));
+  await until("hello", () => client.messages.some((m) => m.type === "hello"));
+  const interruption = Effect.runFork(Fiber.interrupt(fiber));
+  return { client, done: run(Fiber.await(interruption).pipe(Effect.timeout("2 seconds"), Effect.exit)) };
+};
+
+test("interrupting the server with a tab connected completes at once, and the tab is told before its socket closes", async () => {
+  const { client, done } = await serving(false);
+  assert.ok(Exit.isSuccess(await done), "the server did not finish within 2 s with a tab connected");
+  await until("the close", () => client.closedAt() !== null);
+  const closing = client.messages.findIndex((m) => m.type === "closing");
+  assert.ok(closing >= 0, "the tab was not told that the server is closing");
+  assert.ok(closing < client.closedAt()!, "the notice came after the close");
+});
+
+test("the closing finalizer registered before serveEffect runs after the HTTP shutdown, which waits for the tab", async () => {
+  const { client, done } = await serving(true);
+  assert.ok(Exit.isFailure(await done), "the server finished although the finalizer order was wrong");
+  client.close();
 });

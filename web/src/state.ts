@@ -43,6 +43,8 @@ export type ViewState = Readonly<{
   cwd: string;
   /** The id of the run in progress on the server, as the last hello or event reported it. */
   current: number | null;
+  /** The server's incarnation from the last hello (finding 12); null before the first. */
+  incarnation: string | null;
   /** The newest run (in progress or ended) and the one before it. */
   run: RunView | null;
   last: RunView | null;
@@ -53,7 +55,7 @@ export type ViewState = Readonly<{
   listing: Listing | null;
 }>;
 
-export const initialState: ViewState = { connection: "connecting", cwd: "", current: null, run: null, last: null, needsReconnect: false, notices: [], listing: null };
+export const initialState: ViewState = { connection: "connecting", cwd: "", current: null, incarnation: null, run: null, last: null, needsReconnect: false, notices: [], listing: null };
 
 const AGENT: Record<"claude" | "codex", string> = { claude: "Claude Code", codex: "Codex" };
 const sameSubject = (a: SubjectId, b: SubjectId): boolean => JSON.stringify(a) === JSON.stringify(b);
@@ -167,14 +169,19 @@ export const foldEvent = (run: RunView, event: RunEvent): RunView => {
 
 const foldRun = (id: number, events: readonly RunEvent[]): RunView => events.reduce(foldEvent, emptyRun(id));
 
+export const SERVER_CLOSED = "The server has ended. The page reconnects when it is started again.";
 /** A notice for the user that the page itself produces (for example an action discarded after a reconnect). */
 export const notice = (state: ViewState, text: string): ViewState => ({ ...state, notices: [...state.notices, text] });
 
 /** The next state after a message of the server. Pure. */
 export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
   switch (message.type) {
-    case "hello":
-      return { ...state, connection: "open", cwd: message.cwd, current: message.current, needsReconnect: false };
+    case "hello": {
+      // Another start of the server: its run numbers restart, so the views of the earlier server's runs are dropped.
+      const restarted = state.incarnation !== null && state.incarnation !== message.incarnation;
+      const runs = restarted ? { run: null, last: null } : {};
+      return { ...state, ...runs, connection: "open", cwd: message.cwd, current: message.current, incarnation: message.incarnation, needsReconnect: false };
+    }
     case "replay": {
       const views = message.runs.map((r) => foldRun(r.id, r.events));
       return { ...state, run: views[views.length - 1] ?? null, last: views[views.length - 2] ?? null };
@@ -183,6 +190,9 @@ export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
       return { ...state, listing: { path: message.path, parent: message.parent, dirs: message.dirs, error: message.error } };
     case "refused":
       return notice(state, message.reason);
+    case "closing":
+      // [visibility of system status] The socket's reconnection keeps trying; the page says why it is disconnected.
+      return notice({ ...state, connection: "reconnecting" }, SERVER_CLOSED);
     case "event": {
       const current = message.event._tag === "Started" ? message.run : message.event._tag === "Ended" ? null : state.current;
       if (state.run !== null && message.run === state.run.id) {

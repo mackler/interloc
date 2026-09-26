@@ -36,6 +36,7 @@ export const browserEnvironment = (): Environment => ({
 });
 
 const NOT_SENT: Record<"answer" | "stop", string> = { answer: "Your answer was not sent: the run has ended.", stop: "Stop was not sent: the run has ended." };
+const RESTARTED: Record<"answer" | "stop", string> = { answer: "Your answer was not sent: the server has been restarted since.", stop: "Stop was not sent: the server has been restarted since." };
 
 export const connect = (url: string, handlers: Handlers, env: Environment = browserEnvironment()): Connection => {
   let socket: SocketLike | null = null;
@@ -46,11 +47,13 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
   let timer: unknown = null;
   let closed = false;
 
-  const flush = (current: number | null) => {
+  /** The queued actions after a hello: an answer or a stop of another incarnation or of an ended run is discarded with a notice (finding 12). */
+  const flush = (hello: Readonly<{ current: number | null; incarnation: string }>) => {
     const pending = queue;
     queue = [];
     for (const m of pending) {
-      if ((m.type === "answer" || m.type === "stop") && m.run !== current) handlers.onNotice(NOT_SENT[m.type]);
+      if ((m.type === "answer" || m.type === "stop") && m.incarnation !== hello.incarnation) handlers.onNotice(RESTARTED[m.type]);
+      else if ((m.type === "answer" || m.type === "stop") && m.run !== hello.current) handlers.onNotice(NOT_SENT[m.type]);
       else socket?.send(JSON.stringify(m));
     }
   };
@@ -75,7 +78,7 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
         ready = true;
         handlers.onState("open");
         handlers.onMessage(decoded.success);
-        flush(decoded.success.current);
+        flush(decoded.success);
         return;
       }
       handlers.onMessage(decoded.success);

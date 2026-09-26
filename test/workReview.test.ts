@@ -319,3 +319,9 @@ test("(A, Q1) the work response of round 2 receives the round-2 review, the roun
   assert.ok(prompt.includes(read(probe.dir, "work-review-1/changes.diff")), "the current changes.diff");
   assert.match(prompt, /\+implemented/);
 });
+
+// W1-R1-1: behaviour 12 names the two halts separately; a project change during a read-only response is ProjectChanged.
+test("(A) a work response that changes the project halts the run with ProjectChanged, not RecordsChanged", async () => {
+  const { layer } = workResponseRun({ touchProject: true });
+  await runFails(layer, "ProjectChanged");
+});

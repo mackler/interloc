@@ -50,12 +50,13 @@ const runEvent: fc.Arbitrary<RunEvent> = fc.oneof(
 const runRecord: fc.Arbitrary<RunRecord> = fc.record({ id: nat, events: fc.array(runEvent, { maxLength: 4 }) });
 const client: fc.Arbitrary<ClientMessage> = fc.oneof(
   fc.record({ type: fc.constant("start" as const), project: text, task: text }),
-  fc.record({ type: fc.constant("answer" as const), run: nat, prompt: nat, text }),
-  fc.record({ type: fc.constant("stop" as const), run: nat }),
+  fc.record({ type: fc.constant("answer" as const), incarnation: text, run: nat, prompt: nat, text }),
+  fc.record({ type: fc.constant("stop" as const), incarnation: text, run: nat }),
   fc.record({ type: fc.constant("list" as const), path: text }),
 );
 const server: fc.Arbitrary<ServerMessage> = fc.oneof(
-  fc.record({ type: fc.constant("hello" as const), cwd: text, current: fc.option(nat, { nil: null }) }),
+  fc.record({ type: fc.constant("hello" as const), cwd: text, current: fc.option(nat, { nil: null }), incarnation: text }),
+  fc.constant({ type: "closing" as const }),
   fc.record({ type: fc.constant("replay" as const), runs: fc.array(runRecord, { maxLength: 2 }) }),
   fc.record({ type: fc.constant("event" as const), run: nat, seq: nat, event: runEvent }),
   fc.record({ type: fc.constant("listing" as const), path: text, parent: fc.option(text, { nil: null }), dirs: fc.array(text, { maxLength: 3 }), error: fc.option(text, { nil: null }) }),
@@ -81,8 +82,9 @@ test("property: every server message survives the JSON round trip", () => {
   fc.assert(fc.property(server, (m) => assert.deepEqual(decoded(decodeServer(JSON.stringify(m))), plain(m))), { numRuns: 200 });
 });
 
+// A stop or an answer without its incarnation (the shape before finding 12) is refused too.
 test("a frame that is not JSON, or not a message, or has an unknown field, is refused", () => {
-  for (const frame of ["not json", "{}", JSON.stringify({ type: "start", project: "/p" }), JSON.stringify({ type: "stop", run: "1" }), JSON.stringify({ type: "stop", run: 1, extra: true })]) {
+  for (const frame of ["not json", "{}", JSON.stringify({ type: "start", project: "/p" }), JSON.stringify({ type: "stop", run: "1" }), JSON.stringify({ type: "stop", run: 1, extra: true }), JSON.stringify({ type: "stop", run: 1 }), JSON.stringify({ type: "answer", run: 1, prompt: 1, text: "x" })]) {
     assert.ok(Result.isFailure(decodeClient(frame)), frame);
   }
 });
