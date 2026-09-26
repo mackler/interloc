@@ -10,12 +10,14 @@ is one Effect program over five services, and the edges (files, git, terminal, S
 
 ## Commands
 
-- `npm run check` — type check (`tsc --noEmit`). Must report nothing before every commit; `.githooks/pre-commit` runs it and refuses the commit otherwise. Enable the hook once per clone with `git config core.hooksPath .githooks`.
-- `npm test` — type check, then the tests (`node --test test/*.test.ts`): scenario tests with scripted agents, the adapters over a fake SDK, the store on a temporary git repository, and `test/deps.test.ts`, which checks that the pinned versions are installed. A type error fails the tests before any test runs. No credentials needed; requires `git`.
+- `npm run check` — type check: `tsc --noEmit` (the program, tests, prototypes), `tsc --noEmit -p web` (the browser code under `web/src`) and `svelte-check` (the `.svelte` components). Must report nothing before every commit; `.githooks/pre-commit` runs it and refuses the commit otherwise. Enable the hook once per clone with `git config core.hooksPath .githooks`.
+- `npm run build` — builds the page with Vite into `web/dist/` (git-ignored); the web server refuses to start without it.
+- `npm run test:unit` (`node --test test/*.test.ts`), `npm run test:web` (Vitest over `web/src/**/*.test.ts`, jsdom), `npm run test:e2e` (Playwright against the server over scripted agents).
+- `npm test` — type check, then the tests (`npm run test:unit`; `test:web`, the build and `test:e2e` join as their first tests exist): scenario tests with scripted agents, the adapters over a fake SDK, the store on a temporary git repository, and `test/deps.test.ts`, which checks that the pinned versions are installed. A type error fails the tests before any test runs. No credentials needed; requires `git`. The Playwright tests need Chromium and its system libraries in the container: a fresh container needs `npx playwright install chromium` as the user and `npx playwright install-deps chromium` as root, until the container image provides them.
 - Real run, inside a project container that has both agents' credentials and network access:
   `node /opt/plan-review/src/main.ts "task description" [project directory]`
 
-There is no build step. Node.js (22.18 or later) runs the `.ts` files directly by removing the types.
+The program itself has no build step: Node.js (22.18 or later) runs the `.ts` files directly by removing the types. Only the page is built (`npm run build`).
 
 ## TypeScript constraints (required by direct execution)
 
@@ -152,16 +154,20 @@ current with all five, which are released often, and does not want it to fall be
   run `prototypes/proto-schema.ts` in a project container (the schema acceptance proof), then one real
   run. Check the names in `docs/effect-v4-api.md` against the new declarations, update the recorded
   versions and facts, and commit.
-- An upgrade reaches real runs after `git pull` and `npm ci` in `~/work/plan-review`. `npm ci` is
-  needed whenever `package-lock.json` changed — it did when `fast-check` was added.
+- The web GUI's devDependencies (listed under Rules for changes) are pinned too. `vite` stays on 7.x
+  and `@sveltejs/vite-plugin-svelte` on 6.x until `vite-plugin-functions-mixins` accepts Vite 8 (0.4.1
+  declares `vite ^7.2.4`; plugin-svelte 7.x requires Vite 8), so the session-start check reports their
+  8.x/7.x releases as blocked, not simply outdated.
+- An upgrade reaches real runs after `git pull`, `npm ci` and `npm run build` in `~/work/plan-review`.
+  `npm ci` is needed whenever `package-lock.json` changed; `npm run build` whenever the page changed.
 
 ## Rules for changes
 
 - Test first, without exception. Before application code is written or changed, the test that specifies it is written, run, and seen to fail for the reason the change is meant to fix (a failed assertion, or a type error naming the signature being changed; never a missing module or a typo). Then the least code that makes it pass. A new module may first be scaffolded with its final signature and a body that does nothing useful, so that the test fails on its assertion. The observed failure is recorded in the commit message.
 - Every change to behaviour gets a scenario test in `test/` that runs the procedure against the test layers of `test/helpers.ts` (`testLayer`, `testWiring`). `src/issueLog.ts` stays free of I/O and of Effect services so that it can be tested directly.
 - `src/claude.ts` and `src/codex.ts` receive the SDKs through the `Sdk` service and are tested with `test/fakeSdk.ts`. Only `src/sdkLive.ts` (the binding) and `src/main.ts` (the wiring and the runner) are untested; their text is shown to the developer before it is written. No scaffolding may reach a real agent: a scaffold of an adapter makes the SDK call impossible. Verify SDK option names against the type declarations in `node_modules`, not from memory.
-- Do not add a dependency without the developer's instruction. Permitted besides the two SDKs: `effect`, `@effect/platform-node`, and `fast-check` (tests only).
-- This directory is the development clone. The installed program is `~/work/plan-review` on the host, which project containers mount read-only at `/opt/plan-review`. A change here takes effect in real runs only after the developer merges it there with `git pull` and runs `npm ci` there when `package-lock.json` changed.
+- Do not add a dependency without the developer's instruction. Permitted besides the two SDKs: `effect`, `@effect/platform-node`, and these devDependencies, each pinned exactly and checked by `test/deps.test.ts`: `fast-check` (property tests); for the web GUI (instructed 26 Sep 2026) `svelte` (the page), `vite` and `@sveltejs/vite-plugin-svelte` (the build), `vitest` (component tests), `jsdom` (the DOM for Vitest), `svelte-check` (type check of `.svelte` files), `@playwright/test` (end-to-end tests), `marked` and `dompurify` (Markdown rendering and sanitising in the page), `m3-svelte` (Material Design 3 components) and `vite-plugin-functions-mixins` (the CSS `@function`/`@mixin` of m3-svelte's components, resolved at build time).
+- This directory is the development clone. The installed program is `~/work/plan-review` on the host, which project containers mount read-only at `/opt/plan-review`. A change here takes effect in real runs only after the developer merges it there with `git pull`, runs `npm ci` there when `package-lock.json` changed, and `npm run build` for the page.
 - `bin/dev-claude` starts the development container (`compose.cc.yaml`); it is not part of the program.
 
 ## Further context

@@ -1,2 +1,5 @@
 node_modules/
 plan-review/
+web/dist/
+test-results/
+playwright-report/

@@ -28,8 +28,13 @@ test("the installed effect version is the pinned one", () => {
   }
 });
 
-test("fast-check is a devDependency pinned to an exact version and the installed version matches", () => {
-  const pinned: string | undefined = readJson("package.json")?.devDependencies?.["fast-check"];
-  assert.match(pinned ?? "(absent)", /^\d+\.\d+\.\d+$/, "fast-check is not a devDependency pinned to an exact version");
-  assert.equal(readJson("node_modules/fast-check/package.json")?.version, pinned, "installed fast-check differs from the pinned version");
-});
+// The devDependencies, each pinned exactly: fast-check (property tests) and those the developer instructed for the web GUI.
+const PINNED_DEV = ["fast-check", "svelte", "vite", "@sveltejs/vite-plugin-svelte", "vitest", "@playwright/test", "marked", "dompurify", "m3-svelte", "vite-plugin-functions-mixins", "jsdom", "svelte-check"] as const;
+
+for (const name of PINNED_DEV) {
+  test(`${name} is a devDependency pinned to an exact version and the installed version matches`, () => {
+    const pinned: string | undefined = readJson("package.json")?.devDependencies?.[name];
+    assert.match(pinned ?? "(absent)", /^\d+\.\d+\.\d+$/, `${name} is not a devDependency pinned to an exact version`);
+    assert.equal(readJson(`node_modules/${name}/package.json`)?.version, pinned, `installed ${name} differs from the pinned version`);
+  });
+}

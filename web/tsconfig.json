@@ -1,16 +1,16 @@
 {
   "compilerOptions": {
     "target": "es2022",
-    "module": "nodenext",
+    "lib": ["es2022", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
     "strict": true,
     "noEmit": true,
     "erasableSyntaxOnly": true,
     "verbatimModuleSyntax": true,
     "allowImportingTsExtensions": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": []
   },
-  "exclude": [
-    "node_modules",
-    "web"
-  ]
+  "include": ["src"]
 }
