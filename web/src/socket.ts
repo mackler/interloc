@@ -95,8 +95,13 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
     protocolErrors += 1;
     env.logError(`plan-review: a message from the server could not be read (${protocolErrors} in a row): ${reason}`);
     handlers.onProtocolError(reason, protocolErrors);
-    if (protocolErrors >= PROTOCOL_ERROR_LIMIT) fail(s);
-    else s.close();
+    if (protocolErrors >= PROTOCOL_ERROR_LIMIT) return fail(s);
+    // Detached before it closes (W1-R1-1): a browser's close event comes later, and an action sent meanwhile would
+    // reach a closing socket and be discarded in silence; now it is queued. The late close event is ignored by onclose.
+    socket = null;
+    ready = false;
+    s.close();
+    schedule();
   };
   const open = () => {
     if (failed) return;

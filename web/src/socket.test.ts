@@ -16,7 +16,8 @@ class FakeSocket implements SocketLike {
   }
   close() {
     this.closed = true;
-    this.onclose?.({});
+    // A browser fires the close event later; with deferClose the test fires it itself with drop() (W1-R1-1).
+    if (!deferClose) this.onclose?.({});
   }
   // The server's side.
   open() {
@@ -36,6 +37,7 @@ class FakeSocket implements SocketLike {
 
 let sockets: FakeSocket[] = [];
 let logged: string[] = [];
+let deferClose = false;
 const env = (): Environment => ({
   logError: (text) => void logged.push(text),
   open: () => {
@@ -58,6 +60,7 @@ const wire = (h: ReturnType<typeof handlers>) => ({
 beforeEach(() => {
   sockets = [];
   logged = [];
+  deferClose = false;
   vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());
@@ -253,5 +256,46 @@ describe("socket and a frame that does not decode", () => {
     }
     expect(sockets.length).toBe(6);
     expect(h.states).not.toContain("failed");
+  });
+});
+
+// W1-R1-1: a browser's close event arrives after close() returns; in that interval the page must not send to the
+// closing socket, which would discard the answer in silence.
+describe("socket while a protocol error's close is pending", () => {
+  const hello: ServerMessage = { type: "hello", cwd: "/", current: 1, incarnation: "a" };
+  const answer: ClientMessage = { type: "answer", incarnation: "a", run: 1, prompt: 2, text: "A" };
+
+  test("after a frame that does not decode, an action is queued, not sent to the closing socket", () => {
+    deferClose = true;
+    const h = handlers();
+    const c = connect("ws://x/ws", wire(h), env());
+    sockets[0].receive(hello);
+    sockets[0].receiveRaw("not json");
+    expect(h.states.at(-1)).toBe("reconnecting");
+    c.send(answer);
+    expect(sockets[0].sent).toEqual([]);
+    sockets[0].drop();
+    vi.advanceTimersByTime(1000);
+    expect(sockets.length).toBe(2);
+    vi.advanceTimersByTime(60_000);
+    expect(sockets.length).toBe(2);
+    sockets[1].receive(hello);
+    sockets[1].receive({ type: "replay", runs: [] });
+    expect(sockets[1].sent.map((x) => JSON.parse(x))).toEqual([answer]);
+  });
+
+  test("with the close pending, three frames in a row hand the queued answer back", () => {
+    deferClose = true;
+    const h = handlers();
+    const c = connect("ws://x/ws", wire(h), env());
+    sockets[0].receiveRaw("not json");
+    c.send(answer);
+    vi.advanceTimersByTime(1000);
+    sockets[1].receiveRaw("not json");
+    vi.advanceTimersByTime(2000);
+    sockets[2].receiveRaw("not json");
+    expect(h.states.at(-1)).toBe("failed");
+    expect(h.unsent).toEqual([answer]);
+    expect(sockets.flatMap((x) => x.sent)).toEqual([]);
   });
 });
