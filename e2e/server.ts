@@ -2,7 +2,9 @@
 // agents of test/helpers.ts, in a temporary repository, so that no agent is reached. SCENARIO chooses the script
 // of every run: "converge" (one accepted issue, then convergence), "decision" (a question from Claude Code),
 // "stop" (a planning call that waits until it is interrupted), and those of finding 10 of docs/gui-review.md:
-// "interview", "workCorrection", "tabs", "drop", "long". PORT is the port.
+// "interview", "workCorrection", "tabs", "drop", "long"; and "questionReview", the question phase whose review raises
+// an issue, so that Claude Code's response carries the amended list (defect A of docs/page-question-phase-defects.md).
+// PORT is the port.
 
 import { Effect } from "effect";
 import { HttpServer } from "effect/unstable/http";
@@ -42,6 +44,29 @@ export const SCENARIOS: Record<string, TestOptions> = {
       { output: noQuestions, plan: "1. [ ] the step\n" },
     ],
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // Defect A of docs/page-question-phase-defects.md: the question list, its review with one issue, Claude Code's
+  // response with the amended list, a second round without an issue, one interview turn with numbered answers, the
+  // user's answer, a summary, the requirements review, then planning, execution and the work review.
+  questionReview: {
+    config: { questionPhase: true },
+    steps: [
+      { output: { questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      {
+        output: {
+          ...respond([["Q-R1-1", "accepted"]]),
+          questions: [
+            { id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" },
+            { id: "Q2", question: "Which port?", reason: "r", proposed_answers: [{ label: "8080", description: "p" }], default_answer: "8080" },
+          ],
+        },
+      },
+      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "") },
+      { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL on port 8080.") },
+      { output: noQuestions, plan: "1. [ ] the step\n" },
+    ],
+    reviews: [{ issues: [issue("Q-R1-1", "The list does not ask for the port.")] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   },
   // A work correction: work review 1 raises an issue that Claude Code accepts, so planning, execution and the work

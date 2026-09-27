@@ -3,7 +3,7 @@ import { expect, test } from "./fixtures.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
 // fails on an uncaught error or a console error in any of its pages (e2e/fixtures.ts, finding 10 of docs/gui-review.md).
-const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108 } as const;
+const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109 } as const;
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and plan-review" });
@@ -178,4 +178,24 @@ test("(11) Enter while an input method is composing does not answer", async ({ p
   await expect(field).toHaveValue("unfinished composition");
   await page.getByRole("button", { name: "No decision" }).click();
   await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+});
+
+// Defect A of docs/page-question-phase-defects.md: the page had never carried a question phase whose review raised an
+// issue; the response with the amended list stopped the page, live and in every replay.
+test("(12) a question phase through the page: the list's review and response, one interview turn, an answer, the requirements review", async ({ context, page }) => {
+  await startTask(page, "questionReview", "Add a service");
+  await expect(right(page).getByText("The list does not ask for the port.")).toBeVisible();
+  await expect(right(page).getByText(/accepted: rationale Q-R1-1/)).toBeVisible();
+  await expect(left(page).getByText(/Which database should the service use\?/).first()).toBeVisible();
+  // A second tab receives the same run by replay, and the pending interview prompt with it.
+  const other = await context.newPage();
+  await other.goto(url("questionReview"));
+  await expect(right(other).getByText(/accepted: rationale Q-R1-1/)).toBeVisible();
+  await expect(other.getByRole("button", { name: "1. PostgreSQL" })).toBeVisible();
+  await other.close();
+  await page.getByRole("button", { name: "1. PostgreSQL" }).click();
+  await expect(left(page).getByText("The service uses PostgreSQL on port 8080.")).toBeVisible();
+  await page.getByRole("button", { name: "Confirm" }).click();
+  await expect(right(page).getByText(/Requirements review, round 1/)).toBeVisible({ timeout: 20_000 });
+  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible({ timeout: 20_000 });
 });

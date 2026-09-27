@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
 import * as prompts from "../../src/prompts.ts";
-import type { RunEvent, ServerMessage } from "../../src/protocol.ts";
+import { decodeServer, type RunEvent, type ServerMessage } from "../../src/protocol.ts";
 import type { UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
 import { dismissUnsent, initialState, keepUnsent, protocolError, reduce, type ViewState } from "./state.ts";
@@ -241,5 +241,50 @@ describe("a frame the page could not read", () => {
     expect(dismissUnsent(s, 0).unsent).toEqual(["C"]);
     expect(dismissUnsent(s, 1).unsent).toEqual(["A"]);
     expect(initialState.unsent).toEqual([]);
+  });
+});
+
+// The scenario whose absence let defect A of docs/page-question-phase-defects.md through: a replay, as the server sends
+// it, of a question phase with a review, Claude Code's response with the amended list, and the interview's first turn.
+describe("a replay of a question phase", () => {
+  test("decoded as the socket decodes it, it yields both panels and the pending interview prompt", () => {
+    const events: RunEvent[] = [
+      started,
+      notified({ _tag: "PhaseBegan", phase: { kind: "questions" } }),
+      notified({ _tag: "RoundBegan", subject: "questions", round: 1, limit: 5 }),
+      notified({ _tag: "ReviewReceived", subject: "questions", round: 1, review: { issues: [{ id: "Q-R1-1", severity: "major", location: "Q1", problem: "The list does not ask for the database.", evidence: "e" }] }, counted: 1 }),
+      notified({
+        _tag: "ResponseReceived",
+        subject: "questions",
+        round: 1,
+        response: {
+          dispositions: [{ id: "Q-R1-1", action: "accepted", rationale: "Added the database question.", duplicate_of: "", reverses: "" }],
+          self_corrections: [],
+          reviewer_feedback: "",
+          questions_for_user: [],
+          questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }],
+        },
+        resultText: "",
+      }),
+      notified({ _tag: "LoopFinished", subject: "questions", result: "converged" }),
+      notified({ _tag: "InterviewOpened", heading: "Interview" }),
+      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Which database should the service use?\n1. PostgreSQL\n2. SQLite", summary: null }),
+      said("\nWhich database should the service use?\n1. PostgreSQL\n2. SQLite\n"),
+      asked(1, prompts.interviewMessagePrompt),
+    ];
+    const frames = [JSON.stringify(hello()), JSON.stringify({ type: "replay", runs: [{ id: 1, events }] })];
+    const messages = frames.map((f) => {
+      const d = decodeServer(f);
+      if (d._tag !== "Success") throw new Error(`not decoded: ${d.failure}`);
+      return d.success;
+    });
+    const s = fold(messages);
+    const right = s.run?.right.map((m) => `${m.author}:${m.body}`) ?? [];
+    expect(right.length).toBe(2);
+    expect(right[0]).toMatch(/^codex:.*The list does not ask for the database\./s);
+    expect(right[1]).toMatch(/^claude:.*\[Q-R1-1\]\*\* accepted: Added the database question\./s);
+    expect(bodies(s).slice(0, 2)).toEqual([prompts.interviewHelp("Interview", "page"), "Which database should the service use?\n1. PostgreSQL\n2. SQLite"].map((b) => `program:${b}`));
+    expect(s.run?.pending?.asked.kind).toBe("interviewMessage");
+    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2", "End interview=/done", "Quit=/quit"]);
   });
 });
