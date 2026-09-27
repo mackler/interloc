@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
-import { cycleHeading, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
+import { clarificationProgress, cycleHeading, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { correctionCount } from "../../src/issueLog.ts";
 import { type LoopResult, type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
@@ -32,7 +32,9 @@ export type Cycle = Readonly<{ round: number; raised: number | null; counted: nu
  * accepted dispositions, effective self-corrections), and how it ended (null while it runs; `done` with it).
  */
 export type RoundGroup = Readonly<{ subject: SubjectId; heading: string; rounds: readonly Cycle[]; corrections: number; result: LoopResult | null; done: boolean }>;
-export type TimelineEntry = Readonly<{ phase: Phase; label: string; groups: readonly RoundGroup[]; state: "active" | "done" | "stopped" }>;
+/** A step of Gather Requirements (issue #21): its cycles and, for a clarification, the answered questions of the total. */
+export type TimelineStep = Readonly<{ kind: "formulate" | "clarification" | "followUp"; label: string; state: "active" | "done" | "stopped"; count: Readonly<{ answered: number; total: number }> | null; groups: readonly RoundGroup[] }>;
+export type TimelineEntry = Readonly<{ phase: Phase; label: string; groups: readonly RoundGroup[]; steps: readonly TimelineStep[]; state: "active" | "done" | "stopped" }>;
 /** The prompt the run waits on, with every choice it offers (the catalog's and those of the preceding event). */
 /** A pending prompt: the agent's options (an interview turn's numbered answers or a relayed question's options,
  * rendered as cards) apart from the catalog's fixed choices (buttons), issue #12. */
@@ -167,20 +169,38 @@ export const bandsOf = (messages: readonly Message[]): readonly BandGroup[] => {
 const withoutAuthorHeading = (markdown: string): string => markdown.replace(/^### [^\n]*\n+/, "").trim();
 
 const freshCycle = (round: number): Cycle => ({ round, raised: null, counted: null, reviewIds: [] });
-/** The timeline after a round began: the round in its subject's open group of the current entry. */
+/** The groups with the round in the subject's open group, or in a new group when none is open. */
+const withRound = (groups: readonly RoundGroup[], subject: SubjectId, round: number): readonly RoundGroup[] => {
+  const open = groups.findIndex((g) => sameSubject(g.subject, subject) && !g.done);
+  return open < 0
+    ? [...groups, { subject, heading: subjectHeading(subject), rounds: [freshCycle(round)], corrections: 0, result: null, done: false }]
+    : groups.map((g, i) => (i === open ? { ...g, rounds: [...g.rounds, freshCycle(round)] } : g));
+};
+/**
+ * The timeline after a round began: the round in its subject's open group of the current entry, or of its last step
+ * when the entry has steps (Gather Requirements, issue #21), so a follow-up clarification takes the later cycles.
+ */
 const roundBegan = (timeline: readonly TimelineEntry[], subject: SubjectId, round: number): readonly TimelineEntry[] => {
   const last = timeline[timeline.length - 1];
   if (last === undefined) return timeline;
-  const open = last.groups.findIndex((g) => sameSubject(g.subject, subject) && !g.done);
-  const groups =
-    open < 0
-      ? [...last.groups, { subject, heading: subjectHeading(subject), rounds: [freshCycle(round)], corrections: 0, result: null, done: false }]
-      : last.groups.map((g, i) => (i === open ? { ...g, rounds: [...g.rounds, freshCycle(round)] } : g));
-  return [...timeline.slice(0, -1), { ...last, groups }];
+  const step = last.steps[last.steps.length - 1];
+  const next: TimelineEntry =
+    step === undefined ? { ...last, groups: withRound(last.groups, subject, round) } : { ...last, steps: [...last.steps.slice(0, -1), { ...step, groups: withRound(step.groups, subject, round) }] };
+  return [...timeline.slice(0, -1), next];
 };
-/** The timeline with every open group of the subject changed by `f`. */
-const openGroups = (timeline: readonly TimelineEntry[], subject: SubjectId, f: (g: RoundGroup) => RoundGroup): readonly TimelineEntry[] =>
-  timeline.map((e) => ({ ...e, groups: e.groups.map((g) => (sameSubject(g.subject, subject) && !g.done ? f(g) : g)) }));
+/** The timeline with every open group of the subject, in the entries and in their steps, changed by `f`. */
+const openGroups = (timeline: readonly TimelineEntry[], subject: SubjectId, f: (g: RoundGroup) => RoundGroup): readonly TimelineEntry[] => {
+  const each = (groups: readonly RoundGroup[]) => groups.map((g) => (sameSubject(g.subject, subject) && !g.done ? f(g) : g));
+  return timeline.map((e) => ({ ...e, groups: each(e.groups), steps: e.steps.map((st) => ({ ...st, groups: each(st.groups) })) }));
+};
+const newStep = (kind: TimelineStep["kind"], count: TimelineStep["count"]): TimelineStep => ({ kind, label: stepLabel(kind), state: "active", count, groups: [] });
+/** The entry with its active steps ended in `state`. */
+const endSteps = (e: TimelineEntry, state: "done" | "stopped"): TimelineEntry => ({ ...e, steps: e.steps.map((st) => (st.state === "active" ? { ...st, state } : st)) });
+/** The timeline with the last entry's steps changed by `f`, when it is the question phase. */
+const inQuestionPhase = (timeline: readonly TimelineEntry[], f: (steps: readonly TimelineStep[]) => readonly TimelineStep[]): readonly TimelineEntry[] => {
+  const last = timeline[timeline.length - 1];
+  return last === undefined || last.phase.kind !== "questions" ? timeline : [...timeline.slice(0, -1), { ...last, steps: f(last.steps) }];
+};
 /** The group with the cycle of `round` changed by `f`. */
 const inCycle = (g: RoundGroup, round: number, f: (c: Cycle) => Cycle): RoundGroup => ({ ...g, rounds: g.rounds.map((c) => (c.round === round ? f(c) : c)) });
 
@@ -188,9 +208,9 @@ const inCycle = (g: RoundGroup, round: number, f: (c: Cycle) => Cycle): RoundGro
 const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
   switch (event._tag) {
     case "PhaseBegan":
-      return { ...run, phase: bandOf(event.phase, time), timeline: [...run.timeline, { phase: event.phase, label: phaseName(event.phase), groups: [], state: "active" }] };
+      return { ...run, phase: bandOf(event.phase, time), timeline: [...run.timeline, { phase: event.phase, label: phaseName(event.phase), groups: [], steps: event.phase.kind === "questions" ? [newStep("formulate", null)] : [], state: "active" }] };
     case "PhaseEnded":
-      return { ...run, activity: "", busy: false, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? { ...e, state: "done" } : e)) };
+      return { ...run, activity: "", busy: false, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done" }, "done") : e)) };
     case "RoundBegan":
       return { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
     case "LoopFinished":
@@ -203,7 +223,10 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     }
     case "ResponseReceived": {
       const response = event.response;
-      const corrected = (g: RoundGroup): RoundGroup => ({ ...g, corrections: g.corrections + correctionCount(g.rounds.find((c) => c.round === event.round)?.reviewIds ?? [], response) });
+      const corrected = (g: RoundGroup): RoundGroup => {
+        const cycle = g.rounds.find((c) => c.round === event.round);
+        return cycle === undefined ? g : { ...g, corrections: g.corrections + correctionCount(cycle.reviewIds, response) };
+      };
       return withRight({ ...run, timeline: openGroups(run.timeline, event.subject, corrected) }, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
     }
     case "PlanWritten": {
@@ -215,11 +238,18 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       const turn = event.summary === null ? { kind: "continuing" as const, message: event.message } : { kind: "summary_proposed" as const, message: event.message, summary: event.summary };
       const body = event.summary === null ? event.message : `${event.message}\n\n**${SUMMARY_PROPOSED_HEADING}**\n\n${event.summary}`;
       // Issue #5: the interview's turns are Claude's words, so they are Claude's messages.
-      return { ...withLeft(run, message(run, time, "claude", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
+      // Issue #21: the turn's count is the active clarification step's.
+      const count = { answered: event.answered, total: event.total };
+      const timeline = inQuestionPhase(run.timeline, (steps) => steps.map((st, i) => (i === steps.length - 1 && st.state === "active" && st.kind !== "formulate" ? { ...st, count } : st)));
+      return { ...withLeft({ ...run, timeline }, message(run, time, "claude", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
     }
-    case "InterviewOpened":
+    case "InterviewOpened": {
+      // Issue #21: the step before ends, and the clarification opens as a step with its total.
+      const step = newStep(event.stage === "followUp" ? "followUp" : "clarification", { answered: 0, total: event.total });
+      const timeline = inQuestionPhase(run.timeline, (steps) => [...steps.map((st) => (st.state === "active" ? { ...st, state: "done" as const } : st)), step]);
       // The page's own help (finding 8): no terminal """ convention, which the page does not implement.
-      return withLeft(run, message(run, time, "program", interviewHelp(event.heading, "page"), "text"));
+      return withLeft({ ...run, timeline }, message(run, time, "program", interviewHelp(event.heading, "page"), "text"));
+    }
     case "QuestionAsked":
       // Issue #7: a relayed question is Claude's Markdown message; the terminal's lines of it that follow are absorbed.
       return {
@@ -265,7 +295,7 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
       case "Notified":
         return notifiedEvent(r, event.event, time);
       case "Ended":
-        return { ...r, ended: event.code, pending: null, activity: "", busy: false, timeline: r.timeline.map((e) => (e.state === "active" ? { ...e, state: event.code === 0 ? "done" : "stopped" } : e)) };
+        return { ...r, ended: event.code, pending: null, activity: "", busy: false, timeline: r.timeline.map((e) => (e.state === "active" ? endSteps({ ...e, state: event.code === 0 ? "done" : "stopped" }, event.code === 0 ? "done" : "stopped") : e)) };
     }
   })();
   return { ...next, nextSeq: run.nextSeq + 1 };
@@ -323,7 +353,15 @@ export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
 export const progressOf = (run: RunView): string => {
   const entry = [...run.timeline].reverse().find((e) => e.state === "active") ?? run.timeline[run.timeline.length - 1];
   if (entry === undefined) return progressLine(null, null);
-  const rounds = entry.groups[entry.groups.length - 1]?.rounds ?? [];
-  const latest = rounds[rounds.length - 1];
-  return progressLine(entry.label, latest === undefined ? null : cycleLine(latest.round, null, null));
+  const latestCycle = (groups: readonly RoundGroup[]): string | null => {
+    const rounds = groups[groups.length - 1]?.rounds ?? [];
+    const latest = rounds[rounds.length - 1];
+    return latest === undefined ? null : cycleLine(latest.round, null, null);
+  };
+  const step = entry.steps[entry.steps.length - 1];
+  if (step === undefined) return progressLine(entry.label, latestCycle(entry.groups));
+  // Issue #21: the active step, with its running review loop's latest cycle, or else its count.
+  const running = step.groups.filter((g) => !g.done);
+  const detail = running.length > 0 ? latestCycle(running) : step.count === null ? latestCycle(step.groups) : clarificationProgress(step.count.answered, step.count.total);
+  return progressLine(stepOfPhase(entry.label, step.label), detail);
 };

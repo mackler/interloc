@@ -125,8 +125,14 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await startTask(page, "interview", "Add a service");
   await expect(left(page).getByText("Clarification. /done ends the clarification, /quit ends the run; Shift+Enter starts a new line.")).toBeVisible();
   await expect(left(page).getByText('"""')).toHaveCount(0);
+  // Issue #21: Gather Requirements shows its steps; the clarification counts the agreed question, answered or not.
+  const step = (label: string) => rail(page).locator("[data-step]", { has: page.locator("[data-step-label]", { hasText: label }) });
+  await expect(step("Formulate questions")).toHaveAttribute("data-step", "done");
+  await expect(step("Clarification")).toHaveAttribute("data-step", "active");
+  await expect(step("Clarification").locator("[data-count]")).toHaveText("0 of 1 answered");
   await page.getByRole("button", { name: "1. PostgreSQL" }).click();
   await expect(left(page).getByText("Anything else?")).toBeVisible();
+  await expect(step("Clarification").locator("[data-count]")).toHaveText("1 of 1 answered");
   // Issue #2 (Q5): in the left panel Claude and Interloq speak from the left, the user from the right.
   const list = left(page).locator(".list");
   await onSide(list.locator("article[data-author=claude]").first(), list, "left");
@@ -145,6 +151,8 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   // Four review loops and an execution follow; the run takes about 5 s alone and longer under the whole suite's load.
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await expect(rail(page).getByText("Gather Requirements", { exact: true })).toBeVisible();
+  await expect(step("Clarification")).toHaveAttribute("data-step", "done");
+  await expect(step("Clarification").getByText("1 cycle resolved 0 issues", { exact: true })).toBeVisible();
 });
 
 test("(6) a work correction runs planning, execution and the work review a second time", async ({ page }) => {

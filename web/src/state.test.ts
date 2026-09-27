@@ -210,7 +210,7 @@ describe("activity and timeline", () => {
     const during = fold(live(events));
     const entry = during.run?.timeline[0];
     expect(entry?.state).toBe("active");
-    expect(entry?.groups.map((g) => [g.heading, g.done])).toEqual([["Question review", true], ["Requirements review", false]]);
+    expect(entry?.steps.flatMap((st) => st.groups.map((g) => [g.heading, g.done]))).toEqual([["Question review", true], ["Requirements review", false]]);
     const after = fold(live([...events, notified({ _tag: "LoopFinished", subject: "requirements", result: "converged" }), notified({ _tag: "PhaseEnded", phase: q, result: "converged" })]));
     expect(after.run?.timeline[0].state).toBe("done");
     expect(replayed(events).run?.timeline).toEqual(during.run?.timeline);
@@ -268,6 +268,68 @@ describe("the cycles of a review loop in the timeline", () => {
   });
 });
 
+// Issue #21 (Q5, Q6, Q7): Gather Requirements is one phase with its steps: Formulate questions, Clarification and any
+// Follow-up clarification, each done, active or stopped, with its cycles and the clarification's count.
+describe("the steps of Gather Requirements", () => {
+  const q = { kind: "questions" as const };
+  const turn = (answered: number, total: number, summary: string | null = null) => notified({ _tag: "InterviewTurn", heading: "Clarification", message: "Hi", summary, answered, total });
+  const opened = (stage: "clarification" | "followUp" | "conversation", total: number) => notified({ _tag: "InterviewOpened", heading: "Clarification", stage, total });
+  const round = (subject: "questions" | "requirements", n: number) => notified({ _tag: "RoundBegan", subject, round: n, limit: 5 });
+  const finished = (subject: "questions" | "requirements") => notified({ _tag: "LoopFinished", subject, result: "converged" });
+  const steps = (s: ViewState) => s.run?.timeline[0].steps.map((st) => [st.label, st.state, st.count === null ? null : `${st.count.answered}/${st.count.total}`, st.groups.map((g) => `${g.heading}:${g.rounds.map((c) => c.round).join(",")}`).join(";")]);
+  const through = [started, notified({ _tag: "PhaseBegan", phase: q }), round("questions", 1), finished("questions"), opened("clarification", 7), turn(0, 7), turn(3, 7)];
+
+  test("the question phase begins with Formulate questions, which holds the question review's cycles", () => {
+    const s = fold(live(through.slice(0, 3)));
+    expect(steps(s)).toEqual([["Formulate questions", "active", null, "Question review:1"]]);
+    expect(s.run?.timeline[0].groups).toEqual([]);
+  });
+
+  test("InterviewOpened ends Formulate questions and opens Clarification with its total; each turn updates the count", () => {
+    const s = fold(live(through));
+    expect(steps(s)).toEqual([["Formulate questions", "done", null, "Question review:1"], ["Clarification", "active", "3/7", ""]]);
+    expect(replayed(through).run?.timeline).toEqual(s.run?.timeline);
+  });
+
+  test("the requirements review's cycles go to the latest clarification; a follow-up clarification is a step of its own with the later cycles", () => {
+    const events = [...through, turn(7, 7, "# R"), round("requirements", 1), opened("followUp", 1), turn(0, 1), turn(1, 1, "# R2"), round("requirements", 2), finished("requirements"), opened("followUp", 2), notified({ _tag: "PhaseEnded", phase: q, result: "converged" })];
+    const s = fold(live(events));
+    expect(steps(s)).toEqual([
+      ["Formulate questions", "done", null, "Question review:1"],
+      ["Clarification", "done", "7/7", "Requirements review:1"],
+      ["Follow-up clarification", "done", "1/1", "Requirements review:2"],
+      ["Follow-up clarification", "done", "0/2", ""],
+    ]);
+    expect(s.run?.timeline[0].steps[1].groups[0].result).toBe("converged");
+    expect(s.run?.timeline[0].state).toBe("done");
+    expect(replayed(events).run?.timeline).toEqual(s.run?.timeline);
+  });
+
+  test("the conversation after an empty list is a Clarification whose count starts at 0 of 0", () => {
+    const s = fold(live([started, notified({ _tag: "PhaseBegan", phase: q }), round("questions", 1), finished("questions"), opened("conversation", 0)]));
+    expect(steps(s)?.at(-1)).toEqual(["Clarification", "active", "0/0", ""]);
+  });
+
+  test("a run that ends during a clarification stops that step with its phase; the earlier steps stay done", () => {
+    const events = [...through, { _tag: "Ended", code: 130 } as RunEvent];
+    const s = fold(live(events));
+    expect(s.run?.timeline[0].state).toBe("stopped");
+    expect(steps(s)?.map((st) => st[1])).toEqual(["done", "stopped"]);
+    expect(replayed(events).run?.timeline).toEqual(s.run?.timeline);
+  });
+
+  test("the other phases have no steps", () => {
+    const s = fold(live([started, notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } })]));
+    expect(s.run?.timeline[0].steps).toEqual([]);
+  });
+
+  test("the compact progress line names the active step and its count, or its latest cycle", () => {
+    expect(progressOf(fold(live(through)).run!)).toBe("Progress: Gather Requirements — Clarification, 3 of 7 answered");
+    expect(progressOf(fold(live(through.slice(0, 3))).run!)).toBe("Progress: Gather Requirements — Formulate questions, cycle 1");
+    expect(progressOf(fold(live([...through, turn(7, 7, "# R"), round("requirements", 1)])).run!)).toBe("Progress: Gather Requirements — Clarification, cycle 1");
+  });
+});
+
 // Issue #14: the compact window's progress line names the latest cycle, without a limit.
 describe("the compact progress line", () => {
   test("the active phase and its latest cycle; none before any phase", () => {
@@ -308,6 +370,8 @@ describe("runs, replay and gaps", () => {
     fc.constantFrom("", "y", "2").map((text): RunEvent => ({ _tag: "Answered", prompt: 1, text })),
     fc.constantFrom<UiEvent>(
       { _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } },
+      { _tag: "PhaseBegan", phase: { kind: "questions" } },
+      { _tag: "InterviewOpened", heading: "Clarification", stage: "clarification", total: 2 },
       { _tag: "RoundBegan", subject: { plan: 1 }, round: 1, limit: 5 },
       { _tag: "ReviewReceived", subject: { plan: 1 }, round: 1, review: { issues: [{ id: "A", severity: "major", location: "l", problem: "p", evidence: "e" }] }, counted: 1 },
       { _tag: "ResponseReceived", subject: { plan: 1 }, round: 1, response: { dispositions: [{ id: "A", action: "accepted", rationale: "r", duplicate_of: "", reverses: "" }], self_corrections: [], reviewer_feedback: "", questions_for_user: [] }, resultText: "" },

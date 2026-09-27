@@ -204,6 +204,8 @@ for (const [width, height] of [
     await page.setViewportSize({ width, height });
     await startTask(page, `Show the time at ${width}`, LONG_CHOICES_URL);
     await expect(page.getByRole("button", { name: "End clarification" })).toBeVisible();
+    // Issue #21: a narrow window's progress line names the step and its count.
+    if (width < 840) await expect(page.locator("details.progress summary")).toHaveText("Progress: Gather Requirements — Clarification, 0 of 1 answered");
     const group = page.getByRole("group", { name: "Proposed answers" });
     await expect(group.getByRole("button")).toHaveCount(3);
     const cards = group.getByRole("button");

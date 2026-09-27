@@ -20,7 +20,8 @@ import { LONG_ANSWERS } from "./longAnswers.ts";
 import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from "../test/helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
-const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, asked_ids: [], answered_ids: [], complete, summary });
+/** A scripted interview turn; `asked` and `answered` are the ids Claude reports (issue #21). */
+const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, asked_ids: asked, answered_ids: answered, complete, summary });
 const LONG = 60;
 export const SCENARIOS: Record<string, TestOptions> = {
   converge: {
@@ -40,9 +41,9 @@ export const SCENARIOS: Record<string, TestOptions> = {
     config: { questionPhase: true },
     steps: [
       { output: { questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
-      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "") },
-      { output: turn("Anything else?", false, "") },
-      { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.") },
+      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "", ["Q1"]) },
+      { output: turn("Anything else?", false, "", ["Q1"], ["Q1"]) },
+      { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.", ["Q1"], ["Q1"]) },
       { output: noQuestions, plan: "1. [ ] the step\n" },
     ],
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
@@ -53,7 +54,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
     config: { questionPhase: true },
     steps: [
       { output: { questions: [{ id: "Q1", question: "How should a message show its time?", reason: "r", proposed_answers: [{ label: "Absolute", description: "a" }, { label: "Relative", description: "r" }], default_answer: "Absolute" }] } },
-      { output: turn(`How should a message show its time?\n${LONG_ANSWERS.join("\n")}`, false, "") },
+      { output: turn(`How should a message show its time?\n${LONG_ANSWERS.join("\n")}`, false, "", ["Q1"]) },
       { output: turn("Anything else?", false, "") },
       { output: turn("That is all I need.", true, "# Requirements\n\nRelative time.") },
       { output: noQuestions, plan: "1. [ ] the step\n" },

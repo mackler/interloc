@@ -510,6 +510,18 @@ export function loopSummary(cycles: number, corrections: number, result: "conver
       return `${n}: ${count(corrections, "correction", "corrections")} due`;
   }
 }
+/** The steps of Gather Requirements in the progress rail (issue #21, Q5 and Q7). */
+export function stepLabel(kind: "formulate" | "clarification" | "followUp"): string {
+  return kind === "formulate" ? "Formulate questions" : kind === "clarification" ? "Clarification" : "Follow-up clarification";
+}
+/** A clarification's count (issue #21, Q6): the total grows with the follow-ups Claude asks. */
+export function clarificationProgress(answered: number, total: number): string {
+  return `${answered} of ${total} answered`;
+}
+/** A phase and its active step, as the compact progress line names them. */
+export function stepOfPhase(phase: string, step: string): string {
+  return `${phase} — ${step}`;
+}
 /** The progress rail's heading and its text before any phase (issue #14, Q4: unchanged). */
 export const PROGRESS_HEADING = "Progress";
 export const NO_PHASE_YET = "No phase has begun.";
