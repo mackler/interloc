@@ -15,10 +15,21 @@ const workflow = (): string => readText(".github/workflows/ci.yml") ?? "(absent)
 const versionOf = (command: string, args: readonly string[]): string => {
   const result = spawnSync(command, args, { encoding: "utf8" });
   const match = /\d+\.\d+\.\d+/.exec(`${result.stdout ?? ""}${result.stderr ?? ""}`);
-  assert.ok(match !== null, `${command} ${args.join(" ")} printed no version`);
+  assert.ok(
+    match !== null,
+    `${command} ${args.join(" ")} printed no version: this container is older than container/Dockerfile, ` +
+      `or was changed by hand. Rebuild it: bin/ilcli build, then down, then shell.`,
+  );
   return match[0];
 };
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const dockerfile = (): string => readText("container/Dockerfile") ?? "(absent)";
+/** The value of an `ARG NAME=value` of the image, which is where its tools are pinned. */
+const argOf = (name: string): string => {
+  const match = new RegExp(`^ARG ${escape(name)}=(\\S+)$`, "m").exec(dockerfile());
+  assert.ok(match !== null, `container/Dockerfile declares no ARG ${name}`);
+  return match[1];
+};
 
 test("the workflow sets up Node from .node-version", () => {
   assert.match(workflow(), /node-version-file: \.node-version/, "the workflow does not read .node-version");
@@ -43,4 +54,22 @@ test("the release job pushes to release with the deploy key, and the test job ha
   assert.match(workflow(), /refs\/heads\/release/, "the workflow does not push to refs/heads/release");
   assert.match(workflow(), /secrets\.RELEASE_DEPLOY_KEY/, "the workflow does not use the secret RELEASE_DEPLOY_KEY");
   assert.match(workflow(), /timeout-minutes: \d+/, "the test job has no timeout-minutes");
+});
+
+// The image is now part of the repository (container/Dockerfile), so the same drift check covers it: its pins are
+// what this machine runs, and its Node is the one .node-version gives CI. A rebuild cannot move them apart silently.
+test("the image builds on the Node of .node-version", () => {
+  const node = (readText(".node-version") ?? "(absent)").trim();
+  assert.match(
+    dockerfile(),
+    new RegExp(`^FROM node:${escape(node)}-`, "m"),
+    `container/Dockerfile does not build on node:${node}, so a rebuild could drift from .node-version`,
+  );
+});
+
+test("the image pins the bats and bashly this machine runs, and the Playwright the package pins", () => {
+  assert.equal(argOf("BATS_VERSION"), versionOf("bats", ["--version"]), "the image's bats is not the one running here");
+  assert.equal(argOf("BASHLY_VERSION"), versionOf("bashly", ["--version"]), "the image's bashly is not the one running here");
+  const pinned = (JSON.parse(readText("package.json") ?? "{}") as { devDependencies?: Record<string, string> }).devDependencies?.["@playwright/test"];
+  assert.equal(argOf("PLAYWRIGHT_VERSION"), pinned, "the image's Playwright is not the pin in package.json");
 });

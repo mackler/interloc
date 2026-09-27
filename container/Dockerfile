@@ -1,10 +1,10 @@
 # The image of the development container (compose.cc.yaml builds it as claude-code-base).
 # It carries Claude Code, and the tools the test suite needs that npm does not provide:
 # Playwright's Chromium, bashly (which generates bin/ilcli) and bats (which tests it).
-# Their versions are pinned here and checked against this machine and the CI workflow by
-# test/ci.test.ts, so that a rebuild cannot silently move them apart.
+# Their versions are pinned here, and the Node of the base image is the one .node-version gives CI;
+# test/ci.test.ts checks all four against this machine, so that a rebuild cannot move them apart.
 
-FROM node:26-trixie-slim
+FROM node:26.10.0-trixie-slim
 ARG CLAUDE_CODE_VERSION=latest
 ARG PLAYWRIGHT_VERSION=1.63.0
 ARG BASHLY_VERSION=2.0.0
