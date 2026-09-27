@@ -5,6 +5,7 @@ import type { SubjectId } from "./artifacts.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { TurnVariant } from "./schemaNormalize.ts";
+import type { InterviewStage } from "./uiEvents.ts";
 
 /** A question list as the agents exchange it or as the program records it (a recorded default may be null). */
 export type RenderableQuestions = Readonly<{
@@ -67,4 +68,16 @@ export const renderResponse = (response: PlannerResponse): string => {
   const self = response.self_corrections.map((s) => `- **Self-correction** (${s.new_action}, issue "${s.id}"): ${s.explanation}`);
   const feedback = response.reviewer_feedback !== "" ? [`- **Feedback to the reviewer:** ${response.reviewer_feedback}`] : [];
   return `### Claude Code\n\n${[...answers, ...self, ...feedback].join("\n")}\n\n`;
+};
+
+/** The heading of an interview in conversation.md, a record: unchanged when the user-facing name changes (issue #21). */
+export const recordHeading = (stage: InterviewStage): string => {
+  switch (stage) {
+    case "clarification":
+      return "Interview";
+    case "followUp":
+      return "Second interview";
+    case "conversation":
+      return "Conversation before planning";
+  }
 };

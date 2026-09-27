@@ -59,3 +59,10 @@ test("the work subject: its id, file, prompts and policies", () => {
     assert.deepEqual([other.leaveOnAcceptance, other.leaveOnDecision, other.prepare], [false, false, null]);
   }
 });
+
+// Issue #14 and the clarification's name (Q5): the proceed choice at the cycle limit is shown to the user.
+test("the proceed choices name the clarification and implementation", () => {
+  assert.equal(questionSubject("t").proceed, "proceed to the clarification with the question list as it is");
+  assert.equal(requirementsSubject().proceed, "proceed to planning with the requirements as they are");
+  assert.equal(planSubject(1, false).proceed, "proceed to implementation with the plan as it is");
+});

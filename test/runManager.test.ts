@@ -71,7 +71,7 @@ test("a run: Started, the Ui's events, Ended 0; conversation.md is byte-identica
   assert.equal(events[0]._tag, "Started");
   assert.deepEqual(h.received.filter((b) => b.run === id).map((b) => b.seq), events.map((_, i) => i), "seq counts from 0 without a gap");
   assert.equal(endCode(h, id), 0);
-  assert.ok(events.some((e) => e._tag === "Said" && /finished after 1 execution phase/.test(e.text)));
+  assert.ok(events.some((e) => e._tag === "Said" && /finished after 1 implementation phase/.test(e.text)));
   assert.ok(events.some((e) => e._tag === "Notified" && e.event._tag === "PhaseBegan"));
   const read = (r: string) => fs.readFileSync(path.join(r, "plan-review", "conversation.md"), "utf8");
   assert.equal(read(repo), read(terminal));

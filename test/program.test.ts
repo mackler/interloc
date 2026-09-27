@@ -21,7 +21,7 @@ const assertTail = (probe: WiringProbe): void => {
 test("a finished run prints the plan path and exits 0", async () => {
   const { wiring, probe } = testWiring(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] });
   assert.equal(await runProgram(["task"], wiring), 0);
-  assert.match(said(probe), /Claude Code reports that the task is finished after 1 execution phase\(s\)\./);
+  assert.match(said(probe), /Claude Code reports that the task is finished after 1 implementation phase\(s\)\./);
   assert.match(said(probe), new RegExp(`Plan: ${path.join(probe.dir, "plan.md")}\\nConversation record: ${probe.dir}/conversation.md`));
   assert.match(said(probe), /Claude Code session id: test-session/);
   assertTail(probe);
@@ -38,7 +38,10 @@ test("the project directory argument is used, and the config of that project app
   const repo = tempRepo();
   const { wiring, probe } = testWiring(repo, { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished], config: { maxRounds: 3 } });
   assert.equal(await runProgram(["task", repo], { ...wiring, cwd: "/nonexistent" }), 0);
-  assert.match(said(probe), /round 1 \(limit 3\)/);
+  assert.match(said(probe), /Planning phase 1, cycle 1: Codex review \.\.\./);
+  assert.match(said(probe), /Implementation phase 1: Claude Code implements the plan/);
+  assert.match(said(probe), /Implementation phase 1 ended with status: finished/);
+  assert.match(said(probe), /finished after 1 implementation phase\(s\)\./);
 });
 
 test("a missing task prints the usage and exits 2", async () => {

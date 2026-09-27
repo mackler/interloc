@@ -79,7 +79,7 @@ export const describe = (error: RunErrorFields): string => {
       if (error.unknownDispositions.length > 0) parts.push(`Claude Code returned a disposition for an id that is not in the review: ${error.unknownDispositions.join(", ")}`);
       if (error.emptyIds.length > 0) parts.push(`an empty id in ${error.emptyIds.join(" and ")}`);
       if (error.collidingIds.length > 0) parts.push(`a generated self-correction id already exists in the log: ${error.collidingIds.join(", ")}`);
-      return `the round is invalid: ${parts.join("; ")}`;
+      return `the cycle is invalid: ${parts.join("; ")}`;
     }
     case "QuestionListInvalid": {
       const parts: string[] = [];
@@ -88,7 +88,7 @@ export const describe = (error: RunErrorFields): string => {
       return `the question list is invalid: ${parts.join("; ")}`;
     }
     case "RoundLimitStop":
-      return `stopped by the user at the round limit of ${error.heading}`;
+      return `stopped by the user at the cycle limit of ${error.heading}`;
     case "ClaudeCallFailed":
       return `Claude Code planning call failed: ${error.message}`;
     case "CodexCallFailed":

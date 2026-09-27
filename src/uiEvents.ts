@@ -2,10 +2,13 @@
 // records them, the web Ui turns them into the page's panels, activity line and progress. Pure; types only from src/.
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
+import { cycleHeading, phaseLabel } from "./prompts.ts";
 import type { ExecOutcome, PlannerResponse, QuestionListResponse, Review } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
 export type Phase = Readonly<{ kind: "questions" }> | Readonly<{ kind: "planning" | "execution" | "work"; n: number }>;
+/** Which conversation with the user runs (issue #21): the first clarification, a follow-up on accepted requirements gaps, or the conversation after an empty agreed list. */
+export type InterviewStage = "clarification" | "followUp" | "conversation";
 export type Agent = "claude" | "codex";
 export type LoopResult = "converged" | "proceed" | "revise";
 
@@ -31,18 +34,7 @@ export type UiEvent =
 
 const AGENT_LABEL: Record<Agent, string> = { claude: "Claude Code", codex: "Codex" };
 /** The name of a phase as the progress display shows it. */
-export const phaseName = (phase: Phase): string => {
-  switch (phase.kind) {
-    case "questions":
-      return "Question phase";
-    case "planning":
-      return `Planning ${phase.n}`;
-    case "execution":
-      return `Execution ${phase.n}`;
-    case "work":
-      return `Work review ${phase.n}`;
-  }
-};
+export const phaseName = (phase: Phase): string => (phase.kind === "questions" ? phaseLabel("questions", 0) : phaseLabel(phase.kind, phase.n));
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** One line per event, for test output. Total over the variants. */
@@ -53,7 +45,7 @@ export const describeEvent = (event: UiEvent): string => {
     case "PhaseEnded":
       return `${phaseName(event.phase)} ended: ${event.result}`;
     case "RoundBegan":
-      return `${subjectDir(event.subject)}, round ${event.round} of ${event.limit}`;
+      return cycleHeading(subjectDir(event.subject), event.round);
     case "ReviewReceived":
       return `review of ${subjectDir(event.subject)}, round ${event.round}: ${plural(event.review.issues.length, "issue")}, ${event.counted} counted`;
     case "ResponseReceived":

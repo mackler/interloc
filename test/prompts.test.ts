@@ -109,3 +109,30 @@ test("an action not sent because the page is no longer connected, with the answe
   assert.equal(prompts.notSentNotice("start", "disconnected"), "The new task was not sent: the page is no longer connected to the server.");
   assert.equal(prompts.notSentNotice("list", "disconnected"), "The directory listing was not requested: the page is no longer connected to the server.");
 });
+
+// Issue #14: the user reads "cycle", never "round", at the limit; the agents' prompts and the records keep "round".
+test("the cycle limit's prompts, in the terminal and in the page, speak of cycles", () => {
+  const limit = prompts.limitPrompt(5, "proceed to implementation with the plan as it is");
+  assert.equal(limit, "5 cycles completed without convergence. Number = additional cycles; p = proceed to implementation with the plan as it is; 0 = stop > ");
+  assert.equal(prompts.limitNoProceedPrompt(2), "2 cycles completed without convergence. Number = additional cycles; 0 = stop > ");
+  assert.equal(prompts.pagePromptText("limit", limit), "5 cycles completed without convergence. Add cycles, proceed without convergence, or stop.");
+  assert.equal(prompts.pagePromptText("limitNoProceed", prompts.limitNoProceedPrompt(2)), "2 cycles completed without convergence. Add cycles or stop.");
+});
+
+test("the status lines of the phases name Gather Requirements and Implementation", () => {
+  assert.equal(prompts.questionListLine, "Gather Requirements: Claude Code formulates the question list ...");
+  assert.equal(prompts.implementationBeganLine(2, "auto"), "\nImplementation phase 2: Claude Code implements the plan (permission mode auto) ...");
+  assert.equal(prompts.implementationEndedLine(2, "finished"), "\nImplementation phase 2 ended with status: finished");
+  assert.equal(prompts.taskFinishedLine(3), "\nClaude Code reports that the task is finished after 3 implementation phase(s).");
+  assert.equal(prompts.IMPLEMENTATION_STOPPED_LINE, "\nClaude Code has stopped implementation with a question.");
+});
+
+// The Q5 follow-up of issue #21: the user reads "clarification" where the records say "interview".
+test("the clarification's headings and help", () => {
+  assert.equal(prompts.clarificationHeading("clarification"), "Clarification");
+  assert.equal(prompts.clarificationHeading("followUp"), "Follow-up clarification");
+  assert.equal(prompts.clarificationHeading("conversation"), "Conversation before planning");
+  assert.equal(prompts.interviewHelp("Clarification", "page"), "Clarification. /done ends the clarification, /quit ends the run; Shift+Enter starts a new line.");
+  assert.equal(prompts.interviewHelp("Clarification", "terminal"), '\nClarification. Commands: /done = end the clarification; /quit = end the run; """ on its own line starts and ends a message of several lines.');
+  assert.equal(prompts.END_CLARIFICATION, "End clarification");
+});

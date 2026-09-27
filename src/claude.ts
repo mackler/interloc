@@ -179,7 +179,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         await inCallback(
           Effect.gen(function* () {
             const questions = yield* questionsOf(input);
-            yield* ui.say("\nClaude Code has stopped execution with a question.");
+            yield* ui.say(prompts.IMPLEMENTATION_STOPPED_LINE);
             const answers = yield* relayQuestions(questions);
             yield* Ref.set(stop, {
               question: questions.map((q) => q.question).join(" / "),

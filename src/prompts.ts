@@ -2,6 +2,7 @@
 
 import { pathOf } from "./artifacts.ts";
 import type { LogEntry, Review } from "./schema.ts";
+import type { InterviewStage } from "./uiEvents.ts";
 
 const SEVERITY = `Severity: blocking = the work cannot succeed with the file as written; major = the file as written will produce a defect or omits something required; minor = everything else.`;
 
@@ -201,13 +202,13 @@ Return the complete output again, corrected. Do not modify any file.`;
 export function decisionPrompt(subject: string): string {
   return `Decision on: ${subject} (Enter = none, q = quit) > `;
 }
-/** The round limit, with the choice to proceed without convergence. */
+/** The round limit, with the choice to proceed without convergence. The user reads "cycles" (issue #14). */
 export function limitPrompt(limit: number, proceedLabel: string): string {
-  return `${limit} rounds completed without convergence. Number = additional rounds; p = ${proceedLabel}; 0 = stop > `;
+  return `${limit} cycles completed without convergence. Number = additional cycles; p = ${proceedLabel}; 0 = stop > `;
 }
 /** The round limit of a subject without a proceed choice (the work review, Q13). */
 export function limitNoProceedPrompt(limit: number): string {
-  return `${limit} rounds completed without convergence. Number = additional rounds; 0 = stop > `;
+  return `${limit} cycles completed without convergence. Number = additional cycles; 0 = stop > `;
 }
 /** The user's input at a stop of an execution phase whose report carried none. */
 export const execInputPrompt = "Your input for Claude Code (q = quit) > ";
@@ -221,6 +222,61 @@ export const interviewMessagePrompt = "You > ";
 export const confirmSummaryPrompt = "Enter = confirm the summary; any other text continues the conversation > ";
 /** The choice after an empty agreed question list (behaviour 2). */
 export const startOrTalkPrompt = "\nClaude Code and Codex agree that no question is needed. Enter = start planning; any other text opens a conversation with Claude Code > ";
+
+// ---- status lines to the user (issue #14: "Gather Requirements", "Implementation", "cycle") -----------------------
+
+/** The start of the question phase. */
+export const questionListLine = "Gather Requirements: Claude Code formulates the question list ...";
+/** The start and the end of execution phase k. */
+export function implementationBeganLine(k: number, permissionMode: string): string {
+  return `\nImplementation phase ${k}: Claude Code implements the plan (permission mode ${permissionMode}) ...`;
+}
+export function implementationEndedLine(k: number, status: string): string {
+  return `\nImplementation phase ${k} ended with status: ${status}`;
+}
+/** The end of a finished run. */
+export function taskFinishedLine(phases: number): string {
+  return `\nClaude Code reports that the task is finished after ${phases} implementation phase(s).`;
+}
+/** An AskUserQuestion stop of an execution call. */
+export const IMPLEMENTATION_STOPPED_LINE = "\nClaude Code has stopped implementation with a question.";
+/** The proceed choices of the subjects at the cycle limit (the work review has none). */
+export const PROCEED_TO_CLARIFICATION = "proceed to the clarification with the question list as it is";
+export const PROCEED_TO_PLANNING = "proceed to planning with the requirements as they are";
+export const PROCEED_TO_IMPLEMENTATION = "proceed to implementation with the plan as it is";
+/** The review loop's lines: a cycle's review and response. */
+export function cycleReviewLine(heading: string, n: number): string {
+  return `\n${cycleHeading(heading, n)}: Codex review ...`;
+}
+export function cycleResponseLine(heading: string, n: number): string {
+  return `${cycleHeading(heading, n)}: Claude Code response ...`;
+}
+/** The counts listed at the cycle limit. */
+export function cycleCountsLines(heading: string, counts: readonly number[], costs: readonly (number | null | undefined)[]): readonly string[] {
+  return [`\nCounted issues and reported Claude Code usage per cycle of ${heading}:`, ...counts.map((c, i) => `  cycle ${i + 1}: counted issues = ${c}, total_cost_usd = ${costs[i] ?? "not reported"}`)];
+}
+/** Behaviour 7's pauses in the user's words: identical content, idle cycles, an unexplained change. */
+export function identicalContentLine(fileLabel: string, cycle: number, seen: string): string {
+  return `\n${fileLabel} after cycle ${cycle} is identical to ${fileLabel} after ${seen} (cycle 0 is the state at the start).`;
+}
+export function observedAfter(cycle: number, afterDecision: boolean): string {
+  return afterDecision ? `cycle ${cycle} (after the user's decision)` : `cycle ${cycle}`;
+}
+export function alternatingSubject(fileLabel: string): string {
+  return `which of the two alternating versions of ${fileLabel} is correct`;
+}
+export function idleLine(idle: number, cycle: number): string {
+  return `\nClaude Code accepted no issue in ${idle} consecutive cycles. Issues of cycle ${cycle} without amendment:`;
+}
+export function idleSubject(idle: number): string {
+  return `the issues of the last ${idle} cycles that produced no amendment`;
+}
+export function unexplainedChangeLine(fileLabel: string, cycle: number): string {
+  return `\n${fileLabel} changed in cycle ${cycle} without an accepted issue, a self-correction, or a user decision.`;
+}
+export function unexplainedChangeSubject(fileLabel: string, heading: string, cycle: number): string {
+  return `the unexplained change to ${fileLabel} in ${cycleHeading(heading, cycle)}`;
+}
 
 // ---- work review ----------------------------------------------------------------------------------
 
@@ -295,10 +351,10 @@ export function pagePromptText(kind: string, text: string): string {
       return `Decision on: ${text.slice(decision[0].length, text.length - decision[1].length)}`;
     case "limit":
     case "limitNoProceed": {
-      const rounds = /^[0-9]+/.exec(text)?.[0] ?? "The";
+      const cycles = /^[0-9]+/.exec(text)?.[0] ?? "The";
       return kind === "limit"
-        ? `${rounds} rounds completed without convergence. Add rounds, proceed without convergence, or stop.`
-        : `${rounds} rounds completed without convergence. Add rounds or stop.`;
+        ? `${cycles} cycles completed without convergence. Add cycles, proceed without convergence, or stop.`
+        : `${cycles} cycles completed without convergence. Add cycles or stop.`;
     }
     case "execInput":
       return "Your input for Claude";
@@ -317,11 +373,24 @@ export function pagePromptText(kind: string, text: string): string {
   }
 }
 
+/** The name of a conversation with the user as both interfaces show it (issue #21, Q5 follow-up). */
+export function clarificationHeading(stage: InterviewStage): string {
+  switch (stage) {
+    case "clarification":
+      return "Clarification";
+    case "followUp":
+      return "Follow-up clarification";
+    case "conversation":
+      return "Conversation before planning";
+  }
+}
+/** The fixed choice that ends a clarification. */
+export const END_CLARIFICATION = "End clarification";
 /** The interview's opening help (finding 8 of docs/gui-review.md), for the terminal or the page. */
 export function interviewHelp(heading: string, ui: "terminal" | "page"): string {
   return ui === "terminal"
-    ? `\n${heading}. Commands: /done = end the interview; /quit = end the run; """ on its own line starts and ends a message of several lines.`
-    : `${heading}. /done ends the interview, /quit ends the run; Shift+Enter starts a new line.`;
+    ? `\n${heading}. Commands: /done = end the clarification; /quit = end the run; """ on its own line starts and ends a message of several lines.`
+    : `${heading}. /done ends the clarification, /quit ends the run; Shift+Enter starts a new line.`;
 }
 
 // ---- the page's help and notices (W2-R1-4) --------------------------------------------------------------------------
@@ -342,6 +411,31 @@ export const START_FORM_DESCRIPTION: readonly Readonly<{ text: string; style: "p
   { text: "Stop task", style: "strong" },
   { text: " ends a task like Ctrl+C in the terminal.", style: "plain" },
 ];
+
+/**
+ * The name of a phase as both interfaces show it (issue #14): the first phase gathers the requirements, and an
+ * execution phase implements the plan. The records keep their own names (question-review/, execution-<k>/).
+ */
+export function phaseLabel(kind: "questions" | "planning" | "execution" | "work", n: number): string {
+  switch (kind) {
+    case "questions":
+      return "Gather Requirements";
+    case "planning":
+      return `Planning ${n}`;
+    case "execution":
+      return `Implementation ${n}`;
+    case "work":
+      return `Work review ${n}`;
+  }
+}
+/** The purpose of an agent call as the activity line names it: the events keep the program's words (issues #14, #21). */
+export function purposeLabel(purpose: string): string {
+  return purpose === "interview" ? "clarification" : purpose === "execution" ? "implementation" : purpose;
+}
+/** A cycle of a review loop in the user's words (issue #14): the records and the events say "round". */
+export function cycleHeading(heading: string, n: number): string {
+  return `${heading}, cycle ${n}`;
+}
 
 /** The label that opens a phase's band in a chat panel (issue #15): the phase's name and the time it began. */
 export function phaseBandLabel(name: string, clock: string): string {
@@ -392,6 +486,9 @@ export function protocolErrorNotice(reason: string): string {
 /** The page has stopped reconnecting after three frames in a row it could not read (decision Q5). */
 export const CONNECTION_FAILED_NOTICE =
   "The page has stopped reconnecting: it could not read the server's messages three times in a row. Nothing you do here is sent any more, and your typed text is kept. Reload the page once the server has been fixed.";
+/** The progress rail's heading and its text before any phase (issue #14, Q4: unchanged). */
+export const PROGRESS_HEADING = "Progress";
+export const NO_PHASE_YET = "No phase has begun.";
 /** The one-line progress of a compact window: the current phase and its latest round, or none. */
 export function progressLine(label: string | null, round: Readonly<{ round: number; limit: number }> | null): string {
   if (label === null) return "Progress: no phase has begun";

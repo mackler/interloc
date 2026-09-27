@@ -36,7 +36,7 @@ describe("ordering and the panels", () => {
     const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null };
     const interview = fold(live([started, notified(turn), said("\nWhich database?\n1. PostgreSQL\n2. SQLite\n"), asked(1, prompts.interviewMessagePrompt)]));
     expect(interview.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2"]);
-    expect(interview.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End interview=/done", "Quit=/quit"]);
+    expect(interview.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End clarification=/done", "Quit=/quit"]);
     const question: UiEvent = { _tag: "QuestionAsked", question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
     const relayed = fold(live([started, notified(question), asked(1, prompts.optionOrTextPrompt)]));
     expect(relayed.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["A=1", "B=2"]);
@@ -47,7 +47,7 @@ describe("ordering and the panels", () => {
     const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null };
     const answered = (text: string) => fold(live([started, notified(turn), asked(1, prompts.interviewMessagePrompt), { _tag: "Answered", prompt: 1, text }]));
     expect(bodies(answered("2")).at(-1)).toBe("user:2. SQLite");
-    expect(bodies(answered("/done")).at(-1)).toBe("user:End interview");
+    expect(bodies(answered("/done")).at(-1)).toBe("user:End clarification");
   });
 
   test("an answer that is a choice shows the choice's label", () => {
@@ -80,7 +80,7 @@ describe("ordering and the panels", () => {
     const review = { issues: [{ id: "A", severity: "major" as const, location: "l", problem: "p", evidence: "e" }] };
     const response = { dispositions: [{ id: "A", action: "accepted" as const, rationale: "r", duplicate_of: "", reverses: "" }], self_corrections: [], reviewer_feedback: "", questions_for_user: [] };
     const s = fold(live([started, notified({ _tag: "ReviewReceived", subject: { plan: 1 }, round: 2, review, counted: 1 }), notified({ _tag: "ResponseReceived", subject: { plan: 1 }, round: 2, response, resultText: "" })]));
-    expect(s.run?.right.map((m) => [m.author, m.heading])).toEqual([["codex", "Planning phase 1, round 2"], ["claude", "Planning phase 1, round 2"]]);
+    expect(s.run?.right.map((m) => [m.author, m.heading])).toEqual([["codex", "Planning phase 1, cycle 2"], ["claude", "Planning phase 1, cycle 2"]]);
     expect(s.run?.right[0].body).toMatch(/\*\*\[A\]\*\*/);
     // The author is the message's; the body does not repeat it (aesthetic and minimalist design).
     expect(s.run?.right.map((m) => m.body)).not.toContainEqual(expect.stringMatching(/^### /));
@@ -176,7 +176,7 @@ test("every prompt is shown in the page's words, without the terminal's key conv
     expect(body, text).not.toMatch(/>\s*$|\bq = quit|Enter =|= stop|p = /);
     expect(body.trim(), text).not.toBe("");
   }
-  expect(fold(live([started, asked(1, prompts.limitPrompt(5, "proceed to execution"))])).run?.left.at(-1)?.body).toMatch(/5 rounds completed without convergence/);
+  expect(fold(live([started, asked(1, prompts.limitPrompt(5, "proceed to execution"))])).run?.left.at(-1)?.body).toMatch(/5 cycles completed without convergence/);
   expect(fold(live([started, asked(1, "Something new > ")])).run?.left.at(-1)?.body).toBe("Something new");
 });
 
@@ -187,6 +187,14 @@ describe("activity and timeline", () => {
     expect(s1.run?.busy).toBe(true);
     const s2 = fold([{ type: "event", run: 1, seq: 3, time: at(3), event: notified({ _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" }) }], s1);
     expect(s2.run?.activity).toBe("");
+  });
+
+  test("the activity line names a call's purpose in the user's words: clarification and implementation (issues #14, #21)", () => {
+    const of = (purpose: string) => fold(live([started, notified({ _tag: "AgentCallStarted", agent: "claude", purpose })])).run?.activity;
+    expect(of("interview")).toBe("Claude — clarification");
+    expect(of("execution")).toBe("Claude — implementation");
+    expect(of("planning")).toBe("Claude — planning");
+    expect(of("review")).toBe("Claude — review");
   });
 
   test("the question phase stays active through its review loops until PhaseEnded; each loop has its own group; replay agrees", () => {
@@ -385,7 +393,7 @@ describe("a replay of a question phase", () => {
     expect(bodies(s).slice(0, 2)).toEqual([`program:${prompts.interviewHelp("Interview", "page")}`, "claude:Which database should the service use?\n1. PostgreSQL\n2. SQLite"]);
     expect(s.run?.pending?.asked.kind).toBe("interviewMessage");
     expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2"]);
-    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End interview=/done", "Quit=/quit"]);
+    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End clarification=/done", "Quit=/quit"]);
   });
 });
 
@@ -531,9 +539,9 @@ describe("phase bands", () => {
       const groups = bandsOf(s.run?.left ?? []);
       expect(groups.map((g) => [g.band?.kind ?? null, g.band?.name ?? null, g.messages.map((m) => m.body)])).toEqual([
         [null, null, ["m0"]],
-        ["execution", "Execution 1", ["e1"]],
+        ["execution", "Implementation 1", ["e1"]],
         ["planning", "Planning 2", ["p1", "p2"]],
-        ["execution", "Execution 2", ["e2"]],
+        ["execution", "Implementation 2", ["e2"]],
       ]);
     }
   });

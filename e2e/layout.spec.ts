@@ -60,7 +60,7 @@ const compactChecks = async (page: Page, context: import("@playwright/test").Bro
   // Messages that arrive in the hidden panel are counted on its button.
   await other.getByRole("button", { name: "No decision" }).click();
   await expect(page.getByRole("button", { name: new RegExp(`${RIGHT}.*[1-9][0-9]* new`) })).toBeVisible();
-  await expect(panel(page, LEFT).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await other.close();
 };
 
@@ -86,7 +86,7 @@ test("(L3) a desktop window, 1280 × 800: the rail and both panels side by side"
   await expect(page.getByRole("button", { name: new RegExp(RIGHT) })).toHaveCount(0);
   await page.getByRole("button", { name: "No decision" }).click();
   await page.getByRole("button", { name: "No decision" }).click();
-  await expect(panel(page, LEFT).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
 // W2-R1-3 and P3-R1-1 (work review 2 and planning 3): a panel keeps its reading position across a switch and a resize,
@@ -203,7 +203,7 @@ for (const [width, height] of [
   test(`(L9) paragraph-length answers at ${width} × ${height}: each is a card that holds its text, chosen by keyboard`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await startTask(page, `Show the time at ${width}`, LONG_CHOICES_URL);
-    await expect(page.getByRole("button", { name: "End interview" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "End clarification" })).toBeVisible();
     const group = page.getByRole("group", { name: "Proposed answers" });
     await expect(group.getByRole("button")).toHaveCount(3);
     const cards = group.getByRole("button");
@@ -218,8 +218,8 @@ for (const [width, height] of [
       expect(b.x + b.width, `answer ${i + 1} ends inside the prompt`).toBeLessThanOrEqual(prompt.x + prompt.width + 0.5);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page overflows horizontally").toBe(true);
-    // The cards scroll within the prompt, so the message field, Send and End interview stay in the window.
-    for (const name of ["[name=answer]", "button[name=send]", "button:has-text('End interview')"]) {
+    // The cards scroll within the prompt, so the message field, Send and End clarification stay in the window.
+    for (const name of ["[name=answer]", "button[name=send]", "button:has-text('End clarification')"]) {
       const b = await box(page.locator(name));
       expect(b.y + b.height, `${name} is within the window`).toBeLessThanOrEqual(height);
     }

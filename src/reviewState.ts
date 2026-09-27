@@ -5,6 +5,7 @@
 
 import { AcceptedWithoutChange, RoundLimitStop, type RunError } from "./errors.ts";
 import { parseExtraRounds } from "./input.ts";
+import * as prompts from "./prompts.ts";
 import * as log from "./issueLog.ts";
 import { renderRound } from "./render.ts";
 import { type IssueId, validateReview, validateRound, type ValidatedReview, type ValidatedRound } from "./round.ts";
@@ -144,7 +145,7 @@ const say = (text: string): ReviewCommand => ({ kind: "Say", text });
 const idPrefixOf = (subject: SubjectId): string => (subject === "questions" ? "Q" : subject === "requirements" ? "G" : "plan" in subject ? "P" : "W");
 const notify = (event: UiEvent): ReviewCommand => ({ kind: "Notify", event });
 const show = (value: unknown): string => JSON.stringify(value, null, 2);
-const describeObservation = (o: Observation): string => (o.stage === "decision" ? `round ${o.round} (after the user's decision)` : `round ${o.round}`);
+const describeObservation = (o: Observation): string => prompts.observedAfter(o.round, o.stage === "decision");
 
 // ---- transitions --------------------------------------------------------------------------------
 
@@ -166,12 +167,12 @@ const startRound = (s: ReviewState): Transition => {
   const { heading } = s.setup;
   const n = s.round + 1;
   if (n > s.limit) {
-    const lines = [`\nCounted issues and reported Claude Code usage per round of ${heading}:`, ...s.counts.map((c, i) => `  round ${i + 1}: counted issues = ${c}, total_cost_usd = ${s.costs[i] ?? "not reported"}`)];
+    const lines = prompts.cycleCountsLines(heading, s.counts, s.costs);
     return { state: { ...s, step: { name: "awaitingLimit" } }, commands: [...lines.map(say), { kind: "AskLimit", limit: s.limit }] };
   }
   return {
     state: { ...s, round: n, step: { name: "awaitingReview" }, current: freshRound },
-    commands: [notify({ _tag: "RoundBegan", subject: s.setup.subject, round: n, limit: s.limit }), say(`\n${heading}, round ${n} (limit ${s.limit}): Codex review ...`), { kind: "CallReviewer", round: n }],
+    commands: [notify({ _tag: "RoundBegan", subject: s.setup.subject, round: n, limit: s.limit }), say(prompts.cycleReviewLine(heading, n)), { kind: "CallReviewer", round: n }],
   };
 };
 
@@ -191,7 +192,7 @@ const onLimitAnswer = (s: ReviewState, answer: string): Transition => {
 /** After the reraised prompts: the planner's response. */
 const toResponse = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition => ({
   state: { ...s, step: { name: "awaitingResponse" } },
-  commands: [...before, say(`${s.setup.heading}, round ${s.round}: Claude Code response ...`), { kind: "CallPlanner", round: s.round }],
+  commands: [...before, say(prompts.cycleResponseLine(s.setup.heading, s.round)), { kind: "CallPlanner", round: s.round }],
 });
 
 const askEach = (s: ReviewState, queue: readonly Ask[], step: (asking: Ask, rest: readonly Ask[]) => Step, otherwise: (s: ReviewState, before: readonly ReviewCommand[]) => Transition, before: readonly ReviewCommand[] = []): Transition => {
@@ -322,8 +323,8 @@ const identicalCheck = (s: ReviewState, hash: string, stage: Stage, before: read
   if (seen === undefined) return finishRound(s, hash, stage, before);
   return ask(
     s,
-    { name: "askingIdentical", hash, stage, asking: { say: [], subject: `which of the two alternating versions of ${fileLabel} is correct`, id: null } },
-    { say: [`\n${fileLabel} after round ${s.round} is identical to ${fileLabel} after ${describeObservation(seen)} (round 0 is the state at the start).`], subject: `which of the two alternating versions of ${fileLabel} is correct`, id: null },
+    { name: "askingIdentical", hash, stage, asking: { say: [], subject: prompts.alternatingSubject(fileLabel), id: null } },
+    { say: [prompts.identicalContentLine(fileLabel, s.round, describeObservation(seen))], subject: prompts.alternatingSubject(fileLabel), id: null },
     before,
   );
 };
@@ -336,10 +337,10 @@ const finishRound = (s: ReviewState, hash: string, stage: Stage, before: readonl
   const state: ReviewState = { ...s, observations: [...s.observations, { round: s.round, stage, hash }], idle };
   if (idle < maxIdleRounds) return withBefore(startRound(state), before);
   const lines = [
-    `\nClaude Code accepted no issue in ${idle} consecutive rounds. Issues of round ${s.round} without amendment:`,
+    prompts.idleLine(idle, s.round),
     ...state.log.filter((x) => x.phase === phase && x.round === s.round && x.source === "review" && x.action !== "accepted").map((e) => `  - [${e.id}] (${e.action}) ${e.problem}\n      rationale: ${e.rationale}`),
   ];
-  const asking: Ask = { say: lines, subject: `the issues of the last ${idle} rounds that produced no amendment`, id: null };
+  const asking: Ask = { say: lines, subject: prompts.idleSubject(idle), id: null };
   return ask(state, { name: "askingIdle", asking }, asking, before);
 };
 const withBefore = (t: Transition, before: readonly ReviewCommand[]): Transition => (before.length === 0 ? t : { state: t.state, commands: [...before, ...t.commands] });
@@ -353,8 +354,8 @@ const onFileObserved = (s: ReviewState, hash: string): Transition => {
       if (accepted > 0 && hash === last) return halt(s, new AcceptedWithoutChange({ fileLabel, accepted }));
       if (accepted === 0 && selfCount === 0 && !s.current.decided && hash !== last) {
         const asking: Ask = {
-          say: [`\n${fileLabel} changed in round ${s.round} without an accepted issue, a self-correction, or a user decision.`, `The free-text response of Claude Code: ${s.current.resultText || "none"}`],
-          subject: `the unexplained change to ${fileLabel} in ${heading}, round ${s.round}`,
+          say: [prompts.unexplainedChangeLine(fileLabel, s.round), `The free-text response of Claude Code: ${s.current.resultText || "none"}`],
+          subject: prompts.unexplainedChangeSubject(fileLabel, heading, s.round),
           id: null,
         };
         return ask(s, { name: "askingUnexplained", hash, asking }, asking);

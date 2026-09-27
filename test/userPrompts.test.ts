@@ -17,7 +17,7 @@ const catalog: [string, Partial<UserPrompt> & { kind: UserPrompt["kind"] }, stri
   [prompts.execInputPrompt, { kind: "execInput", mode: "ask", free: "line" }, ["Quit=q"]],
   [prompts.optionOrTextPrompt, { kind: "optionOrText", mode: "ask", free: "line", extra: "questionOptions" }, ["Quit=q"]],
   [prompts.permissionPrompt, { kind: "permission", mode: "ask", free: "none" }, ["Allow=y", "Deny=n", "Quit=q"]],
-  [prompts.interviewMessagePrompt, { kind: "interviewMessage", mode: "message", free: "message", extra: "numberedAnswers" }, ["End interview=/done", "Quit=/quit"]],
+  [prompts.interviewMessagePrompt, { kind: "interviewMessage", mode: "message", free: "message", extra: "numberedAnswers" }, ["End clarification=/done", "Quit=/quit"]],
   [prompts.confirmSummaryPrompt, { kind: "confirmSummary", mode: "message", free: "message" }, ["Confirm=", "Quit=/quit"]],
   [prompts.startOrTalkPrompt, { kind: "startOrTalk", mode: "message", free: "message" }, ["Start planning=", "Quit=/quit"]],
 ];

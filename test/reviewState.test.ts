@@ -32,7 +32,8 @@ void noQuestions;
 
 test("Begin: round 1 starts with the Codex review and the initial observation is recorded", () => {
   const t = start();
-  assert.match(says(t), /round 1 \(limit 5\): Codex review/);
+  assert.match(says(t), /^\nPlanning phase 1, cycle 1: Codex review \.\.\.$/m);
+  assert.doesNotMatch(says(t), /limit|round/);
   assert.deepEqual(last(t), { kind: "CallReviewer", round: 1 });
   assert.deepEqual(t.state.observations, [{ round: 0, stage: "start", hash: "h0" }]);
   assert.equal(t.state.round, 1);
@@ -115,7 +116,8 @@ test("the pauses ask in the decided order and a decision leads to ApplyDecisions
 
 test("an unexplained change asks; no decision leads on, a decision applies and observes again", () => {
   const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" });
-  assert.match(says(t), /changed in round 1 without an accepted issue/);
+  assert.match(says(t), /changed in cycle 1 without an accepted issue/);
+  assert.match((last(t) as { subject: string }).subject, /^the unexplained change to plan\.md in Planning phase 1, cycle 1$/);
   assert.equal(last(t).kind, "AskDecision");
   const onward = advance(t.state, { kind: "DecisionGiven", text: "" });
   assert.deepEqual(last(onward), { kind: "CallReviewer", round: 2 });
@@ -132,14 +134,15 @@ test("an unexplained change asks; no decision leads on, a decision applies and o
 test("identical content names the round after which it was seen, with the decision stage", () => {
   const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" }, { kind: "DecisionGiven", text: "" });
   const round2 = run(t, { kind: "ReviewDecoded", review: { issues: [issue("B")] } }, response([["B", "rejected"]]), { kind: "FileObserved", hash: "h0" }, { kind: "DecisionGiven", text: "" });
-  assert.match(says(round2), /after round 2 is identical to plan\.md after round 0/);
+  assert.match(says(round2), /after cycle 2 is identical to plan\.md after cycle 0 \(cycle 0 is the state at the start\)/);
   assert.equal(last(round2).kind, "AskDecision");
 });
 
 test("idle rounds: the prompt after maxIdleRounds, a decision applies and is observed as a decision stage, and the counter resets", () => {
   const t = run(afterReview(), { kind: "ResponseDecoded", response: respond([["A", "rejected"]]), resultText: "", costUsd: null }, { kind: "FileObserved", hash: "h0" });
   const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
-  assert.match(says(idle), /accepted no issue in 1 consecutive rounds/);
+  assert.match(says(idle), /accepted no issue in 1 consecutive cycles\. Issues of cycle 1 without amendment:/);
+  assert.equal((last(idle) as { subject: string }).subject, "the issues of the last 1 cycles that produced no amendment");
   assert.equal(last(idle).kind, "AskDecision");
   const applied = run(idle, { kind: "DecisionGiven", text: "apply" }, { kind: "DecisionsApplied" });
   assert.deepEqual(last(applied), { kind: "ObserveFile", stage: "decision" });
@@ -153,7 +156,7 @@ test("idle rounds: the prompt after maxIdleRounds, a decision applies and is obs
 test("the round limit: proceed, stop, or more rounds", () => {
   const atLimit = run(start({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
   assert.deepEqual(last(atLimit), { kind: "AskLimit", limit: 1 });
-  assert.match(says(atLimit), /round 1: counted issues = 1, total_cost_usd = 0.1/);
+  assert.match(says(atLimit), /per cycle of Planning phase 1:\n  cycle 1: counted issues = 1, total_cost_usd = 0.1/);
   const proceed = advance(atLimit.state, { kind: "LimitAnswer", answer: "p" });
   assert.deepEqual(last(proceed), { kind: "Finish", result: "proceed" });
   assert.ok(proceed.commands.some((c) => c.kind === "Converse" && /without convergence after round 1/.test(c.markdown)));

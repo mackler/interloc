@@ -44,7 +44,7 @@ const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
   [prompts.execInputPrompt, (t: string) => entry("execInput", t, "ask", [], "line")],
   [prompts.optionOrTextPrompt, (t: string) => entry("optionOrText", t, "ask", [], "line", "questionOptions")],
   [prompts.permissionPrompt, (t: string) => entry("permission", t, "ask", [{ label: "Allow", sends: "y" }, { label: "Deny", sends: "n" }], "none")],
-  [prompts.interviewMessagePrompt, (t: string) => entry("interviewMessage", t, "message", [{ label: "End interview", sends: "/done" }], "message", "numberedAnswers")],
+  [prompts.interviewMessagePrompt, (t: string) => entry("interviewMessage", t, "message", [{ label: prompts.END_CLARIFICATION, sends: "/done" }], "message", "numberedAnswers")],
   [prompts.confirmSummaryPrompt, (t: string) => entry("confirmSummary", t, "message", [{ label: "Confirm", sends: "" }], "message")],
   [prompts.startOrTalkPrompt, (t: string) => entry("startOrTalk", t, "message", [{ label: "Start planning", sends: "" }], "message")],
 ]);

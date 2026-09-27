@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeEvent, type UiEvent } from "../src/uiEvents.ts";
+import { describeEvent, phaseName, type UiEvent } from "../src/uiEvents.ts";
 
 const review = { issues: [] };
 const response = { dispositions: [], self_corrections: [], reviewer_feedback: "", questions_for_user: [] };
@@ -9,8 +9,8 @@ const outcome = { status: "finished" as const, summary: "done", question: "", re
 // One example of every variant; the `satisfies` makes a missing tag a type error when the union grows.
 const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp] } = {
   PhaseBegan: [{ _tag: "PhaseBegan", phase: { kind: "planning", n: 2 } }, /Planning 2 began/],
-  PhaseEnded: [{ _tag: "PhaseEnded", phase: { kind: "questions" }, result: "done" }, /Question phase ended: done/],
-  RoundBegan: [{ _tag: "RoundBegan", subject: { plan: 1 }, round: 3, limit: 10 }, /planning-1, round 3 of 10/],
+  PhaseEnded: [{ _tag: "PhaseEnded", phase: { kind: "questions" }, result: "done" }, /Gather Requirements ended: done/],
+  RoundBegan: [{ _tag: "RoundBegan", subject: { plan: 1 }, round: 3, limit: 10 }, /planning-1, cycle 3$/],
   ReviewReceived: [{ _tag: "ReviewReceived", subject: "questions", round: 1, review, counted: 0 }, /review of question-review, round 1: 0 issues, 0 counted/],
   ResponseReceived: [{ _tag: "ResponseReceived", subject: "requirements", round: 2, response, resultText: "" }, /response in requirements-review, round 2/],
   LoopFinished: [{ _tag: "LoopFinished", subject: { plan: 1 }, result: "converged" }, /planning-1 finished: converged/],
@@ -30,3 +30,11 @@ for (const [tag, [event, expected]] of Object.entries(examples)) {
     assert.match(describeEvent(event), expected);
   });
 }
+
+// Issue #14: the phases are named for what they do; "Question phase" and "Execution" are gone from the labels.
+test("phaseName names the phases as the page shows them", () => {
+  assert.equal(phaseName({ kind: "questions" }), "Gather Requirements");
+  assert.equal(phaseName({ kind: "planning", n: 1 }), "Planning 1");
+  assert.equal(phaseName({ kind: "execution", n: 2 }), "Implementation 2");
+  assert.equal(phaseName({ kind: "work", n: 3 }), "Work review 3");
+});

@@ -54,11 +54,11 @@ const startTask = async (page: Page, scenario: Scenario, task: string) => {
 test("(1) a run from the form: the timeline shows its phases and the right panel the agents' exchange", async ({ page }) => {
   await startTask(page, "converge", "Document the service");
   await expect(rail(page).getByText("Planning 1", { exact: true })).toBeVisible();
-  await expect(rail(page).getByText("Execution 1", { exact: true })).toBeVisible();
+  await expect(rail(page).getByText("Implementation 1", { exact: true })).toBeVisible();
   await expect(rail(page).getByText("Work review 1", { exact: true })).toBeVisible();
   await expect(right(page).getByText("The step names no file.")).toBeVisible();
   await expect(right(page).getByText(/accepted: rationale P1-R1-1/)).toBeVisible();
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await expect(page.locator("button[name=new]")).toBeVisible();
   // Issue #2: in the right panel Claude speaks from the left and Codex from the right.
   const list = right(page).locator(".list");
@@ -66,7 +66,7 @@ test("(1) a run from the form: the timeline shows its phases and the right panel
   await onSide(list.locator("article[data-author=codex]").first(), list, "right");
   // Issue #15: each phase is a band opened by its label with the time it began; each kind of phase has its own tone.
   await expect(left(page).locator(".phase-label", { hasText: /^Planning 1 · \S/ })).toBeVisible();
-  await expect(left(page).locator(".phase-label", { hasText: /^Execution 1 · \S/ })).toBeVisible();
+  await expect(left(page).locator(".phase-label", { hasText: /^Implementation 1 · \S/ })).toBeVisible();
   const tone = (band: Locator) => band.evaluate((e) => getComputedStyle(e).backgroundColor);
   const [planningTone, executionTone] = [await tone(left(page).locator(".band-planning").first()), await tone(left(page).locator(".band-execution").first())];
   expect(planningTone).not.toBe(executionTone);
@@ -78,7 +78,7 @@ test("(2) a decision prompt with its buttons: No decision continues, and the ans
   await expect(left(page).getByText("Decision on: question from Claude Code: Which database should the service use?")).toBeVisible();
   await page.getByRole("button", { name: "No decision" }).click();
   await expect(left(page).locator("[data-author=user]").getByText("No decision")).toBeVisible();
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
 test("(3) a reload during a run shows the same messages and the pending prompt", async ({ page }) => {
@@ -91,12 +91,12 @@ test("(3) a reload during a run shows the same messages and the pending prompt",
   expect(await left(page).locator("article").allTextContents()).toEqual(before);
   await expect(page.getByRole("button", { name: "No decision" })).toBeVisible();
   await page.getByRole("button", { name: "No decision" }).click();
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
 test("(4) one click on Stop interrupts the task, and the page offers a new one", async ({ page }) => {
   await startTask(page, "stop", "A task to stop");
-  await expect(left(page).getByText(/round 1: Claude Code response/)).toBeVisible();
+  await expect(left(page).getByText(/cycle 1: Claude Code response/)).toBeVisible();
   await page.locator("button[name=stop]").click();
   await expect(left(page).getByText(/INTERRUPTED by the user\. State is preserved in/)).toBeVisible();
   await expect(page.locator("button[name=stop]")).toBeDisabled();
@@ -117,7 +117,7 @@ test("the fixture records an uncaught error in a second page of the context", as
 
 test("(5) an interview through confirmation: the page's help, a numbered answer, /done, the confirmed summary", async ({ page }) => {
   await startTask(page, "interview", "Add a service");
-  await expect(left(page).getByText("Interview. /done ends the interview, /quit ends the run; Shift+Enter starts a new line.")).toBeVisible();
+  await expect(left(page).getByText("Clarification. /done ends the clarification, /quit ends the run; Shift+Enter starts a new line.")).toBeVisible();
   await expect(left(page).getByText('"""')).toHaveCount(0);
   await page.getByRole("button", { name: "1. PostgreSQL" }).click();
   await expect(left(page).getByText("Anything else?")).toBeVisible();
@@ -133,18 +133,18 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await onSide(band.locator("article[data-author=user]").first(), band, "right");
   const [b, c] = [await edges(band), await contentEdges(list)];
   expect(Math.abs(b.right - b.left - (c.right - c.left)), "the band is as wide as the list's content").toBeLessThanOrEqual(2);
-  await page.getByRole("button", { name: "End interview" }).click();
+  await page.getByRole("button", { name: "End clarification" }).click();
   await expect(left(page).getByText("The service uses PostgreSQL.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
   // Four review loops and an execution follow; the run takes about 5 s alone and longer under the whole suite's load.
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
-  await expect(rail(page).getByText("Question phase", { exact: true })).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+  await expect(rail(page).getByText("Gather Requirements", { exact: true })).toBeVisible();
 });
 
 test("(6) a work correction runs planning, execution and the work review a second time", async ({ page }) => {
   await startTask(page, "workCorrection", "Write the tool");
-  await expect(left(page).getByText(/finished after 2 execution phase/)).toBeVisible();
-  for (const phase of ["Planning 1", "Execution 1", "Work review 1", "Planning 2", "Execution 2", "Work review 2"]) await expect(rail(page).getByText(phase, { exact: true })).toBeVisible();
+  await expect(left(page).getByText(/finished after 2 implementation phase/)).toBeVisible();
+  for (const phase of ["Planning 1", "Implementation 1", "Work review 1", "Planning 2", "Implementation 2", "Work review 2"]) await expect(rail(page).getByText(phase, { exact: true })).toBeVisible();
   await expect(right(page).getByText("The step misses its test.")).toBeVisible();
   // Issue #15: every planning phase has the same tone, and so has every execution phase, apart from the other's.
   const tones = (kind: string) => left(page).locator(`.band-${kind}`).evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
@@ -168,7 +168,7 @@ test("(7) two tabs: another tab's answer withdraws the unsent draft with a notic
   await expect(other.locator("[name=answer]")).toHaveValue("");
   await expect(other.getByText(/answered in another tab; your unsent text was discarded: «an unsent answer»/)).toBeVisible();
   await other.getByRole("button", { name: "No decision" }).click();
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
 test("(8) a dropped connection: an answer made meanwhile is sent once after the hello, and the replay duplicates nothing", async ({ page }) => {
@@ -190,7 +190,7 @@ test("(8) a dropped connection: an answer made meanwhile is sent once after the 
   await expect(page.getByText("reconnecting…", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "No decision" }).click();
   hold = false;
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await expect(left(page).getByText(prompt)).toHaveCount(1);
   await expect(left(page).locator("[data-author=user]").getByText("No decision")).toHaveCount(1);
 });
@@ -232,7 +232,7 @@ test("(11) Enter while an input method is composing does not answer", async ({ p
   await expect(left(page).locator("[data-author=user]")).toHaveCount(0);
   await expect(field).toHaveValue("unfinished composition");
   await page.getByRole("button", { name: "No decision" }).click();
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
 // Defect A of docs/page-question-phase-defects.md: the page had never carried a question phase whose review raised an
@@ -251,6 +251,6 @@ test("(12) a question phase through the page: the list's review and response, on
   await page.getByRole("button", { name: "1. PostgreSQL" }).click();
   await expect(left(page).getByText("The service uses PostgreSQL on port 8080.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(right(page).getByText(/Requirements review, round 1/)).toBeVisible();
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
+  await expect(right(page).getByText(/Requirements review, cycle 1/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });

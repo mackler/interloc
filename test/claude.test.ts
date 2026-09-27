@@ -183,6 +183,7 @@ test("execution AskUserQuestion is a stop: needs_input with the answer, even wit
   assert.equal(outcome.question, "A or B?");
   assert.equal(outcome.userInput, "A or B? -> A");
   assert.equal(fake.sdk.calls[0].options.permissionMode, "auto");
+  assert.ok(fake.ui.said.includes("\nClaude Code has stopped implementation with a question."), fake.ui.said.join("\n"));
 });
 
 test("after a stop, the hook denies tools but permits the final structured output", async () => {

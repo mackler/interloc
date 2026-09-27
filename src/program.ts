@@ -4,6 +4,7 @@
 import { Cause, Context, Effect, Exit, Layer, Option, type Scope } from "effect";
 import * as path from "node:path";
 import { describe } from "./errors.ts";
+import { taskFinishedLine } from "./prompts.ts";
 import { run } from "./run.ts";
 import type { AgentSdk } from "./sdk.ts";
 import { Planner, type Reviewer, RunConfig, Sdk, Store, type StoreShape, Ui, type UiShape } from "./services.ts";
@@ -87,7 +88,7 @@ export const program = (args: readonly string[], wiring: Wiring): Effect.Effect<
     const exit = yield* run(task).pipe(Effect.provide(context), Effect.onInterrupt(() => interrupted), Effect.exit);
 
     if (Exit.isSuccess(exit)) {
-      yield* ui.say(`\nClaude Code reports that the task is finished after ${exit.value} execution phase(s).`);
+      yield* ui.say(taskFinishedLine(exit.value));
       yield* ui.say(`Plan: ${records.plan}\nConversation record: ${records.dir}/conversation.md`);
       yield* tail(yield* sessionId, records);
       return 0;

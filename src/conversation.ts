@@ -5,24 +5,27 @@ import { Effect } from "effect";
 import type { RunError } from "./errors.ts";
 import { parseInterviewMessage } from "./input.ts";
 import * as prompts from "./prompts.ts";
-import { interviewSays } from "./render.ts";
+import { interviewSays, recordHeading } from "./render.ts";
 import { planningCall } from "./review.ts";
 import * as S from "./schema.ts";
 import { normalizeTurn } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
 import { askNonEmpty } from "./ui.ts";
+import type { InterviewStage } from "./uiEvents.ts";
 
 /**
  * A conversation between the user and Claude Code in the program's terminal. It ends when Claude Code
  * reports completion and the user confirms the summary, which the program writes to requirements.md.
  */
-export const interview = (opening: string, heading: string): Effect.Effect<void, RunError, Services> =>
+export const interview = (opening: string, stage: InterviewStage): Effect.Effect<void, RunError, Services> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const ui = yield* Ui;
+    // The user reads "Clarification" (issue #21); conversation.md, a record, keeps its heading.
+    const heading = prompts.clarificationHeading(stage);
     // Each interface renders its own help (finding 8 of docs/gui-review.md): the terminal its """ convention, the page Shift+Enter.
     yield* ui.notify({ _tag: "InterviewOpened", heading });
-    yield* store.converse(`## ${heading}\n\n`);
+    yield* store.converse(`## ${recordHeading(stage)}\n\n`);
     let prompt = opening;
     for (;;) {
       const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, "interview")).output);

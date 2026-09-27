@@ -2,6 +2,7 @@
   // The progress of the run (decision Q3) [visibility of system status]: the phases in the order they occurred,
   // each done, active or stopped, the rounds of each review loop nested, and a progress indicator while an agent works.
   import { LinearProgressEstimate } from "m3-svelte";
+  import { NO_PHASE_YET, PROGRESS_HEADING } from "../../../src/prompts.ts";
   import type { TimelineEntry } from "../state.ts";
 
   type Props = { timeline: readonly TimelineEntry[]; busy: boolean };
@@ -11,9 +12,9 @@
 </script>
 
 <nav class="rail" aria-label="Progress of the run">
-  <h2 class="m3-font-title-small">Progress</h2>
+  <h2 class="m3-font-title-small">{PROGRESS_HEADING}</h2>
   {#if timeline.length === 0}
-    <p class="m3-font-body-small muted">No phase has begun.</p>
+    <p class="m3-font-body-small muted">{NO_PHASE_YET}</p>
   {/if}
   <ol>
     {#each timeline as entry, i (i)}

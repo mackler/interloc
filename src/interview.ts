@@ -17,7 +17,7 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
     const ui = yield* Ui;
 
     yield* ui.notify({ _tag: "PhaseBegan", phase: { kind: "questions" } });
-    yield* ui.say("Question phase: Claude Code generates the question list ...");
+    yield* ui.say(prompts.questionListLine);
     const generated = yield* planningCall(prompts.questionListPrompt(task), S.QuestionList);
     yield* writeQuestions(task, generated.output);
     yield* store.converse(`## Question list proposed by Claude Code\n\n${renderQuestions(generated.output)}\n`);
@@ -36,10 +36,10 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
         return;
       }
       yield* store.converse(`**User:** ${first}\n\n`);
-      yield* interview(prompts.interviewOpenEmptyPrompt(first), "Conversation before planning");
+      yield* interview(prompts.interviewOpenEmptyPrompt(first), "conversation");
     } else {
       yield* ui.say(`\nThe agreed list contains ${agreed.length} question(s).`);
-      yield* interview(prompts.interviewOpenPrompt, "Interview");
+      yield* interview(prompts.interviewOpenPrompt, "clarification");
     }
 
     const reviewed = yield* reviewLoop(requirementsSubject());

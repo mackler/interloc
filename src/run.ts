@@ -5,7 +5,7 @@ import { Effect } from "effect";
 import { recordPath } from "./artifacts.ts";
 import { PlanNotWritten, type RunError } from "./errors.ts";
 import { questionPhase } from "./interview.ts";
-import { execInputPrompt, executePrompt, initialPlanPrompt, revisePlanAfterExecutionPrompt, type WorkReviewEnd } from "./prompts.ts";
+import { execInputPrompt, executePrompt, implementationBeganLine, implementationEndedLine, initialPlanPrompt, revisePlanAfterExecutionPrompt, type WorkReviewEnd } from "./prompts.ts";
 import { applyDecisions, askDecision, planningCall, reviewLoop } from "./review.ts";
 import * as S from "./schema.ts";
 import { Planner, RunConfig, type Services, Store, Ui } from "./services.ts";
@@ -49,13 +49,13 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
 
       // Execution phase K.
       yield* ui.notify({ _tag: "PhaseBegan", phase: { kind: "execution", n: k } });
-      yield* ui.say(`\nExecution phase ${k}: Claude Code implements the plan (permission mode ${config.execPermissionMode}) ...`);
+      yield* ui.say(implementationBeganLine(k, config.execPermissionMode));
       const outcome = yield* planner.executing(executePrompt);
       yield* store.saveExecution(k, outcome);
       yield* store.checkpoint({ subject: "execution", phase: k, round: 0, stage: "executed" });
       yield* ui.notify({ _tag: "ExecutionEnded", phase: k, outcome });
       yield* ui.notify({ _tag: "PhaseEnded", phase: { kind: "execution", n: k }, result: outcome.status });
-      yield* ui.say(`\nExecution phase ${k} ended with status: ${outcome.status}`);
+      yield* ui.say(implementationEndedLine(k, outcome.status));
       yield* ui.say(`Summary: ${outcome.summary || "none"}`);
       const stopped = outcome.status !== "finished";
       if (stopped) {

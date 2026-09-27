@@ -32,7 +32,7 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records" },
     applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output) },
     amend: null,
-    proceed: "proceed to the interview with the question list as it is",
+    proceed: prompts.PROCEED_TO_CLARIFICATION,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
     prepare: null,
@@ -52,9 +52,9 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
     amend: (_review, response, round) => {
       const ids = response.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
       if (ids.length === 0) return Effect.succeed(undefined);
-      return interview(prompts.interviewGapsPrompt(recordPath({ kind: "review", subject: id, round }), ids), "Second interview");
+      return interview(prompts.interviewGapsPrompt(recordPath({ kind: "review", subject: id, round }), ids), "followUp");
     },
-    proceed: "proceed to planning with the requirements as they are",
+    proceed: prompts.PROCEED_TO_PLANNING,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
     prepare: null,
@@ -71,7 +71,7 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
     respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlannerResponse, after: null, capability: "records" },
     applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
     amend: null,
-    proceed: "proceed to execution with the plan as it is",
+    proceed: prompts.PROCEED_TO_IMPLEMENTATION,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
     prepare: null,

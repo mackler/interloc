@@ -92,7 +92,7 @@ test("an accepted issue without a plan change halts the run", async () => {
   await runFails(layer, "AcceptedWithoutChange", /plan\.md is unchanged/);
 });
 
-test("the round limit offers to proceed to execution", async () => {
+test("the round limit offers to proceed to implementation", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["p"],
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]), plan: "v2" }],
@@ -101,7 +101,7 @@ test("the round limit offers to proceed to execution", async () => {
     config: { maxRounds: 1 },
   });
   assert.equal(await runTask(layer), 1);
-  assert.match(probe.ui.asked[0], /1 rounds completed without convergence/);
+  assert.equal(probe.ui.asked[0], "1 cycles completed without convergence. Number = additional cycles; p = proceed to implementation with the plan as it is; 0 = stop > ");
 });
 
 test("a reversal and a disputed self-correction each produce a prompt and a decided_by_user entry", async () => {
@@ -150,7 +150,7 @@ test("0 at the round limit stops with RoundLimitStop", async () => {
     reviews: [{ issues: [issue("A")] }],
     config: { maxRounds: 1 },
   });
-  await runFails(layer, "RoundLimitStop", /stopped by the user at the round limit of Planning phase 1/);
+  await runFails(layer, "RoundLimitStop", /stopped by the user at the cycle limit of Planning phase 1/);
 });
 
 test("q at the round limit stops with UserStopped", async () => {
@@ -216,7 +216,7 @@ test("the identical-content message names the round after which the content was 
   assert.equal(await runTask(layer), 1);
   const identical = probe.ui.said.filter((line) => /is identical to plan\.md after/.test(line));
   assert.equal(identical.length, 1, probe.ui.said.join("\n"));
-  assert.match(identical[0], /identical to plan\.md after round 2\b/);
+  assert.match(identical[0], /identical to plan\.md after cycle 2\b/);
 });
 
 // Finding 3 of docs/functional-design-review.md: duplicate or extra dispositions and duplicate review ids passed
@@ -273,7 +273,7 @@ test("at the round limit, an integer beyond the safe range is an invalid answer 
     reviews: [{ issues: [issue("A")] }],
     config: { maxRounds: 1 },
   });
-  await runFails(huge.layer, "RoundLimitStop", /round limit/);
+  await runFails(huge.layer, "RoundLimitStop", /cycle limit/);
 
   const three = testLayer(tempRepo(), {
     answers: ["3"],
@@ -283,7 +283,7 @@ test("at the round limit, an integer beyond the safe range is an invalid answer 
     config: { maxRounds: 1 },
   });
   assert.equal(await runTask(three.layer), 1);
-  assert.ok(three.probe.ui.said.some((line) => /round 2 \(limit 4\)/.test(line)), three.probe.ui.said.join("\n"));
+  assert.ok(three.probe.ui.said.some((line) => /^\nPlanning phase 1, cycle 2: Codex review \.\.\.$/.test(line)), three.probe.ui.said.join("\n"));
 });
 
 // Finding 16 / decision Q6: checkpoint.json names the last committed transition (no resume).

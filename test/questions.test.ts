@@ -121,8 +121,11 @@ test("a gap that Claude Code accepts produces a second interview and a revised r
   });
   await runTask(layer);
   assert.equal(read(probe.dir, "requirements.md"), "Q1: A\nRetries: 3\n");
-  assert.match(read(probe.dir, "conversation.md"), /## Second interview/);
+  assert.match(read(probe.dir, "conversation.md"), /## Interview\n[\s\S]*## Second interview\n/);
   assert.equal((await probe.loadLog("requirements"))[0].id, "G-R1-1");
+  // The user reads "Clarification" and "Follow-up clarification"; conversation.md keeps its record headings.
+  const headings = probe.ui.notified.flatMap((e) => (e._tag === "InterviewOpened" || e._tag === "InterviewTurn" ? [e.heading] : []));
+  assert.deepEqual([...new Set(headings)], ["Clarification", "Follow-up clarification"]);
 });
 
 test("/done ends the interview early", async () => {

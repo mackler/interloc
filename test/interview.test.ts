@@ -27,6 +27,7 @@ test("a turn that is complete with a blank summary continues the conversation in
   });
   await runTask(layer);
   assert.ok(probe.ui.asked.some((p) => p.startsWith("You >")), "the blank summary was not treated as a continuing turn");
+  assert.ok(probe.ui.said.includes("Gather Requirements: Claude Code formulates the question list ..."), probe.ui.said.join("\n"));
   assert.match(read(probe.dir, "requirements.md"), /None\./);
   assert.doesNotMatch(read(probe.dir, "conversation.md"), /Summary proposed by Claude Code:\n\n\s*\n/);
 });

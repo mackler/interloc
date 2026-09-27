@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ConfigInvalid, decodeRunError, GitError, haltMessage, ProjectChanged, RecordsChanged } from "../src/errors.ts";
+import { ConfigInvalid, decodeRunError, GitError, haltMessage, ProjectChanged, RecordsChanged, RoundInvalid, RoundLimitStop } from "../src/errors.ts";
 
 test("haltMessage reports a typed error with its description", () => {
   const error = new ProjectChanged({ during: "planning", fileLabel: null, changes: [{ kind: "content_changed", path: "a.txt" }] });
@@ -42,4 +42,11 @@ test("RecordsChanged names the changed records, round-trips through decodeRunErr
   assert.match(message ?? "", /content changed: plan\.md/);
   assert.match(message ?? "", /added: notes\/x\.md/);
   assert.deepEqual(decodeRunError({ _tag: "RecordsChanged", changes: [{ kind: "removed", path: "requirements.md" }] }), { _tag: "RecordsChanged", changes: [{ kind: "removed", path: "requirements.md" }] });
+});
+
+// Issue #14: the user reads "cycle" where the program says "round".
+test("the cycle limit's stop and an invalid cycle are described in cycles", () => {
+  assert.equal(haltMessage(new RoundLimitStop({ heading: "Planning phase 1" })), "HALTED: stopped by the user at the cycle limit of Planning phase 1");
+  const invalid = new RoundInvalid({ duplicateIssues: ["A"], missing: [], duplicateDispositions: [], unknownDispositions: [], emptyIds: [], collidingIds: [] });
+  assert.match(haltMessage(invalid) ?? "", /^HALTED: the cycle is invalid: /);
 });

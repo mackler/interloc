@@ -137,8 +137,8 @@ test("notify writes nothing to the terminal", async () => {
 // Finding 8 of docs/gui-review.md: the terminal renders the interview's opening help, with its """ convention.
 test("notify renders the interview's opening help in the terminal, with the multiline convention", async () => {
   const io = streams();
-  await withUi(io, (ui) => ui.notify({ _tag: "InterviewOpened", heading: "Interview" }));
-  assert.ok(io.written().includes(prompts.interviewHelp("Interview", "terminal")));
+  await withUi(io, (ui) => ui.notify({ _tag: "InterviewOpened", heading: "Clarification" }));
+  assert.ok(io.written().includes(prompts.interviewHelp("Clarification", "terminal")));
   assert.match(io.written(), /""" on its own line/);
 });
 

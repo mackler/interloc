@@ -230,9 +230,9 @@ describe("PromptWidget", () => {
     }
     cards[1].click();
     expect(sent).toEqual(["2"]);
-    // The fixed choices stay buttons below: End interview the filled primary action, Quit outlined; no option among them.
+    // The fixed choices stay buttons below: End clarification the filled primary action, Quit outlined; no option among them.
     const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
-    expect(fixed.map((b) => b.textContent?.trim())).toEqual(["End interview", "Quit"]);
+    expect(fixed.map((b) => b.textContent?.trim())).toEqual(["End clarification", "Quit"]);
     expect(fixed[0].classList.contains("filled")).toBe(true);
     expect(fixed[1].classList.contains("outlined")).toBe(true);
   });
@@ -358,17 +358,23 @@ describe("TimelineRail", () => {
     const root = show(TimelineRail, {
       busy: true,
       timeline: [
-        { phase: { kind: "questions" }, label: "Question phase", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [{ round: 1, limit: 5 }], done: true }] },
+        { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [{ round: 1, limit: 5 }], done: true }] },
         { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "active", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [{ round: 1, limit: 5 }, { round: 2, limit: 5 }], done: false }] },
       ],
     });
     const entries = [...root.querySelectorAll("[data-state]")].map((e) => `${e.getAttribute("data-state")}:${e.querySelector("[data-label]")?.textContent?.trim()}`);
-    expect(entries).toEqual(["done:Question phase", "active:Planning 1"]);
+    expect(entries).toEqual(["done:Gather Requirements", "active:Planning 1"]);
     expect(root.textContent).toMatch(/round 2 of 5/);
     // A phase with one review loop does not repeat its name as a sub-heading.
     expect(root.textContent).not.toMatch(/Planning phase 1/);
     expect(root.textContent).not.toMatch(/Question review/);
     expect(root.querySelector("[data-busy]")).not.toBe(null);
+  });
+
+  test("the heading and the text before any phase (issue #14, Q4)", () => {
+    const root = show(TimelineRail, { busy: false, timeline: [] });
+    expect(root.querySelector("h2")?.textContent).toBe("Progress");
+    expect(root.textContent).toMatch(/No phase has begun\./);
   });
 });
 

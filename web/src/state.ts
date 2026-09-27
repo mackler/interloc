@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
-import { interviewHelp, pagePromptText, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
+import { cycleHeading, interviewHelp, pagePromptText, purposeLabel, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
@@ -182,10 +182,10 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return { ...run, timeline: run.timeline.map((e) => ({ ...e, groups: e.groups.map((g) => (sameSubject(g.subject, event.subject) ? { ...g, done: true } : g)) })) };
     case "ReviewReceived": {
       const body = event.review.issues.length === 0 ? "No issue: the review has converged." : withoutAuthorHeading(renderReview(event.review));
-      return withRight(run, message(run, time, "codex", body, "markdown", `${subjectHeading(event.subject)}, round ${event.round}`));
+      return withRight(run, message(run, time, "codex", body, "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
     }
     case "ResponseReceived":
-      return withRight(run, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", `${subjectHeading(event.subject)}, round ${event.round}`));
+      return withRight(run, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
     case "PlanWritten": {
       const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q}`).join("\n")}`;
       const body = `**${planWrittenHeading(event.phase)}**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;
@@ -208,7 +208,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
         questionOptions: event.options.map((o, i) => ({ label: o.label, sends: String(i + 1) })),
       };
     case "AgentCallStarted": {
-      const callLabel = `${AGENT[event.agent]} — ${event.purpose}`;
+      const callLabel = `${AGENT[event.agent]} — ${purposeLabel(event.purpose)}`;
       return { ...run, callLabel, activity: callLabel, busy: true };
     }
     case "ToolUsed":

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { interviewSays, renderDecision, renderResponse, renderReview, renderFeedback, renderQuestions, renderRound, subjectHeading } from "../src/render.ts";
+import { interviewSays, recordHeading, renderDecision, renderResponse, renderReview, renderFeedback, renderQuestions, renderRound, subjectHeading } from "../src/render.ts";
 import { issue, respond } from "./helpers.ts";
 
 // Finding 27 / recommendation D: the Store writes; the text of the records is composed here.
@@ -53,4 +53,11 @@ test("renderRound is the heading followed by renderReview and renderResponse", (
 
 test("the heading of a work review", () => {
   assert.equal(subjectHeading({ work: 2 }), "Work review 2");
+});
+
+// The records keep their headings when the user-facing name becomes "clarification" (issue #21, Q5 follow-up).
+test("conversation.md's headings of the interviews are unchanged", () => {
+  assert.equal(recordHeading("clarification"), "Interview");
+  assert.equal(recordHeading("followUp"), "Second interview");
+  assert.equal(recordHeading("conversation"), "Conversation before planning");
 });
