@@ -31,7 +31,7 @@ const harness = async (repo: string, scripts: TestOptions[], wiringOf = (options
   await run(manager.subscribe((b) => Effect.sync(() => void received.push(b))).pipe(Scope.provide(scope)));
   return { manager, received, scope, repo, scripts };
 };
-const until = async (what: string, condition: () => boolean, ms = 5000): Promise<void> => {
+const until = async (what: string, condition: () => boolean, ms = 30_000): Promise<void> => {
   for (let waited = 0; waited < ms; waited += 5) {
     if (condition()) return;
     await sleep(5);

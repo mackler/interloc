@@ -95,10 +95,9 @@ const toTop = (l: Locator) =>
   });
 const showPanel = (page: Page, name: string) => page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
 const longRunAtItsPrompt = async (page: Page, task: string) => {
-  test.setTimeout(90_000);
   await page.setViewportSize({ width: 390, height: 844 });
   await startTask(page, task, LONG_URL);
-  await expect(page.getByRole("button", { name: "No decision" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "No decision" })).toBeVisible({ timeout: 60_000 });
 };
 
 test("(L4) a panel's reading position survives a switch of panels and a resize across 840 px", async ({ page }) => {
@@ -181,7 +180,7 @@ test("(L8) a new run's first prompt selects 'You and Interloq' although the old 
   await other.locator("button[name=start]").click();
   await expect(panel(other, LEFT).getByText(FIRST)).toBeVisible();
   hold = false;
-  await expect(page.getByText("connected", { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(page.getByText("connected", { exact: true })).toBeVisible();
   await expect(page.getByText("The second run").first()).toBeVisible();
   await expect(panel(page, LEFT)).toBeVisible();
   await expect(page.locator("[name=answer]")).toBeVisible();

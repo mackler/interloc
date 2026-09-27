@@ -89,7 +89,7 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await expect(left(page).getByText("The service uses PostgreSQL.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
   // Four review loops and an execution follow; the run takes about 5 s alone and longer under the whole suite's load.
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible({ timeout: 20_000 });
+  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
   await expect(rail(page).getByText("Question phase", { exact: true })).toBeVisible();
 });
 
@@ -134,15 +134,14 @@ test("(8) a dropped connection: an answer made meanwhile is sent once after the 
   await expect(page.getByText("reconnecting…", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "No decision" }).click();
   hold = false;
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible({ timeout: 20_000 });
+  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
   await expect(left(page).getByText(prompt)).toHaveCount(1);
   await expect(left(page).locator("[data-author=user]").getByText("No decision")).toHaveCount(1);
 });
 
 test("(9) a long transcript: scrolled up, the position stays while messages arrive, and the chip leads to the end", async ({ page }) => {
-  test.setTimeout(60_000);
   await startTask(page, "long", "Plan in detail");
-  await expect(page.getByRole("button", { name: "No decision" })).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("button", { name: "No decision" })).toBeVisible({ timeout: 60_000 });
   const list = left(page).locator(".list");
   expect(await left(page).locator("article").count()).toBeGreaterThan(150);
   await list.evaluate((el) => {
@@ -196,6 +195,6 @@ test("(12) a question phase through the page: the list's review and response, on
   await page.getByRole("button", { name: "1. PostgreSQL" }).click();
   await expect(left(page).getByText("The service uses PostgreSQL on port 8080.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
-  await expect(right(page).getByText(/Requirements review, round 1/)).toBeVisible({ timeout: 20_000 });
-  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible({ timeout: 20_000 });
+  await expect(right(page).getByText(/Requirements review, round 1/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
 });

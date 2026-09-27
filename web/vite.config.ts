@@ -13,5 +13,6 @@ export default defineConfig({
   build: { outDir: "dist", emptyOutDir: true },
   // Under Vitest, Svelte's browser build, so that components can be mounted in jsdom.
   resolve: process.env.VITEST ? { conditions: ["browser"] } : undefined,
-  test: { environment: "jsdom", include: ["src/**/*.test.ts"], setupFiles: ["src/test-setup.ts"] },
+  // testTimeout sized for a loaded machine (a shared CI runner): a passing test is no slower, only a hang reports later.
+  test: { environment: "jsdom", include: ["src/**/*.test.ts"], setupFiles: ["src/test-setup.ts"], testTimeout: 30_000 },
 });

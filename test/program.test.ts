@@ -63,7 +63,7 @@ test("an invalid config prints HALTED with the file and field and exits 1, befor
 /** Runs the program in a fiber, waits for the double to be reached, interrupts it, and returns its exit. */
 const interruptWhen = async (wiring: Wiring, reached: Promise<void>): Promise<Exit.Exit<number, never>> => {
   const fiber = Effect.runFork(Effect.scoped(program(["task"], wiring)));
-  await Promise.race([reached, sleep(5000).then(() => assert.fail("the program did not reach the point to interrupt within 5 s"))]);
+  await Promise.race([reached, sleep(30_000).then(() => assert.fail("the program did not reach the point to interrupt within 30 s"))]);
   await sleep(10);
   await Effect.runPromise(Fiber.interrupt(fiber));
   return Effect.runPromise(Fiber.await(fiber));

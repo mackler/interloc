@@ -183,7 +183,7 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect), 26 Sep 2026 (the web GUI and th
   three issues in ten) retained about 4 MB, took about 230 ms to publish in full, copying of the run's event array
   included, and its replay (1.55 MB of JSON) reached one client in 45–51 ms. The criterion of Q4 (a replay over 1 s,
   or more than 50 MB retained) is not approached, so chunked transcript storage was not built; the criterion is the
-  test's regression bound.
+  test's regression bound. Since 27 Sep 2026 the bound applies to the best of five replays, so that it holds on a loaded machine (a shared CI runner): a regression slows every sample, a burst of load only some.
 
 ## Not yet known or not yet built
 

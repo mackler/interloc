@@ -22,8 +22,17 @@ const withUi = <A, E>(io: Streams, use: (ui: UiShape) => Effect.Effect<A, E>): P
   Effect.runPromise(Effect.scoped(terminalUi(io.input, io.output).pipe(Effect.flatMap(use))));
 
 /** A promise, or "timeout" after the given time, so that a hanging read fails instead of blocking the suite. */
-const orTimeout = <A>(promise: Promise<A>, ms = 2000): Promise<A | "timeout"> =>
+const orTimeout = <A>(promise: Promise<A>, ms = 30_000): Promise<A | "timeout"> =>
   Promise.race([promise, sleep(ms, "timeout" as const, { ref: false })]);
+
+/** Waits until the condition holds, polling; fails after 30 s, so that a loaded machine only slows a passing test. */
+const eventually = async (what: string, condition: () => boolean, ms = 30_000): Promise<void> => {
+  const deadline = Date.now() + ms;
+  while (!condition()) {
+    if (Date.now() > deadline) assert.fail(`timed out waiting for ${what}`);
+    await sleep(5);
+  }
+};
 
 const stoppedByUser = (e: unknown): boolean => (e as RunError)._tag === "UserStopped";
 
@@ -67,12 +76,11 @@ test("pasted lines are not lost between two askMessage calls", async () => {
 test("two concurrent asks are answered in order, and the second prompt appears only after the first answer", async () => {
   const io = streams();
   const answers = withUi(io, (ui) => Effect.all([ui.ask("First > "), ui.ask("Second > ")], { concurrency: "unbounded" }));
+  await eventually("the first prompt", () => /First > /.test(io.written()));
   await sleep(20);
-  assert.match(io.written(), /First > /);
   assert.doesNotMatch(io.written(), /Second > /, "the second prompt was shown while the first ask was pending");
   io.input.write("one\n");
-  await sleep(20);
-  assert.match(io.written(), /Second > /);
+  await eventually("the second prompt", () => /Second > /.test(io.written()));
   io.input.write("two\n");
   assert.deepEqual(await orTimeout(answers), ["one", "two"]);
 });
@@ -115,7 +123,7 @@ test("Ctrl+C in a terminal reaches the process as SIGINT while the interface is 
   const fiber = Effect.runFork(Effect.scoped(terminalUi(io.input, io.output, () => signals.push("SIGINT")).pipe(Effect.flatMap((ui) => ui.ask("Decision > ")))));
   while (!io.written().includes("Decision > ")) await sleep(5);
   io.input.write("\x03");
-  await sleep(20);
+  await eventually("the SIGINT", () => signals.length > 0);
   assert.deepEqual(signals, ["SIGINT"]);
   await Effect.runPromise(Fiber.interrupt(fiber));
 });

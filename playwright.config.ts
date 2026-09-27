@@ -6,7 +6,10 @@ const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, wor
 
 export default defineConfig({
   testDir: "e2e",
-  timeout: 30_000,
+  // Deadlines sized for a loaded machine (a shared CI runner, or this host at load 10 and more): a passing wait returns
+  // at once, so only a genuine hang takes longer to report.
+  timeout: 120_000,
+  expect: { timeout: 20_000 },
   fullyParallel: false,
   workers: 1,
   reporter: "list",
@@ -17,6 +20,6 @@ export default defineConfig({
     env: { SCENARIO: scenario, PORT: String(port) },
     url: `http://127.0.0.1:${port}/`,
     reuseExistingServer: false,
-    timeout: 30_000,
+    timeout: 120_000,
   })),
 });

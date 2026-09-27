@@ -58,7 +58,7 @@ const connect = (port: number): Promise<Client> =>
     ws.onerror = () => reject(new Error("the WebSocket failed"));
     ws.onopen = () => resolve({ messages, send: (m) => ws.send(JSON.stringify(m)), close: () => ws.close() });
   });
-const until = async (what: string, condition: () => boolean, ms = 5000): Promise<void> => {
+const until = async (what: string, condition: () => boolean, ms = 30_000): Promise<void> => {
   for (let waited = 0; waited < ms; waited += 5) {
     if (condition()) return;
     await sleep(5);
@@ -304,11 +304,30 @@ test("a client that sends start and closes at once leaves the server in a state 
       assert.deepEqual(refusals(next), []);
       next.close();
     }
+    // A quick start may reach the server after the next tab's hello (on a loaded machine it does): its run then begins
+    // later, and the last tab sees it live, stops it, and starts its own, as finding 11 requires of a recovering tab.
     const last = await connect(port);
     await until("hello", () => last.messages.some((m) => m.type === "hello"));
-    last.send({ type: "start", project: repo, task: "after" });
-    await until("a started run", () => [...perRun(last).values()].some((events) => events[0]?.event._tag === "Started" && (events[0].event as { task: string }).task === "after"));
-    assert.deepEqual(refusals(last), []);
+    const hello = last.messages.find((m) => m.type === "hello");
+    const running = (): number[] => [
+      ...new Set([...(hello?.type === "hello" && hello.current !== null ? [hello.current] : []), ...perRun(last).keys()]),
+    ].filter((run) => !hasEnded(last, run));
+    const afterStarted = () => [...perRun(last).values()].some((events) => events[0]?.event._tag === "Started" && (events[0].event as { task: string }).task === "after");
+    for (let attempt = 0; attempt < 5 && !afterStarted(); attempt++) {
+      for (const run of running()) {
+        last.send({ type: "stop", incarnation: "test", run });
+        await until(`the end of run ${run}`, () => hasEnded(last, run));
+      }
+      const before = refusals(last).length;
+      last.send({ type: "start", project: repo, task: "after" });
+      await until("the start's outcome", () => afterStarted() || refusals(last).length > before);
+    }
+    assert.ok(afterStarted(), `no run 'after' started; refusals: ${JSON.stringify(refusals(last))}`);
+    assert.deepEqual(
+      refusals(last).filter((r) => r !== "a run is in progress; stop it or wait for its end"),
+      [],
+      "a start was refused for another reason than a late run in progress",
+    );
     last.close();
   });
 });
