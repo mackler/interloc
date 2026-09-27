@@ -411,6 +411,17 @@ describe("TimelineRail", () => {
     expect([...root.querySelectorAll("[data-count]")].map((e) => e.textContent?.trim())).toEqual(["7 of 7 answered", "1 of 2 answered"]);
   });
 
+  // The re-check after #21: #14's labels and cycle lines render beside the steps of Gather Requirements.
+  test("Gather Requirements with its steps, a planning loop's cycles and Implementation, together", () => {
+    const planning: TimelineEntry = { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections: 2, result: "converged", done: true }], steps: [] };
+    const implementation: TimelineEntry = { phase: { kind: "execution", n: 1 }, label: "Implementation 1", state: "active", groups: [], steps: [] };
+    const root = show(TimelineRail, { busy: false, timeline: [gather("done", [step("formulate", "Formulate questions", "done", null, [questionReview]), step("clarification", "Clarification", "done", { answered: 2, total: 2 })]), planning, implementation] });
+    expect([...root.querySelectorAll("[data-label]")].map((e) => e.textContent?.trim())).toEqual(["Gather Requirements", "Planning 1", "Implementation 1"]);
+    expect([...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim())).toEqual(["2 cycles resolved 1 issue", "2 cycles resolved 2 issues"]);
+    expect(stepRows(root)).toEqual(["done:Formulate questions:-", "done:Clarification:-"]);
+    expect(root.textContent).not.toMatch(/Question phase|Execution|Interview|round| of 5/);
+  });
+
   test("a stopped step shows the stopped mark and is not the current step", () => {
     const root = show(TimelineRail, { busy: false, timeline: [gather("stopped", [step("formulate", "Formulate questions", "done", null), step("clarification", "Clarification", "stopped", { answered: 0, total: 3 })])] });
     expect(stepRows(root)).toEqual(["done:Formulate questions:-", "stopped:Clarification:-"]);
