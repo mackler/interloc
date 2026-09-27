@@ -226,7 +226,9 @@ for (const [width, height] of [
     await cards.nth(1).focus();
     await page.keyboard.press("Enter");
     await expect(panel(page, LEFT).getByText("Anything else?")).toBeVisible();
-    await expect(panel(page, LEFT).getByText(LONG_ANSWERS[1], { exact: true })).toBeVisible();
+    // The user's answer is Markdown (issue #7): the chosen "2. …" line is an ordered list item numbered 2.
+    const answer = panel(page, LEFT).locator("[data-author=user] ol[start='2'] > li");
+    await expect(answer).toHaveText(LONG_ANSWERS[1].replace(/^2\. /, ""));
     await page.locator("button[name=stop]").click();
   });
 }

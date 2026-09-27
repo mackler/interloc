@@ -92,6 +92,12 @@ describe("Claude's messages", () => {
   });
 });
 
+// Issue #7: the user's answer in the left panel is rendered as Markdown.
+test("a user message in Markdown renders its emphasis", () => {
+  const root = show(MessageView, { message: { key: "1-1", author: "user", heading: null, body: "use **x**", format: "markdown", time: "2026-09-27T14:00:00.000Z", showTime: true } });
+  expect(one(root, ".body strong").textContent).toBe("x");
+});
+
 describe("StartForm", () => {
   test("the description is the page's help text from src/prompts.ts, and says Claude (issue #5)", () => {
     const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, onStart: () => undefined, onBrowse: () => undefined });

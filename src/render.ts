@@ -43,6 +43,14 @@ export function renderQuestions(list: RenderableQuestions): string {
 export const interviewSays = (turn: TurnVariant): readonly string[] =>
   turn.kind === "summary_proposed" ? [`\n${turn.message}\n`, `Summary proposed by Claude Code:\n\n${turn.summary}\n`] : [`\n${turn.message}\n`];
 
+/** A question Claude Code relays to the user, with its options. */
+export type RelayedQuestion = Readonly<{ question: string; options: readonly Readonly<{ label: string; description: string }>[] }>;
+/** The terminal lines of a relayed question, in order; the page shows the question once and absorbs these lines (issue #7). */
+export const relayedQuestionSays = (q: RelayedQuestion): readonly string[] => [`\nQuestion from Claude Code: ${q.question}`, ...q.options.map((o, i) => `  ${i + 1}. ${o.label} - ${o.description}`)];
+/** A relayed question as the page shows it: Markdown, as Claude's message (issue #7). */
+export const relayedQuestionMarkdown = (q: RelayedQuestion): string =>
+  q.options.length === 0 ? q.question : `${q.question}\n\n${q.options.map((o, i) => `${i + 1}. **${o.label}**${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}`;
+
 /** Claude Code's prose as the terminal prints it (issue #5): the prefix is the terminal's only attribution. */
 export const claudeLine = (text: string): string => `[claude] ${text}`;
 

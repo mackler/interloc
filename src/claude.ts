@@ -8,6 +8,7 @@ import * as path from "node:path";
 import { type CallOutcome, decodeQuestions, decodeToolTarget, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
 import { ClaudeCallFailed, type UserStopped } from "./errors.ts";
 import { chooseOption } from "./input.ts";
+import { relayedQuestionSays } from "./render.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as prompts from "./prompts.ts";
 import * as S from "./schema.ts";
@@ -97,8 +98,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       const answers = new Map<number, string>();
       for (const [index, q] of questions.entries()) {
         yield* ui.notify({ _tag: "QuestionAsked", question: q.question, options: q.options });
-        yield* ui.say(`\nQuestion from Claude Code: ${q.question}`);
-        for (const [i, o] of q.options.entries()) yield* ui.say(`  ${i + 1}. ${o.label} - ${o.description}`);
+        for (const line of relayedQuestionSays(q)) yield* ui.say(line);
         let reply = "";
         while (reply === "") reply = yield* ui.ask(prompts.optionOrTextPrompt);
         const chosen = chooseOption(reply, q.options.length);

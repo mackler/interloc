@@ -95,7 +95,7 @@ describe("who speaks in the left panel", () => {
 
   test("Claude's prose is one message of Claude, without a prefix, live and after a replay", () => {
     for (const s of [fold(live([started, claudeSaid])), replayed([started, claudeSaid])]) {
-      expect(s.run?.left.map((m) => [m.author, m.body, m.format])).toEqual([["claude", "done", "text"]]);
+      expect(s.run?.left.map((m) => [m.author, m.body])).toEqual([["claude", "done"]]);
     }
   });
 
@@ -115,6 +115,55 @@ describe("who speaks in the left panel", () => {
     expect(tool.run?.activity).toBe("Claude — Read: x");
     expect(prompts.pagePromptText("execInput", prompts.execInputPrompt)).toBe("Your input for Claude");
     expect(prompts.pagePromptText("startOrTalk", prompts.startOrTalkPrompt)).toBe("Claude and Codex agree that no question is needed. Start planning, or write a message to open a conversation with Claude.");
+  });
+});
+
+// Issue #7: the left panel renders Markdown where Claude writes and where the user answers; Interloq's own texts stay plain.
+describe("Markdown in the left panel", () => {
+  const question: UiEvent = { _tag: "QuestionAsked", question: "A or **B**?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
+  const questionLines = [said("\nQuestion from Claude Code: A or **B**?"), said("  1. A - a"), said("  2. B - b")];
+  const formats = (s: ViewState) => s.run?.left.map((m) => `${m.author}:${m.format}`) ?? [];
+
+  test("Claude's prose is Markdown", () => {
+    for (const s of [fold(live([started, notified({ _tag: "ClaudeSaid", text: "**done**" })])), replayed([started, notified({ _tag: "ClaudeSaid", text: "**done**" })])]) {
+      expect(formats(s)).toEqual(["claude:markdown"]);
+    }
+  });
+
+  test("a relayed question is one Markdown message of Claude with its options; its terminal lines are absorbed", () => {
+    const events: RunEvent[] = [started, notified(question), ...questionLines, asked(1, prompts.optionOrTextPrompt)];
+    for (const s of [fold(live(events)), replayed(events)]) {
+      expect(s.run?.left.map((m) => [m.author, m.format, m.body])).toEqual([
+        ["claude", "markdown", "A or **B**?\n\n1. **A** — a\n2. **B** — b"],
+        ["program", "text", prompts.pagePromptText("optionOrText", prompts.optionOrTextPrompt)],
+      ]);
+      expect(s.run?.pending?.options.map((c) => c.label)).toEqual(["A", "B"]);
+    }
+  });
+
+  test("only the lines that follow the question directly are absorbed", () => {
+    const s = fold(live([started, notified(question), ...questionLines, said("  1. A - a")]));
+    expect(bodies(s)).toEqual(["claude:A or **B**?\n\n1. **A** — a\n2. **B** — b", "program:  1. A - a"]);
+  });
+
+  test("the user's answers are Markdown, typed or chosen", () => {
+    const typed = [started, asked(1, prompts.interviewMessagePrompt), { _tag: "Answered", prompt: 1, text: "use **x**" } as RunEvent];
+    const chosen = [started, asked(1, prompts.permissionPrompt), { _tag: "Answered", prompt: 1, text: "y" } as RunEvent];
+    for (const s of [fold(live(typed)), replayed(typed), fold(live(chosen)), replayed(chosen)]) {
+      expect(s.run?.left.at(-1)?.format).toBe("markdown");
+    }
+  });
+
+  test("Interloq's lines, prompts and interview help stay plain; plan writes and interview turns stay Markdown", () => {
+    const events: RunEvent[] = [
+      started,
+      said("a_b"),
+      notified({ _tag: "InterviewOpened", heading: "Interview" }),
+      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null }),
+      notified({ _tag: "PlanWritten", phase: 1, questions: [], resultText: "" }),
+      asked(1, prompts.decisionPrompt("x")),
+    ];
+    expect(formats(fold(live(events)))).toEqual(["program:text", "program:text", "claude:markdown", "program:markdown", "program:text"]);
   });
 });
 

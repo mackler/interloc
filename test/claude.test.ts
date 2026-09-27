@@ -6,6 +6,7 @@ import { test } from "node:test";
 import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Fiber, Layer } from "effect";
 import { makeClaudePlanner, toSdkAnswers } from "../src/claude.ts";
+import { relayedQuestionSays } from "../src/render.ts";
 import { FileSystemError, type RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
@@ -470,6 +471,21 @@ test("a relayed question is notified with its options before the user is asked",
   const fake = await planner([script], ["2"]);
   await run(fake.planner.planning("write the plan", schema, "planning"));
   assert.deepEqual(activity(fake.ui).filter((e) => e._tag === "QuestionAsked"), [{ _tag: "QuestionAsked", question: "A or B?", options: questions[0].options }]);
+});
+
+// Issue #7: the terminal's lines of a relayed question are the ones the page absorbs after the QuestionAsked event.
+test("a relayed question says exactly the lines of relayedQuestionSays, right after its QuestionAsked event", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    yield success({});
+  })();
+  const fake = await planner([script], ["2"]);
+  await run(fake.planner.planning("write the plan", schema, "planning"));
+  const lines = fake.ui.said.filter((l) => !l.startsWith("Claude Code model: "));
+  assert.deepEqual(lines, ["\nQuestion from Claude Code: A or B?", "  1. A - a", "  2. B - b"]);
+  assert.deepEqual(relayedQuestionSays(questions[0]), lines);
 });
 
 test("an execution call notifies its start with the purpose execution", async () => {

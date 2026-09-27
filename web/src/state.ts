@@ -4,7 +4,7 @@
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
 import { interviewHelp, pagePromptText, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
-import { interviewSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
+import { interviewSays, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
 
@@ -36,7 +36,7 @@ export type RunView = Readonly<{
   busy: boolean;
   timeline: readonly TimelineEntry[];
   ended: number | null;
-  /** Internal to the fold: the terminal lines of the last interview turn still to absorb, and the options of the last relayed question and interview message. */
+  /** Internal to the fold: the terminal lines of the last interview turn or relayed question still to absorb, and the options of the last relayed question and interview message. */
   absorb: readonly string[];
   questionOptions: readonly Choice[];
   interviewChoices: readonly Choice[];
@@ -160,7 +160,12 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       // The page's own help (finding 8): no terminal """ convention, which the page does not implement.
       return withLeft(run, message(run, time, "program", interviewHelp(event.heading, "page"), "text"));
     case "QuestionAsked":
-      return { ...run, questionOptions: event.options.map((o, i) => ({ label: o.label, sends: String(i + 1) })) };
+      // Issue #7: a relayed question is Claude's Markdown message; the terminal's lines of it that follow are absorbed.
+      return {
+        ...withLeft(run, message(run, time, "claude", relayedQuestionMarkdown(event), "markdown")),
+        absorb: relayedQuestionSays(event),
+        questionOptions: event.options.map((o, i) => ({ label: o.label, sends: String(i + 1) })),
+      };
     case "AgentCallStarted": {
       const callLabel = `${AGENT[event.agent]} — ${event.purpose}`;
       return { ...run, callLabel, activity: callLabel, busy: true };
@@ -173,13 +178,13 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return run;
     case "ClaudeSaid":
       // Issue #5: Claude's prose is attributed as data, not by a prefix in its text.
-      return withLeft(run, message(run, time, "claude", event.text, "text"));
+      return withLeft(run, message(run, time, "claude", event.text, "markdown"));
   }
 };
 
 /** One event of a run with its time, in its order. Pure; the replay folds the same function. */
 export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
-  // The terminal lines of an interview turn are absorbed only while they follow it directly.
+  // The terminal lines of an interview turn or a relayed question are absorbed only while they follow it directly.
   if (event._tag === "Said" && run.absorb.length > 0 && run.absorb[0] === event.text) return { ...run, absorb: run.absorb.slice(1), nextSeq: run.nextSeq + 1 };
   const r: RunView = { ...run, absorb: [] };
   const next = ((): RunView => {
@@ -194,7 +199,7 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
       }
       case "Answered": {
         const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? [...r.pending.options, ...r.pending.choices].find((c) => c.sends === event.text) : undefined;
-        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "text")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt] };
+        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt] };
       }
       case "Notified":
         return notifiedEvent(r, event.event, time);
