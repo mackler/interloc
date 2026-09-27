@@ -18,6 +18,12 @@ services:
       - claude-config:/home/node/.claude
       - codex-config:/home/node/.codex
       - ${HOME}/work/interloq:/opt/interloq:ro
+      # The host's timezone, so that dates shown in the container match the developer's clock. Read
+      # only, and only /etc/localtime: it is what glibc reads and it exists on every Linux host,
+      # whereas /etc/timezone is Debian's and a bind mount of a missing source would make a directory
+      # on the host. Records are unaffected — they carry ISO times in UTC — as is the page, which
+      # formats in the browser's zone.
+      - /etc/localtime:/etc/localtime:ro
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN
       # Optional, passed through from the host: a fine-grained GitHub token limited to this repository
