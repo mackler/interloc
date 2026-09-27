@@ -20,6 +20,10 @@ services:
       - ${HOME}/work/interloq:/opt/interloq:ro
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN
+      # Optional, passed through from the host: a fine-grained GitHub token limited to this repository
+      # with Issues read and write, so that the assistant in this container can file an issue directly.
+      # Nothing in the program reads it. Absent, the variable is simply empty.
+      - INTERLOQ_ISSUES_TOKEN
     # The web GUI (node /opt/interloq/src/web.ts, default port 8090), reached from the host's browser at
     # http://localhost:8090/ without a token or login. A new ports line takes effect when the container is recreated.
     ports:
