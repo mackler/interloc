@@ -2,7 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Result } from "effect";
 import fc from "fast-check";
+import { Schema } from "effect";
 import { type ClientMessage, decodeClient, decodeServer, inSnapshot, type RunEvent, type RunRecord, type ServerMessage } from "../src/protocol.ts";
+import type { SubjectId } from "../src/artifacts.ts";
+import type { Subject } from "../src/review.ts";
+import type { PlannerResponse, QuestionListResponse } from "../src/schema.ts";
+import { planSubject, questionSubject, requirementsSubject, workSubject } from "../src/subjects.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { promptOf } from "../src/userPrompts.ts";
 import * as prompts from "../src/prompts.ts";
@@ -16,12 +21,15 @@ const agent = fc.constantFrom("claude" as const, "codex" as const);
 const reviewIssue = fc.record({ id: fc.string({ minLength: 1, maxLength: 8 }), severity: fc.constantFrom("blocking" as const, "major" as const, "minor" as const), location: text, problem: text, evidence: text });
 const review = fc.record({ issues: fc.array(reviewIssue, { maxLength: 3 }) });
 const disposition = fc.record({ id: text, action: fc.constantFrom("accepted" as const, "rejected" as const, "partially_accepted" as const, "no_change_needed" as const, "clarification_requested" as const), rationale: text, duplicate_of: text, reverses: text });
-const response = fc.record({
+const plannerResponse = fc.record({
   dispositions: fc.array(disposition, { maxLength: 3 }),
   self_corrections: fc.array(fc.record({ id: text, new_action: fc.constantFrom("accepted" as const, "rejected" as const, "plan_error" as const), explanation: text }), { maxLength: 2 }),
   reviewer_feedback: text,
   questions_for_user: fc.array(text, { maxLength: 2 }),
 });
+const questionEntry = fc.record({ id: text, question: text, reason: text, proposed_answers: fc.array(fc.record({ label: text, description: text }), { maxLength: 2 }), default_answer: text });
+// Defect A of docs/page-question-phase-defects.md: the question subject's response carries the amended list too.
+const response = fc.oneof(plannerResponse, fc.tuple(plannerResponse, fc.array(questionEntry, { maxLength: 2 })).map(([r, questions]) => ({ ...r, questions })));
 const outcome = fc.record({ status: fc.constantFrom("finished" as const, "needs_input" as const, "blocked" as const, "aborted" as const), summary: text, question: text, remainingWork: text, userInput: fc.option(text, { nil: null }) });
 const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   phase.map((p) => ({ _tag: "PhaseBegan" as const, phase: p })),
@@ -110,3 +118,57 @@ test("inSnapshot: with an empty replay nothing is dropped; a later run passes fr
   assert.equal(inSnapshot([a], { run: 1, seq: 49 }), true);
   assert.equal(inSnapshot([a], { run: 1, seq: 50 }), false);
 });
+
+// Defect A of docs/page-question-phase-defects.md: a question review's response is a QuestionListResponse, the planner's
+// response plus the amended list; the page's decoding refused it, and with it the whole replay.
+const questionListResponse: QuestionListResponse = {
+  dispositions: [{ id: "Q-R1-1", action: "accepted", rationale: "Added the database question.", duplicate_of: "", reverses: "" }],
+  self_corrections: [],
+  reviewer_feedback: "",
+  questions_for_user: [],
+  questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }], default_answer: "PostgreSQL" }],
+};
+const responseEvent = (subject: SubjectId, response: QuestionListResponse | Omit<QuestionListResponse, "questions">): RunEvent => ({ _tag: "Notified", event: { _tag: "ResponseReceived", subject, round: 1, response, resultText: "" } });
+
+test("a question review's ResponseReceived survives the round trip, live and in a replay", () => {
+  const event: ServerMessage = { type: "event", run: 1, seq: 5, event: { _tag: "Notified", event: { _tag: "ResponseReceived", subject: "questions", round: 1, response: questionListResponse, resultText: "" } } };
+  assert.deepEqual(decoded(decodeServer(JSON.stringify(event))), event);
+  const replay: ServerMessage = { type: "replay", runs: [{ id: 1, events: [event.event] }] };
+  assert.deepEqual(decoded(decodeServer(JSON.stringify(replay))), replay);
+});
+
+test("every subject's response, as its own schema decodes it, survives the round trip inside a ResponseReceived", () => {
+  const { questions: _questions, ...plannerResponse } = questionListResponse;
+  const subjects = [
+    { subject: "questions" as SubjectId, schema: questionSubject("t").respond.schema, example: questionListResponse },
+    { subject: "requirements" as const, schema: requirementsSubject().respond.schema, example: plannerResponse },
+    { subject: { plan: 1 }, schema: planSubject(1, true).respond.schema, example: plannerResponse },
+    { subject: { work: 1 }, schema: workSubject(1, true).respond.schema, example: plannerResponse },
+  ];
+  for (const { subject, schema, example } of subjects) {
+    const response = Schema.decodeUnknownSync(schema)(example);
+    const message: ServerMessage = { type: "event", run: 1, seq: 0, event: responseEvent(subject, response) };
+    assert.deepEqual(decoded(decodeServer(JSON.stringify(message))), plain(message), JSON.stringify(subject));
+  }
+});
+
+// The audit of defect A (step 2.3 of its plan): the response type of every subject must be exactly one of the members
+// the event carries. `Subject<R>` requires only `R extends PlannerResponse`, so assignability would admit a wider R;
+// equality does not. Both parameters are inferred: `applyDecisions.after` takes D, so fixing D would yield never.
+// A subject added to src/subjects.ts is covered once it is added to this list.
+type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
+type RespondOf<T> = T extends Subject<infer R, infer _D> ? R : never;
+type Carried<R> = Same<R, PlannerResponse> extends true ? true : Same<R, QuestionListResponse>;
+const holds = <_T extends true>(): void => undefined;
+const fails = <_T extends false>(): void => undefined;
+type Responses = [RespondOf<ReturnType<typeof questionSubject>>, RespondOf<ReturnType<typeof requirementsSubject>>, RespondOf<ReturnType<typeof planSubject>>, RespondOf<ReturnType<typeof workSubject>>];
+fails<Same<Responses[0], never>>();
+fails<Same<Responses[1], never>>();
+fails<Same<Responses[2], never>>();
+fails<Same<Responses[3], never>>();
+holds<Carried<Responses[0]>>();
+holds<Carried<Responses[1]>>();
+holds<Carried<Responses[2]>>();
+holds<Carried<Responses[3]>>();
+// The check itself refuses a response with a field the event does not carry.
+fails<Carried<PlannerResponse & { extra: string }>>();
