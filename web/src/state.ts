@@ -2,15 +2,18 @@
 // prompt with its widget, the activity line and the timeline rail. Replay and live events use the same fold.
 
 import type { SubjectId } from "../../src/artifacts.ts";
-import type { Asked, RunEvent, ServerMessage } from "../../src/protocol.ts";
+import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
 import { interviewHelp, pagePromptText, protocolErrorNotice, SERVER_CLOSED_NOTICE } from "../../src/prompts.ts";
 import { interviewSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
 
 export type Author = "program" | "user" | "codex" | "claude";
-/** One chat message. `markdown` is rendered and sanitised; a program's plain text is shown as it is. */
-export type Message = Readonly<{ key: string; author: Author; heading: string | null; body: string; format: "text" | "markdown" }>;
+/**
+ * One chat message. `markdown` is rendered and sanitised; a program's plain text is shown as it is. `time` is the ISO
+ * time its event was published (issue #1); `showTime` whether the time is shown, or only given to assistive technology.
+ */
+export type Message = Readonly<{ key: string; author: Author; heading: string | null; body: string; format: "text" | "markdown"; time: string; showTime: boolean }>;
 /** The rounds of one review loop within a phase. */
 export type RoundGroup = Readonly<{ subject: SubjectId; heading: string; rounds: readonly Readonly<{ round: number; limit: number }>[]; done: boolean }>;
 export type TimelineEntry = Readonly<{ phase: Phase; label: string; groups: readonly RoundGroup[]; state: "active" | "done" | "stopped" }>;
@@ -84,8 +87,29 @@ export const emptyRun = (id: number): RunView => ({
   callLabel: "",
 });
 
-const message = (run: RunView, author: Author, body: string, format: Message["format"], heading: string | null = null): Message => ({ key: `${run.id}-${run.nextSeq}`, author, heading, body, format });
-const withLeft = (run: RunView, m: Message): RunView => ({ ...run, left: [...run.left, m] });
+/**
+ * Decision Q3 of issue #1: consecutive messages of one author in one panel are grouped under one time, until more than
+ * this lies between a message and the one before it.
+ */
+const GROUP_GAP_MS = 2 * 60 * 1000;
+
+/**
+ * Whether a message shows its time: it is the first of its panel, its author differs from the message before it, or
+ * more than two minutes lie between them. A time that cannot be read is shown rather than silently grouped. The gap
+ * may be negative for events published concurrently (their times may differ slightly in order from their seq).
+ */
+export const showsTime = (previous: Message | undefined, author: Author, time: string): boolean => {
+  if (previous === undefined || previous.author !== author) return true;
+  const gap = Date.parse(time) - Date.parse(previous.time);
+  return Number.isNaN(gap) || gap > GROUP_GAP_MS;
+};
+
+/** A message before it is placed in its panel, which decides whether it shows its time. */
+type Unplaced = Omit<Message, "showTime">;
+const message = (run: RunView, time: string, author: Author, body: string, format: Message["format"], heading: string | null = null): Unplaced => ({ key: `${run.id}-${run.nextSeq}`, author, heading, body, format, time });
+const placed = (panel: readonly Message[], m: Unplaced): readonly Message[] => [...panel, { ...m, showTime: showsTime(panel[panel.length - 1], m.author, m.time) }];
+const withLeft = (run: RunView, m: Unplaced): RunView => ({ ...run, left: placed(run.left, m) });
+const withRight = (run: RunView, m: Unplaced): RunView => ({ ...run, right: placed(run.right, m) });
 
 /** The half of a round as conversation.md has it, without its "### Codex" / "### Claude Code" heading, which the message's author shows. */
 const withoutAuthorHeading = (markdown: string): string => markdown.replace(/^### [^\n]*\n+/, "").trim();
@@ -103,7 +127,7 @@ const roundBegan = (timeline: readonly TimelineEntry[], subject: SubjectId, roun
 };
 
 /** A notified event of the run. */
-const notifiedEvent = (run: RunView, event: UiEvent): RunView => {
+const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
   switch (event._tag) {
     case "PhaseBegan":
       return { ...run, timeline: [...run.timeline, { phase: event.phase, label: phaseName(event.phase), groups: [], state: "active" }] };
@@ -115,23 +139,23 @@ const notifiedEvent = (run: RunView, event: UiEvent): RunView => {
       return { ...run, timeline: run.timeline.map((e) => ({ ...e, groups: e.groups.map((g) => (sameSubject(g.subject, event.subject) ? { ...g, done: true } : g)) })) };
     case "ReviewReceived": {
       const body = event.review.issues.length === 0 ? "No issue: the review has converged." : withoutAuthorHeading(renderReview(event.review));
-      return { ...run, right: [...run.right, message(run, "codex", body, "markdown", `${subjectHeading(event.subject)}, round ${event.round}`)] };
+      return withRight(run, message(run, time, "codex", body, "markdown", `${subjectHeading(event.subject)}, round ${event.round}`));
     }
     case "ResponseReceived":
-      return { ...run, right: [...run.right, message(run, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", `${subjectHeading(event.subject)}, round ${event.round}`)] };
+      return withRight(run, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", `${subjectHeading(event.subject)}, round ${event.round}`));
     case "PlanWritten": {
       const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q}`).join("\n")}`;
       const body = `**Claude Code wrote the plan (planning phase ${event.phase}).**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;
-      return withLeft(run, message(run, "program", body, "markdown"));
+      return withLeft(run, message(run, time, "program", body, "markdown"));
     }
     case "InterviewTurn": {
       const turn = event.summary === null ? { kind: "continuing" as const, message: event.message } : { kind: "summary_proposed" as const, message: event.message, summary: event.summary };
       const body = event.summary === null ? event.message : `${event.message}\n\n**Summary proposed by Claude Code:**\n\n${event.summary}`;
-      return { ...withLeft(run, message(run, "program", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
+      return { ...withLeft(run, message(run, time, "program", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
     }
     case "InterviewOpened":
       // The page's own help (finding 8): no terminal """ convention, which the page does not implement.
-      return withLeft(run, message(run, "program", interviewHelp(event.heading, "page"), "text"));
+      return withLeft(run, message(run, time, "program", interviewHelp(event.heading, "page"), "text"));
     case "QuestionAsked":
       return { ...run, questionOptions: event.options.map((o, i) => ({ label: o.label, sends: String(i + 1) })) };
     case "AgentCallStarted": {
@@ -147,8 +171,8 @@ const notifiedEvent = (run: RunView, event: UiEvent): RunView => {
   }
 };
 
-/** One event of a run, in its order. Pure; the replay folds the same function. */
-export const foldEvent = (run: RunView, event: RunEvent): RunView => {
+/** One event of a run with its time, in its order. Pure; the replay folds the same function. */
+export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
   // The terminal lines of an interview turn are absorbed only while they follow it directly.
   if (event._tag === "Said" && run.absorb.length > 0 && run.absorb[0] === event.text) return { ...run, absorb: run.absorb.slice(1), nextSeq: run.nextSeq + 1 };
   const r: RunView = { ...run, absorb: [] };
@@ -157,17 +181,17 @@ export const foldEvent = (run: RunView, event: RunEvent): RunView => {
       case "Started":
         return { ...r, project: event.project, task: event.task };
       case "Said":
-        return event.text.trim() === "" ? r : withLeft(r, message(r, "program", event.text, "text"));
+        return event.text.trim() === "" ? r : withLeft(r, message(r, time, "program", event.text, "text"));
       case "Asked": {
         const extra = event.extra === "questionOptions" ? r.questionOptions : event.extra === "numberedAnswers" ? r.interviewChoices : [];
-        return { ...withLeft(r, message(r, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, choices: [...extra, ...event.choices] } };
+        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, choices: [...extra, ...event.choices] } };
       }
       case "Answered": {
         const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? r.pending.choices.find((c) => c.sends === event.text) : undefined;
-        return { ...withLeft(r, message(r, "user", chosen?.label ?? event.text, "text")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt] };
+        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "text")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt] };
       }
       case "Notified":
-        return notifiedEvent(r, event.event);
+        return notifiedEvent(r, event.event, time);
       case "Ended":
         return { ...r, ended: event.code, pending: null, activity: "", busy: false, timeline: r.timeline.map((e) => (e.state === "active" ? { ...e, state: event.code === 0 ? "done" : "stopped" } : e)) };
     }
@@ -175,7 +199,7 @@ export const foldEvent = (run: RunView, event: RunEvent): RunView => {
   return { ...next, nextSeq: run.nextSeq + 1 };
 };
 
-const foldRun = (id: number, events: readonly RunEvent[]): RunView => events.reduce(foldEvent, emptyRun(id));
+const foldRun = (id: number, events: readonly Stamped[]): RunView => events.reduce(foldEvent, emptyRun(id));
 
 /** A notice for the user that the page itself produces (for example an action discarded after a reconnect). */
 export const notice = (state: ViewState, text: string): ViewState => ({ ...state, notices: [...state.notices, text] });
@@ -212,11 +236,11 @@ export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
       const current = message.event._tag === "Started" ? message.run : message.event._tag === "Ended" ? null : state.current;
       if (state.run !== null && message.run === state.run.id) {
         if (message.seq !== state.run.nextSeq) return { ...state, needsReconnect: true };
-        return { ...state, current, run: foldEvent(state.run, message.event) };
+        return { ...state, current, run: foldEvent(state.run, { time: message.time, event: message.event }) };
       }
       if (state.run === null || message.run > state.run.id) {
         if (message.seq !== 0) return { ...state, needsReconnect: true };
-        return { ...state, current, last: state.run, run: foldEvent(emptyRun(message.run), message.event) };
+        return { ...state, current, last: state.run, run: foldEvent(emptyRun(message.run), { time: message.time, event: message.event }) };
       }
       return state;
     }

@@ -7,7 +7,7 @@ import { Deferred, Effect, Exit, Fiber, Result } from "effect";
 import { HttpServer } from "effect/unstable/http";
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { platformLayer } from "../src/platform.ts";
-import type { ClientMessage, RunEvent, ServerMessage } from "../src/protocol.ts";
+import type { ClientMessage, RunEvent, ServerMessage, Stamped } from "../src/protocol.ts";
 import { type Broadcast, makeRunManager, type RunManager } from "../src/runManager.ts";
 import { makeWebServer, requestTarget } from "../src/webServer.ts";
 import { finished, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
@@ -65,13 +65,13 @@ const until = async (what: string, condition: () => boolean, ms = 30_000): Promi
   }
   throw new Error(`timed out waiting for ${what}`);
 };
-/** The events a client has of each run, from the replay and the live messages, as (seq, event) in arrival order. */
-const perRun = (c: Client): Map<number, { seq: number; event: RunEvent }[]> => {
-  const runs = new Map<number, { seq: number; event: RunEvent }[]>();
-  const add = (run: number, seq: number, event: RunEvent) => runs.set(run, [...(runs.get(run) ?? []), { seq, event }]);
+/** The events a client has of each run, from the replay and the live messages, as (seq, time, event) in arrival order. */
+const perRun = (c: Client): Map<number, { seq: number; time: string; event: RunEvent }[]> => {
+  const runs = new Map<number, { seq: number; time: string; event: RunEvent }[]>();
+  const add = (run: number, seq: number, time: string, event: RunEvent) => runs.set(run, [...(runs.get(run) ?? []), { seq, time, event }]);
   for (const m of c.messages) {
-    if (m.type === "replay") for (const r of m.runs) r.events.forEach((event, seq) => add(r.id, seq, event));
-    if (m.type === "event") add(m.run, m.seq, m.event);
+    if (m.type === "replay") for (const r of m.runs) r.events.forEach((e, seq) => add(r.id, seq, e.time, e.event));
+    if (m.type === "event") add(m.run, m.seq, m.time, m.event);
   }
   return runs;
 };
@@ -208,7 +208,7 @@ test("a run that ends between the subscription and the snapshot is received once
     await until("b's replay", () => b.messages.some((m) => m.type === "replay"));
     await sleep(50);
     const replay = b.messages.find((m) => m.type === "replay");
-    assert.ok(replay?.type === "replay" && replay.runs.length === 1 && replay.runs[0].events.at(-1)?._tag === "Ended");
+    assert.ok(replay?.type === "replay" && replay.runs.length === 1 && replay.runs[0].events.at(-1)?.event._tag === "Ended");
     assert.equal(b.messages.filter((m) => m.type === "event").length, 0, "buffered events of the ended run were sent again");
     contiguous(b);
     a.close();
@@ -238,6 +238,12 @@ test("a connection kept open across two runs receives run 2 from its Started, wi
       assert.equal(perRun(c).get(2)?.[0].seq, 0);
       assert.equal(perRun(c).get(2)?.[0].event._tag, "Started");
     }
+    // Issue #1: every event carries its publication time, live and replayed, and the tab that joined late has, for each
+    // event of run 1, the time the tab that saw it live has.
+    for (const c of [a, late]) for (const [run, events] of perRun(c)) for (const e of events) assert.ok(!Number.isNaN(Date.parse(e.time)), `run ${run} seq ${e.seq} has no time`);
+    const timesOf = (c: Client) => (perRun(c).get(1) ?? []).map((e) => e.time);
+    assert.deepEqual(timesOf(late), timesOf(a));
+    assert.ok(atConnect > 0 && timesOf(late).length > atConnect, "run 1 reached the late tab both by replay and live");
     const ended1 = (perRun(a).get(1) ?? []).find((e) => e.event._tag === "Ended")?.event;
     assert.deepEqual(ended1, { _tag: "Ended", code: 130 });
     a.close();
@@ -372,7 +378,8 @@ test("the closing finalizer registered before serveEffect runs after the HTTP sh
 // Finding 13 of docs/gui-review.md: a tab that falls behind by the bound is told, disconnected and recovers by replay.
 test("a tab that falls behind by its queue's bound is told, its socket is closed, and a reconnect gets the whole replay", async () => {
   const listeners: ((b: Broadcast) => Effect.Effect<void>)[] = [];
-  const events: RunEvent[] = [{ _tag: "Started", project: "/p", task: "t", time: "x" }, ...Array.from({ length: 20 }, (_, i): RunEvent => ({ _tag: "Said", text: `line ${i}` }))];
+  const time = "2026-09-27T14:00:00.000Z";
+  const events: Stamped[] = [{ time, event: { _tag: "Started", project: "/p", task: "t" } }, ...Array.from({ length: 20 }, (_, i): Stamped => ({ time, event: { _tag: "Said", text: `line ${i}` } }))];
   const fake: RunManager = {
     cwd: "/p",
     incarnation: "test",
@@ -396,7 +403,7 @@ test("a tab that falls behind by its queue's bound is told, its socket is closed
           await until("the subscription", () => listeners.length === 1);
           // A burst of events, faster than the tab's forwarding: its queue holds 3. The session may end during it.
           const listener = listeners[0];
-          await run(Effect.forEach(Array.from({ length: 20 }, (_, i) => i + 21), (seq) => listener({ run: 1, seq, event: { _tag: "Said", text: `later ${seq}` } }), { discard: true }));
+          await run(Effect.forEach(Array.from({ length: 20 }, (_, i) => i + 21), (seq) => listener({ run: 1, seq, time, event: { _tag: "Said", text: `later ${seq}` } }), { discard: true }));
           await until("the close", () => slow.closedAt() !== null);
           assert.ok(refusals(slow).some((r) => /too far behind/.test(r)), `refusals: ${refusals(slow)}`);
           await until("the listener's removal", () => listeners.length === 0);

@@ -1,18 +1,20 @@
 import { describe, expect, test } from "vitest";
 import * as prompts from "../../src/prompts.ts";
-import type { RunEvent, ServerMessage } from "../../src/protocol.ts";
+import type { RunEvent, ServerMessage, Stamped } from "../../src/protocol.ts";
 import { promptOf } from "../../src/userPrompts.ts";
 import type { ClientMessage } from "../../src/protocol.ts";
 import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "./draft.ts";
 import { initialState, reduce, type ViewState } from "./state.ts";
 
 // Finding 5 of docs/gui-review.md: a draft belongs to (incarnation, run, prompt).
-const started: RunEvent = { _tag: "Started", project: "/p", task: "t", time: "x" };
+const started: RunEvent = { _tag: "Started", project: "/p", task: "t" };
+const TIME = "2026-09-27T14:00:00.000Z";
+const stamp = (events: readonly RunEvent[]): Stamped[] => events.map((event) => ({ time: TIME, event }));
 const asked = (prompt: number): RunEvent => ({ _tag: "Asked", prompt, ...promptOf(prompts.decisionPrompt(`issue ${prompt}`)) });
 const answered = (prompt: number): RunEvent => ({ _tag: "Answered", prompt, text: "" });
 const hello = (incarnation = "a", current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation });
 const fold = (messages: readonly ServerMessage[], from: ViewState = initialState): ViewState => messages.reduce(reduce, from);
-const live = (events: readonly RunEvent[]): ViewState => fold([hello(), { type: "replay", runs: [] }, ...events.map((event, seq): ServerMessage => ({ type: "event", run: 1, seq, event }))]);
+const live = (events: readonly RunEvent[]): ViewState => fold([hello(), { type: "replay", runs: [] }, ...events.map((event, seq): ServerMessage => ({ type: "event", run: 1, seq, time: TIME, event }))]);
 const draft: Draft = { key: { incarnation: "a", run: 1, prompt: 1 }, text: "my unsent answer" };
 
 describe("draft", () => {
@@ -29,17 +31,17 @@ describe("draft", () => {
   });
 
   test("a replay after a reconnection in which the prompt was answered meanwhile withdraws the draft with a notice", () => {
-    const view = fold([hello(), { type: "replay", runs: [{ id: 1, events: [started, asked(1), answered(1), asked(2)] }] }], live([started, asked(1)]));
+    const view = fold([hello(), { type: "replay", runs: [{ id: 1, events: stamp([started, asked(1), answered(1), asked(2)]) }] }], live([started, asked(1)]));
     expect(reconcile(draft, view)).toEqual({ draft: null, notice: prompts.draftWithdrawnNotice("my unsent answer") });
   });
 
   test("a replay in which the same prompt is still pending keeps the draft", () => {
-    const view = fold([hello(), { type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] }], live([started, asked(1)]));
+    const view = fold([hello(), { type: "replay", runs: [{ id: 1, events: stamp([started, asked(1)]) }] }], live([started, asked(1)]));
     expect(reconcile(draft, view)).toEqual({ draft, notice: null });
   });
 
   test("another incarnation of the server withdraws the draft with a notice; an empty draft goes quietly", () => {
-    const view = fold([hello("b"), { type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] }], live([started, asked(1)]));
+    const view = fold([hello("b"), { type: "replay", runs: [{ id: 1, events: stamp([started, asked(1)]) }] }], live([started, asked(1)]));
     expect(reconcile(draft, view)).toEqual({ draft: null, notice: prompts.draftWithdrawnNotice("my unsent answer") });
     expect(reconcile({ ...draft, text: "" }, live([started, asked(1), answered(1)]))).toEqual({ draft: null, notice: null });
   });

@@ -129,7 +129,7 @@ new name. Material online describes v3 in most cases and is not a source.
 | Name | Line | Notes |
 |---|---|---|
 | `Clock.Clock` | 186 | `Context.Reference<Clock>`: a service with a default, so `Clock.currentTimeMillis` has no requirement; a test overrides it with `Effect.provideService(Clock.Clock, impl)` (Effect.d.ts:11537, data-last `provideService(key)(impl)(self)`) |
-| `Clock.currentTimeMillis` | 260 | `Effect<number>`; the store's `now` (init's archive name, usage times, the checkpoint) |
+| `Clock.currentTimeMillis` | 260 | `Effect<number>`; the store's `now` (init's archive name, usage times, the checkpoint), and the run manager's publication time of every event (`append` and `end`, issue #1; test/runManager.test.ts provides a stepping clock around `start`, which the run's fiber and its `end` inherit) |
 | `Clock` interface | 49 | `currentTimeMillisUnsafe()`, `currentTimeMillis`, `currentTimeNanosUnsafe()`, `currentTimeNanos`, `monotonicTimeNanosUnsafe()`, `monotonicTimeNanos`, `sleep(duration)`; a fixed clock in test/state.test.ts implements all seven |
 | `TestClock` | effect/dist/testing/TestClock.d.ts:241 (`layer`), 340 (`setTime`) | present in rc.117; not used (a fixed `Clock` value is enough) |
 | `FileSystem.OpenFlag` | FileSystem.d.ts:321 | includes `"wx"` (create exclusively); `PlatformError.reason._tag === "AlreadyExists"` (PlatformError.d.ts:73) when the file exists |

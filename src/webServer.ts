@@ -110,7 +110,7 @@ const session = (manager: RunManager, socket: Socket.Socket, fs: FileSystem.File
       const forward = Effect.gen(function* () {
         for (;;) {
           const event = yield* Queue.take(buffered);
-          if (!inSnapshot(runs, event)) yield* send({ type: "event", run: event.run, seq: event.seq, event: event.event });
+          if (!inSnapshot(runs, event)) yield* send({ type: "event", run: event.run, seq: event.seq, time: event.time, event: event.event });
         }
       });
       yield* Effect.forkScoped(forward);

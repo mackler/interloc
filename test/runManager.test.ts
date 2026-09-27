@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
-import { Deferred, Effect, Exit, Fiber, Layer, Queue, Ref, Scope } from "effect";
+import { Clock, Deferred, Effect, Exit, Fiber, Layer, Queue, Ref, Scope } from "effect";
 import { claudePlannerLayer } from "../src/claude.ts";
 import { codexReviewerLayer } from "../src/codex.ts";
 import { platformLayer } from "../src/platform.ts";
@@ -120,7 +120,9 @@ test("stop interrupts the run like Ctrl+C; answers and stops naming an ended run
 
   const second = await started(h, repo);
   assert.equal(second, first + 1);
-  assert.deepEqual(h.received.find((b) => b.run === second), { run: second, seq: 0, event: eventsOf(h, second)[0] });
+  const { time, ...firstOfSecond } = h.received.find((b) => b.run === second)!;
+  assert.deepEqual(firstOfSecond, { run: second, seq: 0, event: eventsOf(h, second)[0] });
+  assert.ok(!Number.isNaN(Date.parse(time)), "the broadcast carries its time");
   assert.match(((await run(h.manager.answer(h.manager.incarnation, first, asked.prompt, "late"))) as Refusal).refused, /that run has ended/);
   await ended(h, second);
   assert.equal(endCode(h, second), 0);
@@ -136,7 +138,7 @@ test("the replay during a run holds the last run and the current one", async () 
   const second = await started(h, repo);
   const replay = await run(h.manager.replay);
   assert.deepEqual(replay.map((r) => r.id), [first, second]);
-  assert.deepEqual(replay[0].events, eventsOf(h, first));
+  assert.deepEqual(replay[0].events, h.received.filter((b) => b.run === first).map((b) => ({ time: b.time, event: b.event })));
   await run(h.manager.stop(h.manager.incarnation, second));
   await ended(h, second);
 });
@@ -297,4 +299,40 @@ test("a subscriber that never reads overflows at its bound, and the run and the 
   assert.equal(await run(Queue.size(slow.queue)), 3, "the queue grew beyond its bound");
   assert.ok(eventsOf(h, id).length > 3, "the other subscriber missed events");
   await run(Scope.close(scope, Exit.void));
+});
+
+// Issue #1: every event is stamped where it gets its seq, from the Clock service, on both publication paths.
+test("append and end stamp every event with the Clock's time; the replay holds the same times; end still makes the run the last one", async () => {
+  const reads: number[] = [];
+  const next = (): number => {
+    const ms = Date.UTC(2026, 8, 27, 14, 0, 0) + 1_000 * reads.length;
+    reads.push(ms);
+    return ms;
+  };
+  const stepping: Clock.Clock = {
+    currentTimeMillisUnsafe: next,
+    currentTimeMillis: Effect.sync(next),
+    currentTimeNanosUnsafe: () => BigInt(next()) * 1_000_000n,
+    currentTimeNanos: Effect.sync(() => BigInt(next()) * 1_000_000n),
+    monotonicTimeNanosUnsafe: () => 0n,
+    monotonicTimeNanos: Effect.succeed(0n),
+    sleep: () => Effect.void,
+  };
+  const repo = tempRepo();
+  const h = await harness(repo, [converging]);
+  const id = await run(h.manager.start(repo, "task").pipe(Effect.provideService(Clock.Clock, stepping)));
+  assert.equal(typeof id, "number");
+  await ended(h, id as number);
+  const mine = h.received.filter((b) => b.run === id);
+  const issued = new Set(reads.map((ms) => new Date(ms).toISOString()));
+  for (const b of mine) assert.ok(issued.has(b.time), `seq ${b.seq} (${b.event._tag}) has the time ${String(b.time)}, not one the clock gave`);
+  assert.equal(mine[0].event._tag, "Started");
+  assert.equal(mine.at(-1)?.event._tag, "Ended");
+  const times = mine.map((b) => Date.parse(b.time));
+  assert.deepEqual(times, [...times].sort((a, b) => a - b), "one run publishes in order, so its times do not decrease along seq");
+  assert.equal(await run(h.manager.current), null);
+  const replay = await run(h.manager.replay);
+  assert.deepEqual(replay.map((r) => r.id), [id]);
+  assert.deepEqual(replay[0].events, mine.map((b) => ({ time: b.time, event: b.event })));
+  await run(Scope.close(h.scope, Exit.void));
 });

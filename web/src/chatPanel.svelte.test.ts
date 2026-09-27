@@ -11,7 +11,7 @@ afterEach(() => {
   mounted = [];
   document.body.innerHTML = "";
 });
-const message = (i: number): Message => ({ key: `k${i}`, author: "codex", heading: null, body: `message ${i}`, format: "text" });
+const message = (i: number): Message => ({ key: `k${i}`, author: "codex", heading: null, body: `message ${i}`, format: "text", time: "2026-09-27T14:00:00.000Z", showTime: i === 0 });
 const panel = (visible: boolean) => {
   const props = $state({ title: "Claude Code and Codex", messages: [message(0)], empty: "none", visible });
   const target = document.createElement("div");

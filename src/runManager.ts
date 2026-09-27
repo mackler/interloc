@@ -5,11 +5,11 @@ import { Clock, Deferred, Effect, Exit, Fiber, FileSystem, Ref, type Scope, Sema
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { Platform } from "./platform.ts";
 import { exitCodeOf, program, type Wiring } from "./program.ts";
-import type { RunEvent, RunRecord } from "./protocol.ts";
+import type { RunEvent, RunRecord, Stamped } from "./protocol.ts";
 import { makeWebUi, type WebUi } from "./webUi.ts";
 
-/** One event of a run as it is broadcast: the run's id and the event's sequence number in that run (from 0). */
-export type Broadcast = Readonly<{ run: number; seq: number; event: RunEvent }>;
+/** One event of a run as it is broadcast: the run's id, the event's sequence number in that run (from 0) and the time of its publication. */
+export type Broadcast = Readonly<{ run: number; seq: number; time: string; event: RunEvent }>;
 /** Why an action of the page was not carried out; shown to the user. */
 export type Refusal = Readonly<{ refused: string }>;
 
@@ -52,7 +52,7 @@ export const makePublisher = <S, B>(state: Ref.Ref<S>, listeners: Ref.Ref<Readon
     ),
   );
 
-type Run = Readonly<{ id: number; events: readonly RunEvent[]; ui: WebUi; fiber: Fiber.Fiber<number> }>;
+type Run = Readonly<{ id: number; events: readonly Stamped[]; ui: WebUi; fiber: Fiber.Fiber<number> }>;
 type State = Readonly<{ nextId: number; current: Run | null; last: Run | null }>;
 const record = (r: Run): RunRecord => ({ id: r.id, events: r.events });
 const ENDED: Refusal = { refused: "that run has ended" };
@@ -62,7 +62,9 @@ const EARLIER: Refusal = { refused: "that run belongs to an earlier start of the
  * The manager over a wiring per run (the live one of main.ts with the run's web Ui). The state is one Ref: the
  * next id (never reused while the process lives), the current run and the last finished one. An event is
  * appended in one step with its seq and then broadcast, so a listener registered before a snapshot sees every
- * event that the snapshot does not hold (P1-R1-2).
+ * event that the snapshot does not hold (P1-R1-2). The time of an event (issue #1) is read from the Clock before
+ * that step, because the record function stays pure; so events published concurrently may carry times in a slightly
+ * different order than their seq, and seq is the order.
  */
 export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string, incarnation: string): Effect.Effect<RunManager, never, Platform> =>
   Effect.gen(function* () {
@@ -73,18 +75,29 @@ export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string, incar
     const publish = yield* makePublisher(state, listeners);
 
     /** Appends an event to the current run with the given id and broadcasts it; nothing when that run is not current. */
+    const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => new Date(ms).toISOString()));
     const append = (id: number, event: RunEvent): Effect.Effect<void> =>
-      publish((s): readonly [Broadcast | null, State] => {
-        if (s.current === null || s.current.id !== id) return [null, s];
-        return [{ run: id, seq: s.current.events.length, event }, { ...s, current: { ...s.current, events: [...s.current.events, event] } }];
-      }).pipe(Effect.asVoid);
+      now.pipe(
+        Effect.flatMap((time) =>
+          publish((s): readonly [Broadcast | null, State] => {
+            if (s.current === null || s.current.id !== id) return [null, s];
+            return [{ run: id, seq: s.current.events.length, time, event }, { ...s, current: { ...s.current, events: [...s.current.events, { time, event }] } }];
+          }),
+        ),
+        Effect.asVoid,
+      );
     /** Appends Ended and makes the run the last one, in the same step. */
     const end = (id: number, code: number): Effect.Effect<void> =>
-      publish((s): readonly [Broadcast | null, State] => {
-        if (s.current === null || s.current.id !== id) return [null, s];
-        const event: RunEvent = { _tag: "Ended", code };
-        return [{ run: id, seq: s.current.events.length, event }, { ...s, current: null, last: { ...s.current, events: [...s.current.events, event] } }];
-      }).pipe(Effect.asVoid);
+      now.pipe(
+        Effect.flatMap((time) =>
+          publish((s): readonly [Broadcast | null, State] => {
+            if (s.current === null || s.current.id !== id) return [null, s];
+            const event: RunEvent = { _tag: "Ended", code };
+            return [{ run: id, seq: s.current.events.length, time, event }, { ...s, current: null, last: { ...s.current, events: [...s.current.events, { time, event }] } }];
+          }),
+        ),
+        Effect.asVoid,
+      );
 
     /** One git command in a directory: its exit code and its standard output (-1 and "" when it cannot be spawned). */
     const git = (dir: string, args: readonly string[]): Effect.Effect<Readonly<{ code: number; out: string }>> =>
@@ -127,7 +140,6 @@ export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string, incar
         // The ui's sink needs the id, and the id is taken with the reservation of the run.
         const idRef = yield* Ref.make(0);
         const ui = yield* makeWebUi((event) => Ref.get(idRef).pipe(Effect.flatMap((id) => append(id, event))));
-        const time = new Date(yield* Clock.currentTimeMillis).toISOString();
         // The ownership transfer (finding 11 of docs/gui-review.md) is one uninterruptible region: the fiber exists
         // before the run is reserved, the run is reserved with its fiber in one step, and the gate is released after
         // Started, so no interruption can leave a run reserved without a fiber or a fiber that never starts.
@@ -149,7 +161,7 @@ export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string, incar
               return { refused: "a run is in progress; stop it or wait for its end" };
             }
             yield* Ref.set(idRef, reserved);
-            yield* append(reserved, { _tag: "Started", project, task, time });
+            yield* append(reserved, { _tag: "Started", project, task });
             yield* Deferred.succeed(gate, undefined);
             return reserved;
           }),

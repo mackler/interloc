@@ -7,7 +7,9 @@ import PromptWidget from "./components/PromptWidget.svelte";
 import StartForm from "./components/StartForm.svelte";
 import TimelineRail from "./components/TimelineRail.svelte";
 import TopBar from "./components/TopBar.svelte";
-import { emptyRun, type Widget } from "./state.ts";
+import MessageView from "./components/Message.svelte";
+import { clockTime, fullTime } from "./time.ts";
+import { emptyRun, type Message, type Widget } from "./state.ts";
 
 // Plan step 4.5: the components, mounted in jsdom.
 let mounted: ReturnType<typeof mount>[] = [];
@@ -38,6 +40,34 @@ const widget = (text: string, extra: Widget["choices"] = []): Widget => {
   const asked = { _tag: "Asked" as const, prompt: 7, ...promptOf(text) };
   return { asked, choices: [...extra, ...asked.choices] };
 };
+
+// Issue #1: a message's time, shown in its header or, when grouped, given to assistive technology only.
+describe("Message", () => {
+  const ISO = "2026-09-27T14:03:27.000Z";
+  const m = (showTime: boolean): Message => ({ key: "1-1", author: "codex", heading: "Plan review, round 1", body: "No issue.", format: "text", time: ISO, showTime });
+
+  test("a shown time is in the header as <time datetime title>, visible", () => {
+    const root = show(MessageView, { message: m(true) });
+    const time = one(root, "header time") as HTMLTimeElement;
+    expect(time.getAttribute("datetime")).toBe(ISO);
+    expect(time.getAttribute("title")).toBe(fullTime(ISO));
+    expect(time.textContent?.trim()).toBe(clockTime(ISO));
+    expect(time.closest(".visually-hidden")).toBe(null);
+  });
+
+  test("a grouped message keeps its time for assistive technology and the title, visually hidden", () => {
+    const root = show(MessageView, { message: m(false) });
+    const time = one(root, "time") as HTMLTimeElement;
+    expect(time.getAttribute("datetime")).toBe(ISO);
+    expect(time.getAttribute("title")).toBe(fullTime(ISO));
+    expect(time.textContent?.trim()).toBe(clockTime(ISO));
+    expect(time.closest(".visually-hidden")).not.toBe(null);
+  });
+
+  test("the message adds no live region of its own", () => {
+    for (const shown of [true, false]) expect(show(MessageView, { message: m(shown) }).querySelector("[aria-live]")).toBe(null);
+  });
+});
 
 describe("StartForm", () => {
   test("Start is disabled while a field is empty or a run is active, and sends the project and the task", () => {
@@ -321,7 +351,9 @@ describe("App and the draft", () => {
       flushSync();
     }
   }
-  const started = { _tag: "Started", project: "/p", task: "t", time: "x" };
+  const started = { _tag: "Started", project: "/p", task: "t" };
+  const TIME = "2026-09-27T14:00:00.000Z";
+  const stamp = (events: readonly unknown[]) => events.map((event) => ({ time: TIME, event }));
   const asked = (prompt: number) => ({ _tag: "Asked", prompt, ...promptOf(prompts.decisionPrompt(`issue ${prompt}`)) });
   const openPage = async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
@@ -340,20 +372,20 @@ describe("App and the draft", () => {
 
   test("another tab's answer withdraws the draft with a notice; the next prompt's field is empty", async () => {
     const { root, ws } = await openPage();
-    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, asked(1)]) }] });
     type(field(root), "draft for question one");
-    ws.receive({ type: "event", run: 1, seq: 2, event: { _tag: "Answered", prompt: 1, text: "" } });
-    ws.receive({ type: "event", run: 1, seq: 3, event: asked(2) });
+    ws.receive({ type: "event", run: 1, seq: 2, time: TIME, event: { _tag: "Answered", prompt: 1, text: "" } });
+    ws.receive({ type: "event", run: 1, seq: 3, time: TIME, event: asked(2) });
     expect(field(root).value).toBe("");
     expect(root.textContent).toContain(prompts.draftWithdrawnNotice("draft for question one"));
   });
 
   test("after a reconnection whose replay answered the prompt, the draft is withdrawn with a notice", async () => {
     const { root, ws } = await openPage();
-    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, asked(1)]) }] });
     type(field(root), "draft for question one");
     ws.receive({ type: "hello", cwd: "/p", current: 1, incarnation: "a" });
-    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1), { _tag: "Answered", prompt: 1, text: "" }, asked(2)] }] });
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, asked(1), { _tag: "Answered", prompt: 1, text: "" }, asked(2)]) }] });
     expect(field(root).value).toBe("");
     expect(root.textContent).toMatch(/your unsent text was discarded: «draft for question one»/);
   });
@@ -375,7 +407,7 @@ describe("App and the draft", () => {
   test("a failed page: the banner, Stop disabled, the prompt usable, the queued answer back in its field, a new one refused", async () => {
     vi.useFakeTimers();
     const { root, ws } = await openPage();
-    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, asked(1)]) }] });
     ws.close();
     flushSync();
     type(field(root), "queued answer");
@@ -397,7 +429,7 @@ describe("App and the draft", () => {
   test("several actions discarded: the newer draft stays, and the answers are kept under Not sent until dismissed", async () => {
     vi.useFakeTimers();
     const { root, ws } = await openPage();
-    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, asked(1)]) }] });
     ws.close();
     flushSync();
     type(field(root), "answer A");

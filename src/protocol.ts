@@ -11,13 +11,18 @@ import type { Choice, Extra, PromptKind } from "./userPrompts.ts";
 export type Asked = Readonly<{ _tag: "Asked"; prompt: number; text: string; kind: PromptKind; mode: "ask" | "message"; choices: readonly Choice[]; free: "none" | "line" | "message"; extra: Extra }>;
 /** What happened in a run, in order: the run's Ui calls and its start and end. */
 export type RunEvent =
-  | Readonly<{ _tag: "Started"; project: string; task: string; time: string }>
+  | Readonly<{ _tag: "Started"; project: string; task: string }>
   | Readonly<{ _tag: "Said"; text: string }>
   | Asked
   | Readonly<{ _tag: "Answered"; prompt: number; text: string }>
   | Readonly<{ _tag: "Notified"; event: UiEvent }>
   | Readonly<{ _tag: "Ended"; code: number }>;
-export type RunRecord = Readonly<{ id: number; events: readonly RunEvent[] }>;
+/**
+ * An event with the time of its publication (issue #1), an ISO string read from the Clock where the event gets its
+ * seq. seq is the order; the times of events published concurrently may differ slightly in order from their seq.
+ */
+export type Stamped = Readonly<{ time: string; event: RunEvent }>;
+export type RunRecord = Readonly<{ id: number; events: readonly Stamped[] }>;
 /**
  * The incarnation (finding 12 of docs/gui-review.md) names one start of the server: run and prompt numbers restart
  * with the server, so an answer or a stop carries the incarnation it was made in, and the hello says which one is live.
@@ -30,7 +35,7 @@ export type ClientMessage =
 export type ServerMessage =
   | Readonly<{ type: "hello"; cwd: string; current: number | null; incarnation: string }>
   | Readonly<{ type: "replay"; runs: readonly RunRecord[] }>
-  | Readonly<{ type: "event"; run: number; seq: number; event: RunEvent }>
+  | Readonly<{ type: "event"; run: number; seq: number; time: string; event: RunEvent }>
   | Readonly<{ type: "listing"; path: string; parent: string | null; dirs: readonly string[]; error: string | null }>
   | Readonly<{ type: "refused"; reason: string }>
   /** The server is ending (finding 15 of docs/gui-review.md); the tab's socket is closed after this. */
@@ -67,7 +72,7 @@ export const UiEventSchema = Schema.Union([
 
 const ChoiceSchema = Schema.Struct({ label: Str, sends: Str });
 export const RunEventSchema = Schema.Union([
-  tagged("Started", { project: Str, task: Str, time: Str }),
+  tagged("Started", { project: Str, task: Str }),
   tagged("Said", { text: Str }),
   tagged("Asked", {
     prompt: Int,
@@ -82,7 +87,8 @@ export const RunEventSchema = Schema.Union([
   tagged("Notified", { event: UiEventSchema }),
   tagged("Ended", { code: Int }),
 ]);
-const RunRecordSchema = Schema.Struct({ id: Int, events: Schema.Array(RunEventSchema) });
+export const StampedSchema = Schema.Struct({ time: Str, event: RunEventSchema });
+const RunRecordSchema = Schema.Struct({ id: Int, events: Schema.Array(StampedSchema) });
 
 export const ClientMessageSchema = Schema.Union([
   typed("start", { project: Str, task: Str }),
@@ -93,7 +99,7 @@ export const ClientMessageSchema = Schema.Union([
 export const ServerMessageSchema = Schema.Union([
   typed("hello", { cwd: Str, current: Schema.NullOr(Int), incarnation: Str }),
   typed("replay", { runs: Schema.Array(RunRecordSchema) }),
-  typed("event", { run: Int, seq: Int, event: RunEventSchema }),
+  typed("event", { run: Int, seq: Int, time: Str, event: RunEventSchema }),
   typed("listing", { path: Str, parent: Schema.NullOr(Str), dirs: Schema.Array(Str), error: Schema.NullOr(Str) }),
   typed("refused", { reason: Str }),
   typed("closing", {}),
@@ -104,6 +110,7 @@ type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const same = <T extends true>(): T | undefined => undefined;
 void same<Same<typeof UiEventSchema.Type, UiEvent>>();
 void same<Same<typeof RunEventSchema.Type, RunEvent>>();
+void same<Same<typeof StampedSchema.Type, Stamped>>();
 void same<Same<typeof ClientMessageSchema.Type, ClientMessage>>();
 void same<Same<typeof ServerMessageSchema.Type, ServerMessage>>();
 

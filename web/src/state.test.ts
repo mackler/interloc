@@ -1,21 +1,25 @@
 import fc from "fast-check";
 import { describe, expect, test } from "vitest";
 import * as prompts from "../../src/prompts.ts";
-import { decodeServer, type RunEvent, type ServerMessage } from "../../src/protocol.ts";
+import { decodeServer, type RunEvent, type ServerMessage, type Stamped } from "../../src/protocol.ts";
 import type { UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { dismissUnsent, initialState, keepUnsent, protocolError, reduce, type ViewState } from "./state.ts";
+import { dismissUnsent, initialState, keepUnsent, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
 const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
-const started: RunEvent = { _tag: "Started", project: "/p", task: "the task", time: "t" };
+const started: RunEvent = { _tag: "Started", project: "/p", task: "the task" };
 const said = (text: string): RunEvent => ({ _tag: "Said", text });
 const notified = (event: UiEvent): RunEvent => ({ _tag: "Notified", event });
 const asked = (prompt: number, text: string): RunEvent => ({ _tag: "Asked", prompt, ...promptOf(text) });
+/** The time of publication of an event: by default one second per seq from 14:00:00 UTC; `times` gives it in seconds. */
+const BASE = Date.UTC(2026, 8, 27, 14, 0, 0);
+const at = (seconds: number): string => new Date(BASE + seconds * 1000).toISOString();
+const stamp = (events: readonly RunEvent[], times?: readonly number[]): Stamped[] => events.map((event, seq) => ({ time: at(times?.[seq] ?? seq), event }));
 /** The live messages of one run: hello, an empty replay, then the events with seq from 0. */
-const live = (events: readonly RunEvent[], run = 1): ServerMessage[] => [hello(run), { type: "replay", runs: [] }, ...events.map((event, seq): ServerMessage => ({ type: "event", run, seq, event }))];
+const live = (events: readonly RunEvent[], run = 1, times?: readonly number[]): ServerMessage[] => [hello(run), { type: "replay", runs: [] }, ...stamp(events, times).map(({ time, event }, seq): ServerMessage => ({ type: "event", run, seq, time, event }))];
 const fold = (messages: readonly ServerMessage[], from: ViewState = initialState): ViewState => messages.reduce(reduce, from);
-const replayed = (events: readonly RunEvent[], run = 1, current: number | null = run): ViewState => fold([hello(current), { type: "replay", runs: [{ id: run, events }] }]);
+const replayed = (events: readonly RunEvent[], run = 1, current: number | null = run, times?: readonly number[]): ViewState => fold([hello(current), { type: "replay", runs: [{ id: run, events: stamp(events, times) }] }]);
 const bodies = (s: ViewState) => s.run?.left.map((m) => `${m.author}:${m.body}`) ?? [];
 
 describe("ordering and the panels", () => {
@@ -92,7 +96,7 @@ describe("activity and timeline", () => {
     const s1 = fold(live([started, notified({ _tag: "AgentCallStarted", agent: "codex", purpose: "review" }), notified({ _tag: "ToolUsed", agent: "codex", tool: "command", target: "git diff" })]));
     expect(s1.run?.activity).toBe("Codex — review — command: git diff");
     expect(s1.run?.busy).toBe(true);
-    const s2 = fold([{ type: "event", run: 1, seq: 3, event: notified({ _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" }) }], s1);
+    const s2 = fold([{ type: "event", run: 1, seq: 3, time: at(3), event: notified({ _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" }) }], s1);
     expect(s2.run?.activity).toBe("");
   });
 
@@ -127,12 +131,12 @@ describe("runs, replay and gaps", () => {
   test("a seq that does not follow sets the reconnect flag; a new run's Started at seq 0 after Ended is not a gap", () => {
     const one = fold(live([started, { _tag: "Ended", code: 0 }]));
     expect(one.needsReconnect).toBe(false);
-    const two = fold([{ type: "event", run: 2, seq: 0, event: started }], one);
+    const two = fold([{ type: "event", run: 2, seq: 0, time: at(0), event: started }], one);
     expect(two.needsReconnect).toBe(false);
     expect([two.run?.id, two.last?.id]).toEqual([2, 1]);
-    const gap = fold([{ type: "event", run: 2, seq: 5, event: said("x") }], two);
+    const gap = fold([{ type: "event", run: 2, seq: 5, time: at(5), event: said("x") }], two);
     expect(gap.needsReconnect).toBe(true);
-    const badStart = fold([{ type: "event", run: 3, seq: 4, event: started }], two);
+    const badStart = fold([{ type: "event", run: 3, seq: 4, time: at(4), event: started }], two);
     expect(badStart.needsReconnect).toBe(true);
   });
 
@@ -147,6 +151,7 @@ describe("runs, replay and gaps", () => {
   const tagged = <T extends RunEvent["_tag"]>(tag: T) => fc.constant(tag);
   const eventArb: fc.Arbitrary<RunEvent> = fc.oneof(
     fc.string({ maxLength: 8 }).map(said),
+    fc.constant(notified({ _tag: "ReviewReceived", subject: { plan: 1 }, round: 1, review: { issues: [] }, counted: 0 })),
     tagged("Asked").chain(() => fc.constantFrom(prompts.permissionPrompt, prompts.interviewMessagePrompt, prompts.decisionPrompt("x")).map((t) => asked(1, t))),
     fc.constantFrom("", "y", "2").map((text): RunEvent => ({ _tag: "Answered", prompt: 1, text })),
     fc.constantFrom<UiEvent>(
@@ -160,12 +165,17 @@ describe("runs, replay and gaps", () => {
     ).map(notified),
     fc.constant(said("\nHi\n")),
   );
+  // Issue #1: each event with a time, a gap of 0 to 300 s after the one before, so that the grouping of both panels is
+  // covered by the property too.
+  const timed = (events: readonly RunEvent[], gaps: readonly number[]): Stamped[] =>
+    events.map((event, i) => ({ time: at(gaps.slice(0, i + 1).reduce((sum, g) => sum + g, 0)), event }));
+  const gapsArb = fc.array(fc.nat({ max: 300 }), { minLength: 14, maxLength: 14 });
   test("property: the replay of two runs equals their incremental folding", () => {
     fc.assert(
-      fc.property(fc.array(eventArb, { maxLength: 12 }), fc.array(eventArb, { maxLength: 12 }), (a, b) => {
-        const first: RunEvent[] = [started, ...a, { _tag: "Ended", code: 0 }];
-        const second: RunEvent[] = [started, ...b];
-        const incremental = fold([hello(null), { type: "replay", runs: [] }, ...first.map((event, seq): ServerMessage => ({ type: "event", run: 1, seq, event })), ...second.map((event, seq): ServerMessage => ({ type: "event", run: 2, seq, event }))]);
+      fc.property(fc.array(eventArb, { maxLength: 12 }), fc.array(eventArb, { maxLength: 12 }), gapsArb, gapsArb, (a, b, gapsA, gapsB) => {
+        const first = timed([started, ...a, { _tag: "Ended", code: 0 }], gapsA);
+        const second = timed([started, ...b], gapsB);
+        const incremental = fold([hello(null), { type: "replay", runs: [] }, ...first.map(({ time, event }, seq): ServerMessage => ({ type: "event", run: 1, seq, time, event })), ...second.map(({ time, event }, seq): ServerMessage => ({ type: "event", run: 2, seq, time, event }))]);
         const replay = fold([hello(2), { type: "replay", runs: [{ id: 1, events: first }, { id: 2, events: second }] }]);
         expect(replay.run).toEqual(incremental.run);
         expect(replay.last).toEqual(incremental.last);
@@ -178,13 +188,13 @@ describe("runs, replay and gaps", () => {
 // Finding 12 of docs/gui-review.md: a hello from another incarnation clears the view of the earlier server's runs.
 describe("a server restart", () => {
   test("a hello with a new incarnation clears the old run's view; the same incarnation keeps it", () => {
-    const withRun = reduce(reduce(initialState, { type: "hello", cwd: "/w", current: 3, incarnation: "a" }), { type: "replay", runs: [{ id: 3, events: [{ _tag: "Started", project: "/p", task: "t", time: "x" }] }] });
+    const withRun = reduce(reduce(initialState, { type: "hello", cwd: "/w", current: 3, incarnation: "a" }), { type: "replay", runs: [{ id: 3, events: [{ time: at(0), event: { _tag: "Started", project: "/p", task: "t" } }] }] });
     expect(withRun.run?.id).toBe(3);
     expect(withRun.incarnation).toBe("a");
     expect(reduce(withRun, { type: "hello", cwd: "/w", current: 3, incarnation: "a" }).run?.id).toBe(3);
     const restarted = reduce(withRun, { type: "hello", cwd: "/w", current: null, incarnation: "b" });
     expect([restarted.run, restarted.last, restarted.incarnation]).toEqual([null, null, "b"]);
-    const next = reduce(restarted, { type: "event", run: 1, seq: 0, event: { _tag: "Started", project: "/p", task: "u", time: "y" } });
+    const next = reduce(restarted, { type: "event", run: 1, seq: 0, time: at(0), event: { _tag: "Started", project: "/p", task: "u" } });
     expect(next.run?.id).toBe(1);
   });
 });
@@ -272,7 +282,7 @@ describe("a replay of a question phase", () => {
       said("\nWhich database should the service use?\n1. PostgreSQL\n2. SQLite\n"),
       asked(1, prompts.interviewMessagePrompt),
     ];
-    const frames = [JSON.stringify(hello()), JSON.stringify({ type: "replay", runs: [{ id: 1, events }] })];
+    const frames = [JSON.stringify(hello()), JSON.stringify({ type: "replay", runs: [{ id: 1, events: stamp(events) }] })];
     const messages = frames.map((f) => {
       const d = decodeServer(f);
       if (d._tag !== "Success") throw new Error(`not decoded: ${d.failure}`);
@@ -286,5 +296,76 @@ describe("a replay of a question phase", () => {
     expect(bodies(s).slice(0, 2)).toEqual([prompts.interviewHelp("Interview", "page"), "Which database should the service use?\n1. PostgreSQL\n2. SQLite"].map((b) => `program:${b}`));
     expect(s.run?.pending?.asked.kind).toBe("interviewMessage");
     expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2", "End interview=/done", "Quit=/quit"]);
+  });
+});
+
+// Issue #1: each message carries the time its event was published; a time is shown when the author changes or more
+// than 2 minutes lie between a message and the one before it in the same panel (decision Q3).
+describe("the time of a message", () => {
+  const review = notified({ _tag: "ReviewReceived", subject: { plan: 1 }, round: 1, review: { issues: [] }, counted: 0 });
+  const shown = (s: ViewState, panel: "left" | "right" = "left") => s.run?.[panel].map((m) => m.showTime) ?? [];
+
+  test("a message carries its event's time, live and after a replay, and the first of a panel shows it", () => {
+    for (const s of [fold(live([started, said("a")], 1, [0, 5])), replayed([started, said("a")], 1, 1, [0, 5])]) {
+      expect(s.run?.left[0]?.time).toBe(at(5));
+      expect(s.run?.left[0]?.showTime).toBe(true);
+    }
+  });
+
+  test("the same author within 2 minutes is grouped; exactly 2 minutes too; more than 2 minutes shows the time", () => {
+    expect(shown(fold(live([started, said("a"), said("b")], 1, [0, 0, 60])))).toEqual([true, false]);
+    expect(shown(fold(live([started, said("a"), said("b")], 1, [0, 0, 120])))).toEqual([true, false]);
+    expect(shown(fold(live([started, said("a"), said("b")], 1, [0, 0, 121])))).toEqual([true, true]);
+  });
+
+  test("another author shows the time, however close", () => {
+    const s = fold(live([started, asked(1, prompts.permissionPrompt), { _tag: "Answered", prompt: 1, text: "y" }, said("c")], 1, [0, 0, 1, 2]));
+    expect(s.run?.left.map((m) => m.author)).toEqual(["program", "user", "program"]);
+    expect(shown(s)).toEqual([true, true, true]);
+  });
+
+  test("each panel groups on its own: a review between two program lines does not separate them, nor a line two reviews", () => {
+    const s = fold(live([started, said("a"), review, said("b"), review], 1, [0, 0, 10, 20, 30]));
+    expect(shown(s, "left")).toEqual([true, false]);
+    expect(shown(s, "right")).toEqual([true, false]);
+  });
+
+  test("the gap is measured from the message just before, not from the last one that showed its time", () => {
+    const s = fold(live([started, said("a"), said("b"), said("c"), said("d")], 1, [0, 0, 90, 180, 270]));
+    expect(shown(s)).toEqual([true, false, false, false]);
+  });
+
+  test("an event that makes no message (a blank line, an absorbed line, Ended) does not count as the message before", () => {
+    const blank = fold(live([started, said("a"), said("\n"), said("b")], 1, [0, 0, 60, 170]));
+    expect(shown(blank)).toEqual([true, true]);
+    const turn = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null });
+    const absorbed = fold(live([started, turn, said("\nHi\n"), said("b")], 1, [0, 0, 100, 150]));
+    expect(absorbed.run?.left.map((m) => m.body)).toEqual(["Hi", "b"]);
+    expect(shown(absorbed)).toEqual([true, true]);
+    const ended = fold(live([started, said("a"), { _tag: "Ended", code: 0 }], 1, [0, 0, 500]));
+    expect(ended.run?.left.map((m) => [m.time, m.showTime])).toEqual([[at(0), true]]);
+  });
+
+  test("a tab that joins late or reconnects folds the replay to the same messages, times and grouping as a live tab", () => {
+    const events = [started, said("a"), review, said("b"), asked(1, prompts.decisionPrompt("x")), { _tag: "Answered", prompt: 1, text: "" } as RunEvent, said("c")];
+    const times = [0, 1, 2, 30, 200, 210, 400];
+    const liveView = fold(live(events, 1, times));
+    const late = replayed(events, 1, 1, times);
+    const again = fold([hello(1), { type: "replay", runs: [{ id: 1, events: stamp(events, times) }] }], late);
+    for (const s of [late, again]) {
+      expect(s.run?.left).toEqual(liveView.run?.left);
+      expect(s.run?.right).toEqual(liveView.run?.right);
+    }
+    expect(liveView.run?.left.map((m) => [m.time, m.showTime])).toEqual([[at(1), true], [at(30), false], [at(200), true], [at(210), true], [at(400), true]]);
+  });
+
+  test("showsTime: no message before, another author, more than 120 s, or a time that cannot be read", () => {
+    const m = { key: "1-1", author: "program" as const, heading: null, body: "a", format: "text" as const, time: at(0), showTime: true };
+    expect(showsTime(undefined, "program", at(0))).toBe(true);
+    expect(showsTime(m, "user", at(1))).toBe(true);
+    expect(showsTime(m, "program", at(120))).toBe(false);
+    expect(showsTime(m, "program", at(121))).toBe(true);
+    expect(showsTime(m, "program", "not a time")).toBe(true);
+    expect(showsTime({ ...m, time: "not a time" }, "program", at(1))).toBe(true);
   });
 });
