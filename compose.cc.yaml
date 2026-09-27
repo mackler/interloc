@@ -9,7 +9,7 @@ services:
   cc:
     container_name: interloq-claude
     build:
-      context: ../claude-code-image
+      context: ./container
     image: claude-code-base
     user: node
     working_dir: /workspace

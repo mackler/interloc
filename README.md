@@ -37,8 +37,6 @@ your project; that name is unchanged from before the program was called Interloq
 ## What you need
 
 - **Docker** with Docker Compose.
-- **The container image source** in the sibling directory `../claude-code-image`, which is used to
-  build the image `claude-code-base`.
 - **A Claude Code login token** in the environment variable `CLAUDE_CODE_OAUTH_TOKEN` on the host.
 - **A logged-in Codex** whose credentials live in the external Docker volume
   `iou-notes-codex_codex-config`, which is mounted as `~/.codex` in the container.
@@ -73,7 +71,7 @@ credentials, and publishes port 8090 for the web page.
 | `bin/ilcli` or `bin/ilcli run [args]` | Starts the container if needed, then starts Claude Code in it |
 | `bin/ilcli shell` | Opens a Bash shell in the container |
 | `bin/ilcli review "task" [project]` | Runs Interloq in the terminal inside the container |
-| `bin/ilcli build` | Builds the image from `../claude-code-image` |
+| `bin/ilcli build` | Builds the image `claude-code-base` from `container/Dockerfile` |
 | `bin/ilcli down` | Stops and removes the container (the volumes are kept) |
 | `bin/ilcli release` | Pushes `main` to GitHub, where the checks run (see "Deploying an update") |
 | `bin/ilcli upgrade` | In the installed copy: brings it to the tested `release` branch, then `npm ci` and `npm run build` |
