@@ -29,15 +29,25 @@ describe("ordering and the panels", () => {
     expect(s.run?.pending).toBe(null);
   });
 
-  test("a pending prompt carries the catalog's choices; the numbered answers of the preceding interview turn come first", () => {
+  test("a pending prompt carries the catalog's choices; the agent's options (interview answers, relayed options) are apart (issue #12)", () => {
     const decision = fold(live([started, asked(1, prompts.decisionPrompt("x"))]));
     expect(decision.run?.pending?.choices.map((c) => c.label)).toEqual(["No decision", "Quit"]);
+    expect(decision.run?.pending?.options).toEqual([]);
     const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null };
     const interview = fold(live([started, notified(turn), said("\nWhich database?\n1. PostgreSQL\n2. SQLite\n"), asked(1, prompts.interviewMessagePrompt)]));
-    expect(interview.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2", "End interview=/done", "Quit=/quit"]);
+    expect(interview.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2"]);
+    expect(interview.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End interview=/done", "Quit=/quit"]);
     const question: UiEvent = { _tag: "QuestionAsked", question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
     const relayed = fold(live([started, notified(question), asked(1, prompts.optionOrTextPrompt)]));
-    expect(relayed.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["A=1", "B=2", "Quit=q"]);
+    expect(relayed.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["A=1", "B=2"]);
+    expect(relayed.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["Quit=q"]);
+  });
+
+  test("an answer to an interview shows the full line of the chosen option, or the fixed choice's label (issue #12, Q2)", () => {
+    const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null };
+    const answered = (text: string) => fold(live([started, notified(turn), asked(1, prompts.interviewMessagePrompt), { _tag: "Answered", prompt: 1, text }]));
+    expect(bodies(answered("2")).at(-1)).toBe("user:2. SQLite");
+    expect(bodies(answered("/done")).at(-1)).toBe("user:End interview");
   });
 
   test("an answer that is a choice shows the choice's label", () => {
@@ -295,7 +305,8 @@ describe("a replay of a question phase", () => {
     expect(right[1]).toMatch(/^claude:.*\[Q-R1-1\]\*\* accepted: Added the database question\./s);
     expect(bodies(s).slice(0, 2)).toEqual([prompts.interviewHelp("Interview", "page"), "Which database should the service use?\n1. PostgreSQL\n2. SQLite"].map((b) => `program:${b}`));
     expect(s.run?.pending?.asked.kind).toBe("interviewMessage");
-    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2", "End interview=/done", "Quit=/quit"]);
+    expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2"]);
+    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End interview=/done", "Quit=/quit"]);
   });
 });
 

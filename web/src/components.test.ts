@@ -36,9 +36,9 @@ const type = (el: HTMLInputElement | HTMLTextAreaElement, text: string) => {
   el.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
 };
-const widget = (text: string, extra: Widget["choices"] = []): Widget => {
+const widget = (text: string, options: Widget["options"] = []): Widget => {
   const asked = { _tag: "Asked" as const, prompt: 7, ...promptOf(text) };
-  return { asked, choices: [...extra, ...asked.choices] };
+  return { asked, options, choices: asked.choices };
 };
 
 // Issue #1: a message's time, shown in its header or, when grouped, given to assistive technology only.
@@ -158,7 +158,54 @@ describe("StartForm", () => {
   });
 });
 
+// Issue #12: the agent's options are cards in a group of their own, the fixed choices buttons below them.
+const optionsGroup = (root: ParentNode) => root.querySelector<HTMLElement>(`[role=group][aria-label="${prompts.PROPOSED_ANSWERS_LABEL}"]`);
+const cardsOf = (root: ParentNode): HTMLButtonElement[] => [...(optionsGroup(root)?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+const paragraph = (n: number, topic: string) =>
+  `${n}. ${topic}: ${"a sentence long enough to wrap over several lines of any window, with its reason and its consequences, ".repeat(3)}and its end ${n}.`;
+
 describe("PromptWidget", () => {
+  test("paragraph-length options are outlined cards with their full text, native buttons that send only the number (issue #12)", () => {
+    const sent: string[] = [];
+    const options = [1, 2, 3].map((n) => ({ label: paragraph(n, `Answer ${n}`), sends: String(n) }));
+    expect(options.every((o) => o.label.length > 300)).toBe(true);
+    const root = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt, options), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const cards = cardsOf(root);
+    expect(cards.map((c) => c.textContent?.trim())).toEqual(options.map((o) => o.label));
+    for (const card of cards) {
+      expect(card.tagName).toBe("BUTTON");
+      expect(card.type).toBe("button");
+      expect(card.classList.contains("outlined")).toBe(true);
+      expect(card.classList.contains("filled") || card.classList.contains("tonal")).toBe(false);
+    }
+    cards[1].click();
+    expect(sent).toEqual(["2"]);
+    // The fixed choices stay buttons below: End interview the filled primary action, Quit outlined; no option among them.
+    const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
+    expect(fixed.map((b) => b.textContent?.trim())).toEqual(["End interview", "Quit"]);
+    expect(fixed[0].classList.contains("filled")).toBe(true);
+    expect(fixed[1].classList.contains("outlined")).toBe(true);
+  });
+
+  test("a relayed question's options are cards too, with Quit and the text field below (issue #12, Q4)", () => {
+    const sent: string[] = [];
+    const options = [{ label: "A", sends: "1" }, { label: "B", sends: "2" }, { label: paragraph(3, "C"), sends: "3" }];
+    const root = show(PromptWidget, { widget: widget(prompts.optionOrTextPrompt, options), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const cards = cardsOf(root);
+    expect(cards.map((c) => c.textContent?.trim())).toEqual(options.map((o) => o.label));
+    expect(cards.every((c) => c.classList.contains("outlined"))).toBe(true);
+    cards[2].click();
+    expect(sent).toEqual(["3"]);
+    const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
+    expect(fixed.map((b) => `${b.textContent?.trim()}:${b.classList.contains("outlined")}`)).toEqual(["Quit:true"]);
+    expect(root.querySelector("input[name=answer]")).not.toBe(null);
+  });
+
+  test("a prompt without options has no group of cards", () => {
+    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: () => undefined });
+    expect(optionsGroup(root)).toBe(null);
+  });
+
   test("a choice sends its catalog text on one click; typed text is sent with Enter", () => {
     const sent: [number, string][] = [];
     const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: (p: number, t: string) => void sent.push([p, t]) });
@@ -175,7 +222,7 @@ describe("PromptWidget", () => {
   test("an interview's numbered answer sends its number; a permission prompt has no text field", () => {
     const sent: string[] = [];
     const root = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt, [{ label: "1. PostgreSQL", sends: "1" }, { label: "2. SQLite", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
-    const two = [...root.querySelectorAll("button")].find((b) => b.textContent?.trim() === "2. SQLite") as HTMLButtonElement;
+    const two = [...cardsOf(root)].find((b) => b.textContent?.trim() === "2. SQLite") as HTMLButtonElement;
     two.click();
     expect(sent).toEqual(["2"]);
     expect(root.querySelector("textarea[name=answer]")).not.toBe(null);

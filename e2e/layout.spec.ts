@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
+import { LONG_ANSWERS } from "./longAnswers.ts";
 
 // Finding 7 of docs/gui-review.md, decision Q3: the layout adapts. At M3's expanded width (840 px and wider) the rail
 // and both panels are side by side; below it, one panel at a time, chosen by its title, with a badge for the other's
@@ -191,3 +192,41 @@ test("(L8) a new run's first prompt selects 'You and Interloq' although the old 
   await expect(page.locator("[name=answer]")).toBeVisible();
   await other.close();
 });
+
+// Issue #12: an interview's numbered answers that run to a paragraph each are cards that hold their full text, in a
+// narrow and in a wide window; a card is a native button, chosen by keyboard, and the transcript keeps the full line.
+const LONG_CHOICES_URL = "http://127.0.0.1:8110/";
+for (const [width, height] of [
+  [390, 844],
+  [1280, 800],
+] as const) {
+  test(`(L9) paragraph-length answers at ${width} × ${height}: each is a card that holds its text, chosen by keyboard`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await startTask(page, `Show the time at ${width}`, LONG_CHOICES_URL);
+    await expect(page.getByRole("button", { name: "End interview" })).toBeVisible();
+    const group = page.getByRole("group", { name: "Proposed answers" });
+    await expect(group.getByRole("button")).toHaveCount(3);
+    const cards = group.getByRole("button");
+    const prompt = await box(page.getByRole("group", { name: "Your answer" }));
+    for (let i = 0; i < 3; i++) {
+      const card = cards.nth(i);
+      await expect(card).toHaveText(LONG_ANSWERS[i]);
+      const fits = await card.evaluate((el) => ({ height: el.scrollHeight <= el.clientHeight, width: el.scrollWidth <= el.clientWidth }));
+      expect(fits, `answer ${i + 1} fits its card`).toEqual({ height: true, width: true });
+      const b = await box(card);
+      expect(b.x, `answer ${i + 1} starts inside the prompt`).toBeGreaterThanOrEqual(prompt.x);
+      expect(b.x + b.width, `answer ${i + 1} ends inside the prompt`).toBeLessThanOrEqual(prompt.x + prompt.width + 0.5);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page overflows horizontally").toBe(true);
+    // The cards scroll within the prompt, so the message field, Send and End interview stay in the window.
+    for (const name of ["[name=answer]", "button[name=send]", "button:has-text('End interview')"]) {
+      const b = await box(page.locator(name));
+      expect(b.y + b.height, `${name} is within the window`).toBeLessThanOrEqual(height);
+    }
+    await cards.nth(1).focus();
+    await page.keyboard.press("Enter");
+    await expect(panel(page, LEFT).getByText("Anything else?")).toBeVisible();
+    await expect(panel(page, LEFT).getByText(LONG_ANSWERS[1], { exact: true })).toBeVisible();
+    await page.locator("button[name=stop]").click();
+  });
+}

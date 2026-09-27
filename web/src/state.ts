@@ -18,7 +18,9 @@ export type Message = Readonly<{ key: string; author: Author; heading: string | 
 export type RoundGroup = Readonly<{ subject: SubjectId; heading: string; rounds: readonly Readonly<{ round: number; limit: number }>[]; done: boolean }>;
 export type TimelineEntry = Readonly<{ phase: Phase; label: string; groups: readonly RoundGroup[]; state: "active" | "done" | "stopped" }>;
 /** The prompt the run waits on, with every choice it offers (the catalog's and those of the preceding event). */
-export type Widget = Readonly<{ asked: Asked; choices: readonly Choice[] }>;
+/** A pending prompt: the agent's options (an interview turn's numbered answers or a relayed question's options,
+ * rendered as cards) apart from the catalog's fixed choices (buttons), issue #12. */
+export type Widget = Readonly<{ asked: Asked; options: readonly Choice[]; choices: readonly Choice[] }>;
 
 export type RunView = Readonly<{
   id: number;
@@ -184,10 +186,10 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
         return event.text.trim() === "" ? r : withLeft(r, message(r, time, "program", event.text, "text"));
       case "Asked": {
         const extra = event.extra === "questionOptions" ? r.questionOptions : event.extra === "numberedAnswers" ? r.interviewChoices : [];
-        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, choices: [...extra, ...event.choices] } };
+        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, options: extra, choices: event.choices } };
       }
       case "Answered": {
-        const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? r.pending.choices.find((c) => c.sends === event.text) : undefined;
+        const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? [...r.pending.options, ...r.pending.choices].find((c) => c.sends === event.text) : undefined;
         return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "text")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt] };
       }
       case "Notified":

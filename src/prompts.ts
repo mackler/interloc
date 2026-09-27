@@ -332,6 +332,8 @@ export function interviewHelp(heading: string, ui: "terminal" | "page"): string 
 export function answerHint(free: "line" | "message"): string {
   return free === "line" ? "Enter sends." : "Enter sends; Shift+Enter starts a new line.";
 }
+/** The accessible name of the agent's options, the cards above the fixed choices (issue #12). */
+export const PROPOSED_ANSWERS_LABEL = "Proposed answers";
 /** Another tab answered the prompt this tab had an unsent draft for (finding 5). */
 export function draftWithdrawnNotice(text: string): string {
   return `This question was answered in another tab; your unsent text was discarded: «${text}»`;

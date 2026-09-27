@@ -3,7 +3,8 @@
 // of every run: "converge" (one accepted issue, then convergence), "decision" (a question from Claude Code),
 // "stop" (a planning call that waits until it is interrupted), and those of finding 10 of docs/gui-review.md:
 // "interview", "workCorrection", "tabs", "drop", "long"; and "questionReview", the question phase whose review raises
-// an issue, so that Claude Code's response carries the amended list (defect A of docs/page-question-phase-defects.md).
+// an issue, so that Claude Code's response carries the amended list (defect A of docs/page-question-phase-defects.md);
+// "longChoices", an interview turn whose numbered answers are paragraphs (issue #12).
 // PORT is the port.
 
 import { Effect } from "effect";
@@ -15,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import { platformLayer } from "../src/platform.ts";
 import { makeRunManager } from "../src/runManager.ts";
 import { makeWebServer } from "../src/webServer.ts";
+import { LONG_ANSWERS } from "./longAnswers.ts";
 import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from "../test/helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
@@ -41,6 +43,19 @@ export const SCENARIOS: Record<string, TestOptions> = {
       { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "") },
       { output: turn("Anything else?", false, "") },
       { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.") },
+      { output: noQuestions, plan: "1. [ ] the step\n" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // Issue #12: the interview's numbered answers are paragraphs.
+  longChoices: {
+    config: { questionPhase: true },
+    steps: [
+      { output: { questions: [{ id: "Q1", question: "How should a message show its time?", reason: "r", proposed_answers: [{ label: "Absolute", description: "a" }, { label: "Relative", description: "r" }], default_answer: "Absolute" }] } },
+      { output: turn(`How should a message show its time?\n${LONG_ANSWERS.join("\n")}`, false, "") },
+      { output: turn("Anything else?", false, "") },
+      { output: turn("That is all I need.", true, "# Requirements\n\nRelative time.") },
       { output: noQuestions, plan: "1. [ ] the step\n" },
     ],
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],

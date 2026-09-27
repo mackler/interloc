@@ -12,7 +12,7 @@ as CLAUDE.md's section "User interface" requires. "Changed" names what this revi
 | 3. User control and freedom | Stop task at any time (like Ctrl+C); Quit at every prompt, as in the terminal; the chat does not scroll away from a user who has scrolled up (a "new messages" chip instead); New task after the end | — |
 | 4. Consistency and standards | Every button sends exactly the text the terminal would receive; one top app bar; M3 components and colour roles throughout | — |
 | 5. Error prevention | Start is disabled until the directory and the task are filled and no run is active; the path is checked by the server before a run starts (a worktree's top-level directory); an unsent draft belongs to its prompt, and an answer from another tab withdraws it with a notice that quotes it, instead of leaving it under the next prompt; Enter while an input method is composing does not send; a failure to remember the directory never blocks Start; Stop is outlined, labelled "Stop task", placed in the app bar away from the prompt, and disabled without a run (no confirmation dialog, which behaviour 1 excludes) | — |
-| 6. Recognition rather than recall | The directory browser; the last project path remembered; the choices of a prompt as buttons, including the interview's numbered answers and the options of a relayed question | — |
+| 6. Recognition rather than recall | The directory browser; the last project path remembered; the fixed choices of a prompt as buttons; the interview's numbered answers and the options of a relayed question as cards that show the whole option (issue #12) | — |
 | 7. Flexibility and efficiency of use | Buttons for the fixed choices and typing where free text is meaningful; Enter sends (Shift+Enter for a new line in a message), and a visible Send button does the same for touch and discovery | Findings 5 and 6 of `docs/gui-review.md`: a draft stayed attached to the next prompt after another tab answered, and Enter answered while an input method was composing. Both are fixed and tested (the draft over a live answer and over a replay; composition on both fields) |
 | 8. Aesthetic and minimalist design | Only the newest run is shown; the agents' exchange is in its own panel; blank terminal lines and the interview's duplicated lines are not shown | Found in the end-to-end check (stage 5): an agent's message repeated its author as a "### Codex" heading, a review without issues showed only that heading, and the timeline repeated "Planning phase 1" under "Planning 1". The heading is dropped, an empty review reads "No issue: the review has converged.", and a phase names its review loops only when it has more than one |
 | 9. Help users recognize, diagnose, and recover from errors | The server's refusal (a missing path, not a git repository, a run in progress) is the field's error text; halts and interruptions appear as the program's messages with the terminal's text, naming where the state is kept; answers made for an ended run are reported as not sent | — |
@@ -20,7 +20,7 @@ as CLAUDE.md's section "User interface" requires. "Changed" names what this revi
 
 ## Material Design 3
 
-- **Components** (m3-svelte 7.2.1): `Button` (filled for the primary action, tonal for other choices, outlined for Stop, Quit and Browse, text for Cancel), `TextFieldOutlined`, `TextFieldOutlinedMultiline`, `Dialog` (the directory browser), `Chip` (assist, elevated: "new messages"), `LinearProgressEstimate`.
+- **Components** (m3-svelte 7.2.1): `Button` (filled for the primary action, tonal for other choices, outlined for Stop, Quit and Browse, text for Cancel), `Card` (outlined, one per option an agent proposes; issue #12), `TextFieldOutlined`, `TextFieldOutlinedMultiline`, `Dialog` (the directory browser), `Chip` (assist, elevated: "new messages"), `LinearProgressEstimate`.
 - **Colour roles** from the tonal-spot 2025 scheme of m3-svelte's live theme (`--m3v-source`), light and dark through `color-scheme` / `light-dark()`: surface and surface containers for the panels, secondary container for the active phase, primary container for the user's messages, tertiary and secondary containers for Codex and Claude Code, error container for the reconnecting chip and the notices.
 - **Typography**: the M3 type scale classes (`m3-font-title-large` for the app bar, `title-small` for panel headings, `body-*` for messages, `label-*` for authors and the chip).
 - **Elevation**: the app bar at level 2; the dialog at m3-svelte's dialog elevation; the "new messages" chip elevated.
@@ -55,3 +55,25 @@ layout now follows M3's window size classes (`web/src/layout.ts`, `App.svelte`, 
 `e2e/layout.spec.ts` checks, at 390 × 844 and at 640 × 400, that nothing overflows sideways, that the shown panel is
 at least 300 px wide (and 400 or 200 px high) and the answer field at least 280 px wide, the panel switch, the badge
 and the selection by a prompt; and at 1280 × 800 that the rail and both panels stand side by side.
+
+## The agents' options as cards (issue #12, 27 Sep 2026)
+
+An interview turn's numbered answers and a relayed question's options were m3-svelte `Button`s in the row of the
+fixed choices, the first filled. An option can run to a paragraph, and a button's fixed 40 dp height cannot hold one:
+the label spilled out of every button, over its neighbours in a wide window and below it in a narrow one. The
+developer's decisions of the interview:
+
+- **Cards with the full text** (Q1): each option is an outlined M3 `Card` rendered as a native button, one per row in
+  a group named "Proposed answers", above the fixed choices. The user reads the whole option where it is chosen
+  [error prevention; recognition rather than recall]; the repetition of the text of the message above is accepted for
+  that. The card sends only the number, as the button did, and is operated by keyboard like any button.
+- **The transcript keeps the full line** (Q2): the user's message is the chosen option's whole line.
+- **No implied default** (Q3): every option has the same variant, because the agent's first option is not
+  necessarily its default [consistency and standards]; the fixed prompts keep their filled primary action.
+- **Both kinds of agent option** (Q4): the interview's and a relayed question's.
+
+Several paragraphs scroll within their group (at most a quarter of the window's height), so that the answer field,
+Send and the fixed choices stay in a phone's window. `e2e/layout.spec.ts` (L9) checks, at 390 × 844 and at
+1280 × 800, that each of three paragraph options fits its card, that nothing overflows sideways, that the field,
+Send and End interview are in the window, and that a card chosen with the keyboard sends its number and leaves its
+full line in the transcript. The terminal is unchanged: it never rendered these choices.
