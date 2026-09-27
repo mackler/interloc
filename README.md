@@ -43,7 +43,8 @@ your project; that name is unchanged from before the program was called Interloq
 - **A logged-in Codex** whose credentials live in the external Docker volume
   `iou-notes-codex_codex-config`, which is mounted as `~/.codex` in the container.
 - **Node.js 22.18 or later and git** inside the container. The image provides them.
-- **Node.js 22.18 or later, npm and git on the host.** The installed copy (see below) is mounted
+- **Node.js 22.18 or later, npm and git on the host.** `npm ci` refuses an older Node
+  (`engine-strict`). The installed copy (see below) is mounted
   read-only into containers, so its `npm ci` and `npm run build` have to run on the host.
 - **Network access** for both agents.
 - **Only if you change the program:** Chromium for the end-to-end tests. In the development

@@ -38,3 +38,23 @@ for (const name of PINNED_DEV) {
     assert.equal(readJson(`node_modules/${name}/package.json`)?.version, pinned, `installed ${name} differs from the pinned version`);
   });
 }
+
+// Q1 and Q2 of the release pipeline: CI reads the container's exact Node from .node-version, and npm refuses an older Node.
+const readText = (relative: string): string | undefined => {
+  const file = new URL(relative, root);
+  return fs.existsSync(file) ? fs.readFileSync(file, "utf8") : undefined;
+};
+
+test(".node-version holds the exact Node version this machine runs", () => {
+  const text = readText(".node-version") ?? "(absent)";
+  assert.match(text, /^\d+\.\d+\.\d+\n?$/, ".node-version does not hold one exact version");
+  assert.equal(text.trim(), process.versions.node, ".node-version differs from the running Node; update it when the image's Node changes");
+});
+
+test("package.json requires Node >=22.18 through engines", () => {
+  assert.equal(readJson("package.json")?.engines?.node, ">=22.18", "package.json has no engines.node of >=22.18");
+});
+
+test(".npmrc makes npm refuse a Node outside engines", () => {
+  assert.match(readText(".npmrc") ?? "(absent)", /^engine-strict=true$/m, ".npmrc does not set engine-strict=true");
+});

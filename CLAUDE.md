@@ -21,6 +21,8 @@ is one Effect program over five services, and the edges (files, git, terminal, S
 
 The program itself has no build step: Node.js (22.18 or later) runs the `.ts` files directly by removing the types. Only the page is built (`npm run build`).
 
+The minimum, Node.js 22.18, is enforced: `package.json` declares `engines` `>=22.18` and `.npmrc` sets `engine-strict=true`, so `npm ci` refuses an older Node. `.node-version` holds the exact Node version of the container image (26.10.0 on 27 Sep 2026), which the CI workflow uses; update it whenever the image's Node changes — `test/deps.test.ts` fails until it matches the running Node.
+
 ## TypeScript constraints (required by direct execution)
 
 - Erasable syntax only: no `enum`, no parameter properties, no namespaces with runtime code (`erasableSyntaxOnly` enforces this). Effect's tagged error classes (`class X extends Data.TaggedError("X")<{…}> {}`), service classes (`Context.Service<X, Shape>()("key")`) and generator functions (`Effect.gen`) are erasable and are used.
