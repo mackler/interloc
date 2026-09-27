@@ -47,9 +47,13 @@ your project; that name is unchanged from before the program was called Interloq
   (`engine-strict`). The installed copy (see below) is mounted
   read-only into containers, so its `npm ci` and `npm run build` have to run on the host.
 - **Network access** for both agents.
+- **Read access to GitHub from the host** (`git@github.com:mackler/interloq.git`): the installed copy
+  fetches its updates from there (see "Deploying an update").
 - **Only if you change the program:** Chromium for the end-to-end tests. In the development
   container, run `npx playwright install chromium` as the user and
-  `npx playwright install-deps chromium` as root.
+  `npx playwright install-deps chromium` as root. `npm test` also needs bats and bashly in the
+  container: bashly is in the image; bats is not yet, so a fresh container needs
+  `apt-get install -y bats` as root.
 
 ## Your two copies
 
@@ -77,15 +81,22 @@ credentials, and publishes port 8090 for the web page.
 
 ## First-time setup
 
-1. Clone the repository twice: once to `~/work/interloq` (the installed copy) and once to
-   `~/work/interloq-dev` (the development copy).
+1. Clone the repository twice from GitHub: the installed copy on the `release` branch, which only
+   tested commits reach, and the development copy on `main`:
+
+   ```sh
+   git clone --branch release git@github.com:mackler/interloq.git ~/work/interloq
+   git clone git@github.com:mackler/interloq.git ~/work/interloq-dev
+   ```
+
 2. On the host, in the installed copy, install the dependencies and build the page:
 
    ```sh
    cd ~/work/interloq
-   npm ci
-   npm run build
+   bin/ilcli upgrade
    ```
+
+   It runs `npm ci` and `npm run build` (and fetches first; on a fresh clone there is nothing new).
 
 3. In the development copy, install its own dependencies and turn on the type-check hook for
    commits:
@@ -152,10 +163,13 @@ kept and the usage summary is printed.
 
 ## Deploying an update (after making a change)
 
-A change reaches real runs only once it is in the installed copy. Every time you make a change, do
-the following:
+**The installed copy can only ever install a commit whose tests passed.** It follows the branch
+`release` on GitHub, and only the checks on GitHub move that branch: after every push to `main` they
+run the whole `npm test`, and only if it passes do they fast-forward `release` to that commit. So a
+change reaches real runs by this route, and by no other:
 
-1. **Test and commit in the development copy.**
+1. **Commit in the development copy.** Running `npm test` locally first is still worthwhile; it is
+   the same suite that GitHub runs.
 
    ```sh
    cd ~/work/interloq-dev   # or /workspace inside the development container
@@ -163,39 +177,71 @@ the following:
    git commit ...
    ```
 
-   The pre-commit hook runs `npm run check` and refuses a commit that has a type error. The
-   end-to-end tests need the Chromium setup from "What you need".
-2. **Pull into the installed copy, on the host.**
+   The pre-commit hook runs `npm run check` and refuses a commit that has a type error.
+2. **Publish `main`, on the host, in the development copy.**
+
+   ```sh
+   bin/ilcli release
+   ```
+
+   It pushes `main` to GitHub. It refuses, and pushes nothing, if the working tree has uncommitted
+   changes, if you are not on `main`, or if `main` is behind `origin/main`.
+3. **The checks run on GitHub.** Follow them in the repository's Actions tab (workflow `ci`). If
+   `npm test` passes, the `release` job moves `release` to your commit; if it fails, `release` stays
+   where it was, and the installed copy cannot pick up the change.
+4. **Upgrade the installed copy, on the host.**
 
    ```sh
    cd ~/work/interloq
-   git pull ~/work/interloq-dev main
+   bin/ilcli upgrade
    ```
 
-3. **Check whether the dependencies changed.**
-
-   ```sh
-   git diff --name-only ORIG_HEAD HEAD | grep package-lock.json
-   ```
-
-4. **Reinstall the dependencies** if step 3 printed `package-lock.json`:
-
-   ```sh
-   npm ci
-   ```
-
-   If you're unsure, run it anyway; it does no harm.
-5. **Rebuild the page, every time.** The page also contains code from outside `web/`, so rebuild it
-   after every pull:
-
-   ```sh
-   npm run build
-   ```
-6. **Restart the web server.** It loads its code only at startup. Press Ctrl+C in its terminal, then
+   It fetches `release` from GitHub, fast-forwards to it, and runs `npm ci` and `npm run build` every
+   time (the page imports code from `src/`), then prints the commit it landed on. It refuses, and
+   changes nothing, if the copy has local modifications, is not on `release`, or has commits that
+   `origin/release` does not have. If `npm ci` or the build fails, run it again: it repeats both.
+5. **Restart the web server.** It loads its code only at startup. Press Ctrl+C in its terminal, then
    start it again with `node /opt/interloq/src/web.ts`.
-7. **Reload every open browser tab.** A tab reconnects by itself, but it keeps running the old page
+6. **Reload every open browser tab.** A tab reconnects by itself, but it keeps running the old page
    until you reload it.
-8. **Terminal runs** pick up the change the next time they start. No further step is needed.
+7. **Terminal runs** pick up the change the next time they start. No further step is needed.
+
+### One-time setup on GitHub
+
+The `release` job pushes with a deploy key, and a ruleset lets only that key update `release`, so
+neither you nor anyone else can move it by hand to an untested commit.
+
+1. Generate a key pair, without a passphrase, somewhere temporary:
+
+   ```sh
+   ssh-keygen -t ed25519 -N '' -C interloq-release -f release_key
+   ```
+
+2. In the repository's Settings → Deploy keys, add `release_key.pub` with **Allow write access**.
+3. In Settings → Secrets and variables → Actions, add a repository secret `RELEASE_DEPLOY_KEY`
+   holding the contents of `release_key`. Then delete both files.
+4. In Settings → Rules → Rulesets, create a branch ruleset targeting `release`: enable
+   **Restrict updates**, **Restrict deletions** and **Block force pushes**, and add **Deploy keys** as
+   the only bypass.
+5. Check it: a hand push to `release` (for example `git push origin main:release`) must be rejected.
+
+The key is a credential: keep it only in the secret, and rotate it (a new key, the secret replaced,
+the old deploy key deleted) if it may have leaked.
+
+### Switching the installed copy to `release` (once)
+
+An installed copy set up before this route pulled from the development copy. Point it at GitHub and
+at `release` once:
+
+```sh
+cd ~/work/interloq
+git remote set-url origin git@github.com:mackler/interloq.git
+git fetch origin
+git switch --track origin/release
+bin/ilcli upgrade
+```
+
+`git switch` refuses if the copy has local changes; the host needs read access to GitHub.
 
 ## Settings
 
