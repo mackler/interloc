@@ -486,13 +486,37 @@ export function protocolErrorNotice(reason: string): string {
 /** The page has stopped reconnecting after three frames in a row it could not read (decision Q5). */
 export const CONNECTION_FAILED_NOTICE =
   "The page has stopped reconnecting: it could not read the server's messages three times in a row. Nothing you do here is sent any more, and your typed text is kept. Reload the page once the server has been fixed.";
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
+/**
+ * A cycle of a review loop in the progress rail (issue #14, Q1): the issues its review raised, and the counted ones
+ * when they differ; the cycle alone until its review arrives. No limit: the user may grant more cycles.
+ */
+export function cycleLine(n: number, raised: number | null, counted: number | null): string {
+  if (raised === null) return `cycle ${n}`;
+  return `cycle ${n}: ${count(raised, "issue", "issues")}${counted !== null && counted !== raised ? ` (${counted} counted)` : ""}`;
+}
+/**
+ * The one line of a finished review loop (issue #14, Q2 and G-R1-1): the corrections of its cycles, resolved when the
+ * loop converged or the user proceeded, due when it left for a revision (even 0, when a decision of the user ended it).
+ */
+export function loopSummary(cycles: number, corrections: number, result: "converged" | "proceed" | "revise"): string {
+  const n = count(cycles, "cycle", "cycles");
+  switch (result) {
+    case "converged":
+      return `${n} resolved ${count(corrections, "issue", "issues")}`;
+    case "proceed":
+      return `${n} resolved ${count(corrections, "issue", "issues")}, proceeded without convergence`;
+    case "revise":
+      return `${n}: ${count(corrections, "correction", "corrections")} due`;
+  }
+}
 /** The progress rail's heading and its text before any phase (issue #14, Q4: unchanged). */
 export const PROGRESS_HEADING = "Progress";
 export const NO_PHASE_YET = "No phase has begun.";
-/** The one-line progress of a compact window: the current phase and its latest round, or none. */
-export function progressLine(label: string | null, round: Readonly<{ round: number; limit: number }> | null): string {
+/** The one-line progress of a compact window: the current phase or step, and its detail (the latest cycle, a count), or none. */
+export function progressLine(label: string | null, detail: string | null): string {
   if (label === null) return "Progress: no phase has begun";
-  return `Progress: ${label}${round === null ? "" : `, round ${round.round} of ${round.limit}`}`;
+  return `Progress: ${label}${detail === null ? "" : `, ${detail}`}`;
 }
 /** The count of a hidden panel's new messages on its button. */
 export function unseenBadge(n: number): string {

@@ -1,8 +1,9 @@
 <script lang="ts">
   // The progress of the run (decision Q3) [visibility of system status]: the phases in the order they occurred,
-  // each done, active or stopped, the rounds of each review loop nested, and a progress indicator while an agent works.
+  // each done, active or stopped, the cycles of each review loop nested (one line each while the loop runs, one line
+  // for the whole loop when it has ended; issue #14), and a progress indicator while an agent works.
   import { LinearProgressEstimate } from "m3-svelte";
-  import { NO_PHASE_YET, PROGRESS_HEADING } from "../../../src/prompts.ts";
+  import { cycleLine, loopSummary, NO_PHASE_YET, PROGRESS_HEADING } from "../../../src/prompts.ts";
   import type { TimelineEntry } from "../state.ts";
 
   type Props = { timeline: readonly TimelineEntry[]; busy: boolean };
@@ -25,7 +26,11 @@
           <div class="group {group.done ? 'done' : ''}">
             {#if entry.groups.length > 1}<span class="m3-font-label-medium">{group.heading}</span>{/if}
             <ul>
-              {#each group.rounds as r (r.round)}<li class="m3-font-body-small">round {r.round} of {r.limit}</li>{/each}
+              {#if group.result === null}
+                {#each group.rounds as r (r.round)}<li class="m3-font-body-small" data-cycle>{cycleLine(r.round, r.raised, r.counted)}</li>{/each}
+              {:else}
+                <li class="m3-font-body-small" data-summary>{loopSummary(group.rounds.length, group.corrections, group.result)}</li>
+              {/if}
             </ul>
           </div>
         {/each}

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendRound, correctionsDue } from "../src/issueLog.ts";
+import { appendRound, correctionCount, correctionsDue } from "../src/issueLog.ts";
 import type { IssueId, ValidatedRound } from "../src/round.ts";
 
 // Plan step 2.4 (P1-R1-1 of this run, rounds 1 and 2): a work review leaves for a planning phase when the round has a
@@ -35,4 +35,18 @@ test("correctionsDue: a self-correction superseded by the round's disposition of
   // In agreement with the log appendRound writes: the disposition's entry is the current one.
   const log = appendRound([], overlapping);
   assert.deepEqual(log.filter((e) => e.superseded !== true).map((e) => [e.id, e.action]), [["X", "rejected"]]);
+});
+
+// Issue #14 (Q2): the finished loop's line counts the corrections of its cycles, from the response the page receives.
+test("correctionCount: accepted and partially accepted dispositions and effective self-corrections outside the review", () => {
+  const response = (actions: string[], self: [string, "accepted" | "rejected" | "plan_error"][] = []) => ({
+    dispositions: actions.map((action, i) => ({ id: `R${i}`, action: action as "accepted", rationale: "r", duplicate_of: "", reverses: "" })),
+    self_corrections: self.map(([i, new_action]) => ({ id: i, new_action, explanation: "x" })),
+  });
+  const ids = ["R0", "R1", "R2", "R3", "R4"];
+  assert.equal(correctionCount([], response([])), 0);
+  assert.equal(correctionCount(ids, response(["accepted", "partially_accepted", "rejected", "no_change_needed", "clarification_requested"])), 2);
+  assert.equal(correctionCount(ids, response([], [["", "plan_error"], ["P1-R1-2", "accepted"]])), 2, "effective self-corrections outside the review count");
+  assert.equal(correctionCount(ids, response(["rejected"], [["R0", "accepted"]])), 0, "a self-correction of an issue of the same review is superseded");
+  assert.equal(correctionCount(ids, response([], [["P1-R1-2", "rejected"]])), 0, "a rejecting self-correction is not a correction");
 });

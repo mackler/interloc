@@ -107,3 +107,15 @@ export function correctionsDue(round: ValidatedRound): boolean {
   const reviewed = new Set<string>(round.review.issues.map((i) => i.id));
   return round.selfCorrections.some((sc) => !reviewed.has(sc.id) && (sc.newAction === "accepted" || sc.newAction === "plan_error"));
 }
+
+/**
+ * The corrections of one response as the page counts them (issue #14, Q2): the dispositions accepted or partially
+ * accepted, and the self-corrections accepted or plan_error whose id is not an issue of the same review (such a
+ * self-correction is superseded by the issue's disposition, as in correctionsDue).
+ */
+export function correctionCount(reviewIds: readonly string[], response: Readonly<{ dispositions: readonly Readonly<{ action: string }>[]; self_corrections: readonly Readonly<{ id: string; new_action: string }>[] }>): number {
+  const reviewed = new Set(reviewIds);
+  const accepted = response.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").length;
+  const effective = response.self_corrections.filter((sc) => !reviewed.has(sc.id) && (sc.new_action === "accepted" || sc.new_action === "plan_error")).length;
+  return accepted + effective;
+}

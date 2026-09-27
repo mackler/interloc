@@ -4,7 +4,7 @@ import * as prompts from "../../src/prompts.ts";
 import { decodeServer, type RunEvent, type ServerMessage, type Stamped } from "../../src/protocol.ts";
 import type { UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { type Band, bandsOf, dismissUnsent, initialState, keepUnsent, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
+import { type Band, bandsOf, dismissUnsent, initialState, keepUnsent, progressOf, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
 const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
@@ -224,6 +224,61 @@ describe("activity and timeline", () => {
   });
 });
 
+// Issue #14 (Q1, Q2, G-R1-1): a review's counts and a response's corrections reach the timeline, and the loop's result.
+describe("the cycles of a review loop in the timeline", () => {
+  const plan = { plan: 1 };
+  const issueOf = (id: string, severity: "major" | "minor" = "major") => ({ id, severity, location: "l", problem: "p", evidence: "e" });
+  const disposition = (id: string, action: "accepted" | "partially_accepted" | "rejected" | "no_change_needed" | "clarification_requested") => ({ id, action, rationale: "r", duplicate_of: "", reverses: "" });
+  const events: RunEvent[] = [
+    started,
+    notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }),
+    notified({ _tag: "RoundBegan", subject: plan, round: 1, limit: 5 }),
+    notified({ _tag: "ReviewReceived", subject: plan, round: 1, review: { issues: [issueOf("A"), issueOf("B"), issueOf("C", "minor")] }, counted: 2 }),
+    notified({
+      _tag: "ResponseReceived",
+      subject: plan,
+      round: 1,
+      response: { dispositions: [disposition("A", "accepted"), disposition("B", "partially_accepted"), disposition("C", "rejected")], self_corrections: [{ id: "", new_action: "plan_error", explanation: "x" }, { id: "C", new_action: "accepted", explanation: "x" }], reviewer_feedback: "", questions_for_user: [] },
+      resultText: "",
+    }),
+    notified({ _tag: "RoundBegan", subject: plan, round: 2, limit: 5 }),
+  ];
+  const groupOf = (s: ViewState) => s.run?.timeline[0].groups[0];
+
+  test("a cycle carries the issues its review raised and the counted ones; a cycle without its review has none yet", () => {
+    const s = fold(live(events));
+    expect(groupOf(s)?.rounds.map((r) => [r.round, r.raised, r.counted])).toEqual([[1, 3, 2], [2, null, null]]);
+    expect(groupOf(s)?.corrections).toBe(3);
+    expect(groupOf(s)?.result).toBe(null);
+    expect(replayed(events).run?.timeline).toEqual(s.run?.timeline);
+  });
+
+  test("LoopFinished records the loop's result; the corrections of every cycle are summed", () => {
+    const finished = [...events, notified({ _tag: "ReviewReceived", subject: plan, round: 2, review: { issues: [] }, counted: 0 }), notified({ _tag: "LoopFinished", subject: plan, result: "converged" })];
+    const s = fold(live(finished));
+    expect(groupOf(s)?.rounds.map((r) => [r.round, r.raised, r.counted])).toEqual([[1, 3, 2], [2, 0, 0]]);
+    expect([groupOf(s)?.result, groupOf(s)?.done, groupOf(s)?.corrections]).toEqual(["converged", true, 3]);
+    expect(replayed(finished).run?.timeline).toEqual(s.run?.timeline);
+  });
+
+  test("a work review that leaves for a revision keeps its count of corrections due, even 0", () => {
+    const work = { work: 1 };
+    const s = fold(live([started, notified({ _tag: "PhaseBegan", phase: { kind: "work", n: 1 } }), notified({ _tag: "RoundBegan", subject: work, round: 1, limit: 5 }), notified({ _tag: "ReviewReceived", subject: work, round: 1, review: { issues: [issueOf("W1-R1-1")] }, counted: 1 }), notified({ _tag: "LoopFinished", subject: work, result: "revise" })]));
+    expect([groupOf(s)?.result, groupOf(s)?.corrections]).toEqual(["revise", 0]);
+  });
+});
+
+// Issue #14: the compact window's progress line names the latest cycle, without a limit.
+describe("the compact progress line", () => {
+  test("the active phase and its latest cycle; none before any phase", () => {
+    const planning = fold(live([started, notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }), notified({ _tag: "RoundBegan", subject: { plan: 1 }, round: 1, limit: 5 }), notified({ _tag: "RoundBegan", subject: { plan: 1 }, round: 2, limit: 5 })]));
+    expect(progressOf(planning.run!)).toBe("Progress: Planning 1, cycle 2");
+    expect(progressOf(fold(live([started])).run!)).toBe("Progress: no phase has begun");
+    const execution = fold(live([started, notified({ _tag: "PhaseBegan", phase: { kind: "execution", n: 1 } })]));
+    expect(progressOf(execution.run!)).toBe("Progress: Implementation 1");
+  });
+});
+
 describe("runs, replay and gaps", () => {
   test("a seq that does not follow sets the reconnect flag; a new run's Started at seq 0 after Ended is not a gap", () => {
     const one = fold(live([started, { _tag: "Ended", code: 0 }]));
@@ -254,6 +309,8 @@ describe("runs, replay and gaps", () => {
     fc.constantFrom<UiEvent>(
       { _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } },
       { _tag: "RoundBegan", subject: { plan: 1 }, round: 1, limit: 5 },
+      { _tag: "ReviewReceived", subject: { plan: 1 }, round: 1, review: { issues: [{ id: "A", severity: "major", location: "l", problem: "p", evidence: "e" }] }, counted: 1 },
+      { _tag: "ResponseReceived", subject: { plan: 1 }, round: 1, response: { dispositions: [{ id: "A", action: "accepted", rationale: "r", duplicate_of: "", reverses: "" }], self_corrections: [], reviewer_feedback: "", questions_for_user: [] }, resultText: "" },
       { _tag: "LoopFinished", subject: { plan: 1 }, result: "converged" },
       { _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" },
       { _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null },

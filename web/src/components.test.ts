@@ -354,21 +354,35 @@ describe("PromptWidget", () => {
 });
 
 describe("TimelineRail", () => {
-  test("phases in order with their state, and the rounds grouped under each review", () => {
+  const cycle = (round: number, raised: number | null, counted: number | null = raised) => ({ round, raised, counted, reviewIds: [] });
+  test("phases in order with their state, and the cycles grouped under each review with their issues, no limit", () => {
     const root = show(TimelineRail, {
       busy: true,
       timeline: [
-        { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [{ round: 1, limit: 5 }], done: true }] },
-        { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "active", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [{ round: 1, limit: 5 }, { round: 2, limit: 5 }], done: false }] },
+        { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [cycle(1, 0)], corrections: 0, result: "converged", done: true }] },
+        { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "active", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 3, 1), cycle(3, null)], corrections: 2, result: null, done: false }] },
       ],
     });
     const entries = [...root.querySelectorAll("[data-state]")].map((e) => `${e.getAttribute("data-state")}:${e.querySelector("[data-label]")?.textContent?.trim()}`);
     expect(entries).toEqual(["done:Gather Requirements", "active:Planning 1"]);
-    expect(root.textContent).toMatch(/round 2 of 5/);
+    const lines = [...root.querySelectorAll("[data-cycle]")].map((e) => e.textContent?.trim());
+    expect(lines).toEqual(["cycle 1: 2 issues", "cycle 2: 3 issues (1 counted)", "cycle 3"]);
+    expect(root.textContent).not.toMatch(/ of \d|round/);
     // A phase with one review loop does not repeat its name as a sub-heading.
     expect(root.textContent).not.toMatch(/Planning phase 1/);
     expect(root.textContent).not.toMatch(/Question review/);
     expect(root.querySelector("[data-busy]")).not.toBe(null);
+  });
+
+  test("a finished loop collapses to its one line, for each way it can end", () => {
+    const finished = (result: "converged" | "proceed" | "revise", corrections: number) =>
+      show(TimelineRail, { busy: false, timeline: [{ phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections, result, done: true }] }] });
+    const summary = (root: HTMLElement) => [...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim());
+    const converged = finished("converged", 2);
+    expect(summary(converged)).toEqual(["2 cycles resolved 2 issues"]);
+    expect(converged.querySelectorAll("[data-cycle]").length).toBe(0);
+    expect(summary(finished("proceed", 1))).toEqual(["2 cycles resolved 1 issue, proceeded without convergence"]);
+    expect(summary(finished("revise", 0))).toEqual(["2 cycles: 0 corrections due"]);
   });
 
   test("the heading and the text before any phase (issue #14, Q4)", () => {

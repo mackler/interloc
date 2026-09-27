@@ -9,12 +9,12 @@
   // Interloq", selects it].
   import { Button, ConnectedButtons } from "m3-svelte";
   import { untrack } from "svelte";
-  import { CONNECTION_FAILED_NOTICE, notSentNotice, progressLine, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
+  import { CONNECTION_FAILED_NOTICE, notSentNotice, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
   import { EXPANDED_MIN_WIDTH, initialLayout, type Layout, observe, type Pane, select } from "../layout.ts";
   import type { ClientMessage } from "../../../src/protocol.ts";
   import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "../draft.ts";
   import { connect, type Connection } from "../socket.ts";
-  import { dismissUnsent, initialState, keepUnsent, notice, protocolError, reduce, type ViewState } from "../state.ts";
+  import { dismissUnsent, initialState, keepUnsent, notice, progressOf, protocolError, reduce, type ViewState } from "../state.ts";
   import ActivityLine from "./ActivityLine.svelte";
   import ChatPanel from "./ChatPanel.svelte";
   import DirectoryDialog from "./DirectoryDialog.svelte";
@@ -73,13 +73,6 @@
   /** Whether a column is shown: both at expanded width, the selected one below it. */
   const shown = (pane: Pane): boolean => !compact || layout.selected === pane;
   const TITLES: Record<Pane, string> = { left: "You and Interloq", right: "Claude and Codex" };
-  /** The one-line progress of a compact window: the current phase and its latest round (the text: src/prompts.ts). */
-  const progressOf = (r: NonNullable<ViewState["run"]>): string => {
-    const entry = [...r.timeline].reverse().find((e) => e.state === "active") ?? r.timeline[r.timeline.length - 1];
-    if (entry === undefined) return progressLine(null, null);
-    const rounds = entry.groups[entry.groups.length - 1]?.rounds ?? [];
-    return progressLine(entry.label, rounds[rounds.length - 1] ?? null);
-  };
 
   const run = $derived(view.run);
   const showForm = $derived(run === null || (run.ended !== null && formWanted));

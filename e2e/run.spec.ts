@@ -59,6 +59,10 @@ test("(1) a run from the form: the timeline shows its phases and the right panel
   await expect(right(page).getByText("The step names no file.")).toBeVisible();
   await expect(right(page).getByText(/accepted: rationale P1-R1-1/)).toBeVisible();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+  // Issue #14: a finished loop is one line with what its cycles resolved, and no limit is shown.
+  await expect(rail(page).getByText("2 cycles resolved 1 issue", { exact: true })).toBeVisible();
+  await expect(rail(page).getByText("1 cycle resolved 0 issues", { exact: true })).toBeVisible();
+  await expect(rail(page).getByText(/ of \d/)).toHaveCount(0);
   await expect(page.locator("button[name=new]")).toBeVisible();
   // Issue #2: in the right panel Claude speaks from the left and Codex from the right.
   const list = right(page).locator(".list");
@@ -97,6 +101,8 @@ test("(3) a reload during a run shows the same messages and the pending prompt",
 test("(4) one click on Stop interrupts the task, and the page offers a new one", async ({ page }) => {
   await startTask(page, "stop", "A task to stop");
   await expect(left(page).getByText(/cycle 1: Claude Code response/)).toBeVisible();
+  // Issue #14: while the loop runs, each cycle says what its review found.
+  await expect(rail(page).getByText("cycle 1: 1 issue", { exact: true })).toBeVisible();
   await page.locator("button[name=stop]").click();
   await expect(left(page).getByText(/INTERRUPTED by the user\. State is preserved in/)).toBeVisible();
   await expect(page.locator("button[name=stop]")).toBeDisabled();
@@ -145,6 +151,8 @@ test("(6) a work correction runs planning, execution and the work review a secon
   await startTask(page, "workCorrection", "Write the tool");
   await expect(left(page).getByText(/finished after 2 implementation phase/)).toBeVisible();
   for (const phase of ["Planning 1", "Implementation 1", "Work review 1", "Planning 2", "Implementation 2", "Work review 2"]) await expect(rail(page).getByText(phase, { exact: true })).toBeVisible();
+  // Issue #14 (G-R1-1): the work review that led to the second planning phase names its corrections due.
+  await expect(rail(page).getByText("1 cycle: 1 correction due", { exact: true })).toBeVisible();
   await expect(right(page).getByText("The step misses its test.")).toBeVisible();
   // Issue #15: every planning phase has the same tone, and so has every execution phase, apart from the other's.
   const tones = (kind: string) => left(page).locator(`.band-${kind}`).evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));

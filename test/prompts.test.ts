@@ -87,7 +87,8 @@ test("the page's hint, notices, progress line and badge", () => {
   assert.equal(prompts.notSentNotice("stop", "restarted"), "Stop was not sent: the server has been restarted since.");
   assert.equal(prompts.progressLine(null, null), "Progress: no phase has begun");
   assert.equal(prompts.progressLine("Planning 1", null), "Progress: Planning 1");
-  assert.equal(prompts.progressLine("Planning 1", { round: 2, limit: 5 }), "Progress: Planning 1, round 2 of 5");
+  assert.equal(prompts.progressLine("Planning 1", "cycle 2"), "Progress: Planning 1, cycle 2");
+  assert.equal(prompts.progressLine("Gather Requirements — Clarification", "3 of 7 answered"), "Progress: Gather Requirements — Clarification, 3 of 7 answered");
   assert.equal(prompts.unseenBadge(3), "· 3 new");
 });
 
@@ -135,4 +136,18 @@ test("the clarification's headings and help", () => {
   assert.equal(prompts.interviewHelp("Clarification", "page"), "Clarification. /done ends the clarification, /quit ends the run; Shift+Enter starts a new line.");
   assert.equal(prompts.interviewHelp("Clarification", "terminal"), '\nClarification. Commands: /done = end the clarification; /quit = end the run; """ on its own line starts and ends a message of several lines.');
   assert.equal(prompts.END_CLARIFICATION, "End clarification");
+});
+
+// Issue #14 (Q1, Q2, G-R1-1): a cycle's line and a finished loop's line; no limit anywhere.
+test("the cycle lines and the finished loop's line", () => {
+  assert.equal(prompts.cycleLine(2, null, null), "cycle 2");
+  assert.equal(prompts.cycleLine(2, 3, 3), "cycle 2: 3 issues");
+  assert.equal(prompts.cycleLine(1, 1, 1), "cycle 1: 1 issue");
+  assert.equal(prompts.cycleLine(3, 0, 0), "cycle 3: 0 issues");
+  assert.equal(prompts.cycleLine(2, 3, 1), "cycle 2: 3 issues (1 counted)");
+  assert.equal(prompts.loopSummary(2, 3, "converged"), "2 cycles resolved 3 issues");
+  assert.equal(prompts.loopSummary(1, 1, "converged"), "1 cycle resolved 1 issue");
+  assert.equal(prompts.loopSummary(5, 4, "proceed"), "5 cycles resolved 4 issues, proceeded without convergence");
+  assert.equal(prompts.loopSummary(1, 0, "revise"), "1 cycle: 0 corrections due");
+  assert.equal(prompts.loopSummary(2, 1, "revise"), "2 cycles: 1 correction due");
 });

@@ -3,9 +3,10 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
-import { cycleHeading, interviewHelp, pagePromptText, purposeLabel, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
+import { cycleHeading, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
-import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
+import { correctionCount } from "../../src/issueLog.ts";
+import { type LoopResult, type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
 
 export type Author = "program" | "user" | "codex" | "claude";
@@ -21,8 +22,16 @@ export type Message = Readonly<{ key: string; author: Author; heading: string | 
 export type Band = Readonly<{ key: string; kind: Phase["kind"]; name: string; began: string }>;
 /** Consecutive messages of one band, in order: how a panel renders its bands. */
 export type BandGroup = Readonly<{ band: Band | null; messages: readonly Message[] }>;
-/** The rounds of one review loop within a phase. */
-export type RoundGroup = Readonly<{ subject: SubjectId; heading: string; rounds: readonly Readonly<{ round: number; limit: number }>[]; done: boolean }>;
+/**
+ * One cycle of a review loop (issue #14): the issues its review raised and the counted ones, null until the review
+ * arrives; the ids of that review, against which a self-correction of the response is judged.
+ */
+export type Cycle = Readonly<{ round: number; raised: number | null; counted: number | null; reviewIds: readonly string[] }>;
+/**
+ * The rounds of one review loop within a phase: its cycles, the corrections of its responses (accepted and partially
+ * accepted dispositions, effective self-corrections), and how it ended (null while it runs; `done` with it).
+ */
+export type RoundGroup = Readonly<{ subject: SubjectId; heading: string; rounds: readonly Cycle[]; corrections: number; result: LoopResult | null; done: boolean }>;
 export type TimelineEntry = Readonly<{ phase: Phase; label: string; groups: readonly RoundGroup[]; state: "active" | "done" | "stopped" }>;
 /** The prompt the run waits on, with every choice it offers (the catalog's and those of the preceding event). */
 /** A pending prompt: the agent's options (an interview turn's numbered answers or a relayed question's options,
@@ -157,17 +166,23 @@ export const bandsOf = (messages: readonly Message[]): readonly BandGroup[] => {
 /** The half of a round as conversation.md has it, without its "### Codex" / "### Claude Code" heading, which the message's author shows. */
 const withoutAuthorHeading = (markdown: string): string => markdown.replace(/^### [^\n]*\n+/, "").trim();
 
+const freshCycle = (round: number): Cycle => ({ round, raised: null, counted: null, reviewIds: [] });
 /** The timeline after a round began: the round in its subject's open group of the current entry. */
-const roundBegan = (timeline: readonly TimelineEntry[], subject: SubjectId, round: number, limit: number): readonly TimelineEntry[] => {
+const roundBegan = (timeline: readonly TimelineEntry[], subject: SubjectId, round: number): readonly TimelineEntry[] => {
   const last = timeline[timeline.length - 1];
   if (last === undefined) return timeline;
   const open = last.groups.findIndex((g) => sameSubject(g.subject, subject) && !g.done);
   const groups =
     open < 0
-      ? [...last.groups, { subject, heading: subjectHeading(subject), rounds: [{ round, limit }], done: false }]
-      : last.groups.map((g, i) => (i === open ? { ...g, rounds: [...g.rounds, { round, limit }] } : g));
+      ? [...last.groups, { subject, heading: subjectHeading(subject), rounds: [freshCycle(round)], corrections: 0, result: null, done: false }]
+      : last.groups.map((g, i) => (i === open ? { ...g, rounds: [...g.rounds, freshCycle(round)] } : g));
   return [...timeline.slice(0, -1), { ...last, groups }];
 };
+/** The timeline with every open group of the subject changed by `f`. */
+const openGroups = (timeline: readonly TimelineEntry[], subject: SubjectId, f: (g: RoundGroup) => RoundGroup): readonly TimelineEntry[] =>
+  timeline.map((e) => ({ ...e, groups: e.groups.map((g) => (sameSubject(g.subject, subject) && !g.done ? f(g) : g)) }));
+/** The group with the cycle of `round` changed by `f`. */
+const inCycle = (g: RoundGroup, round: number, f: (c: Cycle) => Cycle): RoundGroup => ({ ...g, rounds: g.rounds.map((c) => (c.round === round ? f(c) : c)) });
 
 /** A notified event of the run. */
 const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
@@ -177,15 +192,20 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     case "PhaseEnded":
       return { ...run, activity: "", busy: false, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? { ...e, state: "done" } : e)) };
     case "RoundBegan":
-      return { ...run, timeline: roundBegan(run.timeline, event.subject, event.round, event.limit) };
+      return { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
     case "LoopFinished":
-      return { ...run, timeline: run.timeline.map((e) => ({ ...e, groups: e.groups.map((g) => (sameSubject(g.subject, event.subject) ? { ...g, done: true } : g)) })) };
+      return { ...run, timeline: openGroups(run.timeline, event.subject, (g) => ({ ...g, result: event.result, done: true })) };
     case "ReviewReceived": {
+      const counts = (c: Cycle): Cycle => ({ ...c, raised: event.review.issues.length, counted: event.counted, reviewIds: event.review.issues.map((i) => i.id) });
+      const timeline = openGroups(run.timeline, event.subject, (g) => inCycle(g, event.round, counts));
       const body = event.review.issues.length === 0 ? "No issue: the review has converged." : withoutAuthorHeading(renderReview(event.review));
-      return withRight(run, message(run, time, "codex", body, "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
+      return withRight({ ...run, timeline }, message(run, time, "codex", body, "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
     }
-    case "ResponseReceived":
-      return withRight(run, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
+    case "ResponseReceived": {
+      const response = event.response;
+      const corrected = (g: RoundGroup): RoundGroup => ({ ...g, corrections: g.corrections + correctionCount(g.rounds.find((c) => c.round === event.round)?.reviewIds ?? [], response) });
+      return withRight({ ...run, timeline: openGroups(run.timeline, event.subject, corrected) }, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
+    }
     case "PlanWritten": {
       const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q}`).join("\n")}`;
       const body = `**${planWrittenHeading(event.phase)}**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;
@@ -297,4 +317,13 @@ export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
       return state;
     }
   }
+};
+
+/** The one-line progress of a compact window: the active (or last) phase and its latest cycle (issue #14: no limit). */
+export const progressOf = (run: RunView): string => {
+  const entry = [...run.timeline].reverse().find((e) => e.state === "active") ?? run.timeline[run.timeline.length - 1];
+  if (entry === undefined) return progressLine(null, null);
+  const rounds = entry.groups[entry.groups.length - 1]?.rounds ?? [];
+  const latest = rounds[rounds.length - 1];
+  return progressLine(entry.label, latest === undefined ? null : cycleLine(latest.round, null, null));
 };
