@@ -36,10 +36,10 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
         return;
       }
       yield* store.converse(`**User:** ${first}\n\n`);
-      yield* interview(prompts.interviewOpenEmptyPrompt(first), "conversation");
+      yield* interview(prompts.interviewOpenEmptyPrompt(first), "conversation", []);
     } else {
       yield* ui.say(`\nThe agreed list contains ${agreed.length} question(s).`);
-      yield* interview(prompts.interviewOpenPrompt, "clarification");
+      yield* interview(prompts.interviewOpenPrompt, "clarification", agreed.map((q) => q.id));
     }
 
     const reviewed = yield* reviewLoop(requirementsSubject());

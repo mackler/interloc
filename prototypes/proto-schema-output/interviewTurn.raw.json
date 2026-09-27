@@ -4,6 +4,12 @@
     "message_to_user": {
       "type": "string"
     },
+    "asked_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
     "answered_ids": {
       "type": "array",
       "items": {
@@ -19,6 +25,7 @@
   },
   "required": [
     "message_to_user",
+    "asked_ids",
     "answered_ids",
     "complete",
     "summary"

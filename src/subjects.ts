@@ -52,7 +52,7 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
     amend: (_review, response, round) => {
       const ids = response.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
       if (ids.length === 0) return Effect.succeed(undefined);
-      return interview(prompts.interviewGapsPrompt(recordPath({ kind: "review", subject: id, round }), ids), "followUp");
+      return interview(prompts.interviewGapsPrompt(recordPath({ kind: "review", subject: id, round }), ids), "followUp", ids);
     },
     proceed: prompts.PROCEED_TO_PLANNING,
     leaveOnAcceptance: false,

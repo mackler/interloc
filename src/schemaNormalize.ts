@@ -5,11 +5,17 @@ import { Result } from "effect";
 import { QuestionListInvalid } from "./errors.ts";
 import type { ExecReport, InterviewTurn, QuestionList, QuestionsFile } from "./schema.ts";
 
-/** One interview turn: the conversation continues, or Claude Code proposes the summary. */
-export type TurnVariant = Readonly<{ kind: "continuing"; message: string }> | Readonly<{ kind: "summary_proposed"; message: string; summary: string }>;
+/** The questions asked and answered so far, as Claude Code reports them in each turn (issue #21). */
+type TurnIds = Readonly<{ asked: readonly string[]; answered: readonly string[] }>;
+/** What an interview turn says: the conversation continues, or Claude Code proposes the summary. */
+export type TurnText = Readonly<{ kind: "continuing"; message: string }> | Readonly<{ kind: "summary_proposed"; message: string; summary: string }>;
+/** One interview turn: its text and the questions asked and answered so far. */
+export type TurnVariant = TurnText & TurnIds;
 /** `complete` with a blank summary, and a summary without `complete`, both continue the conversation (Q4: no coverage check). */
-export const normalizeTurn = (turn: InterviewTurn): TurnVariant =>
-  turn.complete && turn.summary.trim() !== "" ? { kind: "summary_proposed", message: turn.message_to_user, summary: turn.summary } : { kind: "continuing", message: turn.message_to_user };
+export const normalizeTurn = (turn: InterviewTurn): TurnVariant => {
+  const ids = { asked: turn.asked_ids, answered: turn.answered_ids };
+  return turn.complete && turn.summary.trim() !== "" ? { kind: "summary_proposed", message: turn.message_to_user, summary: turn.summary, ...ids } : { kind: "continuing", message: turn.message_to_user, ...ids };
+};
 
 /** The status report of an execution call, by outcome: the `question` field is a question only when input is awaited, a description when blocked. */
 export type ReportVariant =
@@ -43,4 +49,13 @@ export const normalizeQuestionList = (list: QuestionList): Result.Result<Normali
     return { ...q, id: q.id, default_answer: null };
   });
   return Result.succeed({ questions, notes });
+};
+
+/**
+ * The count of a clarification (issue #21, Q6): the total is the agreed questions and every question asked so far
+ * (follow-ups raise it, and it is never below the agreed count); the count is the answered ones among them.
+ */
+export const clarificationCount = (agreed: readonly string[], asked: readonly string[], answered: readonly string[]): Readonly<{ answered: number; total: number }> => {
+  const questions = new Set([...agreed, ...asked]);
+  return { answered: new Set(answered.filter((id) => questions.has(id))).size, total: questions.size };
 };

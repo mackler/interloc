@@ -33,7 +33,7 @@ describe("ordering and the panels", () => {
     const decision = fold(live([started, asked(1, prompts.decisionPrompt("x"))]));
     expect(decision.run?.pending?.choices.map((c) => c.label)).toEqual(["No decision", "Quit"]);
     expect(decision.run?.pending?.options).toEqual([]);
-    const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null };
+    const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null, answered: 0, total: 1 };
     const interview = fold(live([started, notified(turn), said("\nWhich database?\n1. PostgreSQL\n2. SQLite\n"), asked(1, prompts.interviewMessagePrompt)]));
     expect(interview.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2"]);
     expect(interview.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End clarification=/done", "Quit=/quit"]);
@@ -44,7 +44,7 @@ describe("ordering and the panels", () => {
   });
 
   test("an answer to an interview shows the full line of the chosen option, or the fixed choice's label (issue #12, Q2)", () => {
-    const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null };
+    const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?\n1. PostgreSQL\n2. SQLite", summary: null, answered: 0, total: 1 };
     const answered = (text: string) => fold(live([started, notified(turn), asked(1, prompts.interviewMessagePrompt), { _tag: "Answered", prompt: 1, text }]));
     expect(bodies(answered("2")).at(-1)).toBe("user:2. SQLite");
     expect(bodies(answered("/done")).at(-1)).toBe("user:End clarification");
@@ -56,8 +56,8 @@ describe("ordering and the panels", () => {
   });
 
   test("an interview turn and a proposed summary each appear once, live and after a replay", () => {
-    const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Hello", summary: null };
-    const summary: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Done.", summary: "# R" };
+    const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Hello", summary: null, answered: 0, total: 1 };
+    const summary: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Done.", summary: "# R", answered: 0, total: 1 };
     const events: RunEvent[] = [started, notified(turn), said("\nHello\n"), notified(summary), said("\nDone.\n"), said("Summary proposed by Claude Code:\n\n# R\n"), said("\nHello\n")];
     const expected = ["claude:Hello", "claude:Done.\n\n**Summary proposed by Claude:**\n\n# R", "program:\nHello\n"];
     expect(bodies(fold(live(events)))).toEqual(expected);
@@ -100,8 +100,8 @@ describe("who speaks in the left panel", () => {
   });
 
   test("an interview turn and its proposed summary are Claude's; a plan write stays Interloq's", () => {
-    const turn = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null });
-    const summary = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Done.", summary: "# R" });
+    const turn = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 });
+    const summary = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Done.", summary: "# R", answered: 0, total: 1 });
     const plan = notified({ _tag: "PlanWritten", phase: 1, questions: [], resultText: "" });
     for (const s of [fold(live([started, turn, summary, plan])), replayed([started, turn, summary, plan])]) {
       expect(s.run?.left.map((m) => m.author)).toEqual(["claude", "claude", "program"]);
@@ -158,8 +158,8 @@ describe("Markdown in the left panel", () => {
     const events: RunEvent[] = [
       started,
       said("a_b"),
-      notified({ _tag: "InterviewOpened", heading: "Interview" }),
-      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null }),
+      notified({ _tag: "InterviewOpened", heading: "Interview", stage: "clarification", total: 1 }),
+      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 }),
       notified({ _tag: "PlanWritten", phase: 1, questions: [], resultText: "" }),
       asked(1, prompts.decisionPrompt("x")),
     ];
@@ -204,7 +204,7 @@ describe("activity and timeline", () => {
       notified({ _tag: "PhaseBegan", phase: q }),
       notified({ _tag: "RoundBegan", subject: "questions", round: 1, limit: 5 }),
       notified({ _tag: "LoopFinished", subject: "questions", result: "converged" }),
-      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null }),
+      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 }),
       notified({ _tag: "RoundBegan", subject: "requirements", round: 1, limit: 5 }),
     ];
     const during = fold(live(events));
@@ -313,7 +313,7 @@ describe("runs, replay and gaps", () => {
       { _tag: "ResponseReceived", subject: { plan: 1 }, round: 1, response: { dispositions: [{ id: "A", action: "accepted", rationale: "r", duplicate_of: "", reverses: "" }], self_corrections: [], reviewer_feedback: "", questions_for_user: [] }, resultText: "" },
       { _tag: "LoopFinished", subject: { plan: 1 }, result: "converged" },
       { _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" },
-      { _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null },
+      { _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 },
       { _tag: "AgentCallStarted", agent: "claude", purpose: "planning" },
       { _tag: "ToolUsed", agent: "claude", tool: "Read", target: "a" },
     ).map(notified),
@@ -375,7 +375,7 @@ describe("answered prompts", () => {
 // Finding 8 of docs/gui-review.md: the page renders the interview's help without the terminal's """ convention.
 describe("the interview's opening help", () => {
   test("the page message names /done, /quit and Shift+Enter, and has no triple quotes", () => {
-    const s = fold(live([started, notified({ _tag: "InterviewOpened", heading: "Interview" })]));
+    const s = fold(live([started, notified({ _tag: "InterviewOpened", heading: "Interview", stage: "clarification", total: 1 })]));
     const body = s.run?.left.at(-1)?.body ?? "";
     expect(body).toBe(prompts.interviewHelp("Interview", "page"));
     expect(body).toMatch(/Shift\+Enter/);
@@ -431,8 +431,8 @@ describe("a replay of a question phase", () => {
         resultText: "",
       }),
       notified({ _tag: "LoopFinished", subject: "questions", result: "converged" }),
-      notified({ _tag: "InterviewOpened", heading: "Interview" }),
-      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Which database should the service use?\n1. PostgreSQL\n2. SQLite", summary: null }),
+      notified({ _tag: "InterviewOpened", heading: "Interview", stage: "clarification", total: 1 }),
+      notified({ _tag: "InterviewTurn", heading: "Interview", message: "Which database should the service use?\n1. PostgreSQL\n2. SQLite", summary: null, answered: 0, total: 1 }),
       said("\nWhich database should the service use?\n1. PostgreSQL\n2. SQLite\n"),
       asked(1, prompts.interviewMessagePrompt),
     ];
@@ -501,7 +501,7 @@ describe("the time of a message", () => {
   test("an event that makes no message (a blank line, an absorbed line, Ended) does not count as the message before", () => {
     const blank = fold(live([started, said("a"), said("\n"), said("b")], 1, [0, 0, 60, 170]));
     expect(shown(blank)).toEqual([true, true]);
-    const turn = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null });
+    const turn = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 });
     const absorbed = fold(live([started, turn, said("\nHi\n"), said("b")], 1, [0, 0, 100, 150]));
     expect(absorbed.run?.left.map((m) => m.body)).toEqual(["Hi", "b"]);
     expect(shown(absorbed)).toEqual([true, true]);

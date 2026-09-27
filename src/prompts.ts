@@ -85,7 +85,7 @@ Return in 'questions' the complete question list of plan-review/questions.json, 
 // ---- interview ----------------------------------------------------------------------------------
 
 const INTERVIEW_RULES = `Rules for the interview.
-Each of your turns produces these output fields. message_to_user: the text that the program shows to the user; plain text without Markdown tables. answered_ids: the ids of the agreed questions that the user has answered so far. complete: true only when every agreed question has been answered and you need nothing further from the user. summary: an empty string while complete is false.
+Each of your turns produces these output fields. message_to_user: the text that the program shows to the user; plain text without Markdown tables. asked_ids: the ids of every question you have asked so far: the agreed questions you have asked, and an id F1, F2, … that you assign to each follow-up question. answered_ids: the ids of the questions, agreed or follow-up, that the user has answered so far. complete: true only when every agreed question has been answered and you need nothing further from the user. summary: an empty string while complete is false.
 When complete is true, summary contains the complete requirements document in Markdown: the task; every decision with the id of its question; the further information and constraints that the user gave; and open points, each with the default that will be assumed.
 Ask one question per message. For an agreed question, show each proposed answer on its own line in the form \`<n>. <answer>\`, numbered from 1, name the default, and state the reason in one sentence. The user may answer with a number, a label, or free text.
 You may ask any follow-up question that the conversation makes necessary. The user may raise any subject and may ask you questions; answer them, and inspect the codebase without changing it where that is needed.
@@ -104,7 +104,7 @@ ${firstMessage}`;
 
 export function interviewGapsPrompt(reviewFile: string, ids: string[]): string {
   return `The reviewer has examined plan-review/requirements.md, the confirmed result of the interview. ${reviewFile} contains the review. You accepted these issues: ${ids.join(", ")}.
-Conduct a second interview with the user on those points only. Treat each accepted issue as an agreed question; use the issue ids in answered_ids.
+Conduct a second interview with the user on those points only. Treat each accepted issue as an agreed question; use the issue ids in asked_ids and answered_ids.
 ${INTERVIEW_RULES}
 When complete is true, summary contains the complete revised requirements document, not only the changes.
 Begin now with your first message to the user.`;

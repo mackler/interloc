@@ -151,3 +151,12 @@ test("the cycle lines and the finished loop's line", () => {
   assert.equal(prompts.loopSummary(1, 0, "revise"), "1 cycle: 0 corrections due");
   assert.equal(prompts.loopSummary(2, 1, "revise"), "2 cycles: 1 correction due");
 });
+
+// Issue #21 (Q6 follow-up): Claude reports every question asked, follow-ups with ids of their own, and the answered ones.
+test("the interview rules define asked_ids with follow-up ids, and answered_ids over both", () => {
+  for (const text of [prompts.interviewOpenPrompt, prompts.interviewOpenEmptyPrompt("hi"), prompts.interviewGapsPrompt("plan-review/requirements-review/review-1.json", ["G-R1-1"])]) {
+    assert.match(text, /asked_ids: the ids of every question you have asked so far: the agreed questions you have asked, and an id F1, F2, … that you assign to each follow-up question/);
+    assert.match(text, /answered_ids: the ids of the questions, agreed or follow-up, that the user has answered so far/);
+  }
+  assert.match(prompts.interviewGapsPrompt("r.json", ["G-R1-1"]), /use the issue ids in asked_ids and answered_ids/);
+});

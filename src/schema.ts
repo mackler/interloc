@@ -67,9 +67,13 @@ export const QuestionListResponse = Schema.Struct({
   questions: Schema.Array(QuestionEntry),
 });
 
-/** Claude Code's output for one turn of the interview. */
+/**
+ * Claude Code's output for one turn of the interview. `asked_ids`: every question asked so far, the agreed ids and the
+ * ids Claude assigns to follow-ups (issue #21); `answered_ids`: those of them the user has answered.
+ */
 export const InterviewTurn = Schema.Struct({
   message_to_user: Schema.String,
+  asked_ids: Schema.Array(Schema.String),
   answered_ids: Schema.Array(Schema.String),
   complete: Schema.Boolean,
   summary: Schema.String,

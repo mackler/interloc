@@ -4,7 +4,7 @@
 import type { SubjectId } from "./artifacts.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import type { DecisionEvent } from "./reviewState.ts";
-import type { TurnVariant } from "./schemaNormalize.ts";
+import type { TurnText } from "./schemaNormalize.ts";
 import type { InterviewStage } from "./uiEvents.ts";
 
 /** A question list as the agents exchange it or as the program records it (a recorded default may be null). */
@@ -41,7 +41,7 @@ export function renderQuestions(list: RenderableQuestions): string {
 }
 
 /** The terminal lines of an interview turn, in order; the page shows the turn once and absorbs these lines (plan 4.2). */
-export const interviewSays = (turn: TurnVariant): readonly string[] =>
+export const interviewSays = (turn: TurnText): readonly string[] =>
   turn.kind === "summary_proposed" ? [`\n${turn.message}\n`, `Summary proposed by Claude Code:\n\n${turn.summary}\n`] : [`\n${turn.message}\n`];
 
 /** A question Claude Code relays to the user, with its options. */

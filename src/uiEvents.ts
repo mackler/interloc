@@ -26,9 +26,10 @@ export type UiEvent =
   | Readonly<{ _tag: "ToolUsed"; agent: Agent; tool: string; target: string }>
   | Readonly<{ _tag: "AgentCallEnded"; agent: Agent; ok: boolean }>
   | Readonly<{ _tag: "QuestionAsked"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
-  | Readonly<{ _tag: "InterviewTurn"; heading: string; message: string; summary: string | null }>
+  /** `answered` of `total` questions so far (issue #21): the agreed ones and the follow-ups Claude reports asking. */
+  | Readonly<{ _tag: "InterviewTurn"; heading: string; message: string; summary: string | null; answered: number; total: number }>
   /** The interview begins; each interface renders its own help (finding 8 of docs/gui-review.md). */
-  | Readonly<{ _tag: "InterviewOpened"; heading: string }>
+  | Readonly<{ _tag: "InterviewOpened"; heading: string; stage: InterviewStage; total: number }>
   /** Claude Code's prose during an execution call, attributed as data (issue #5); the terminal prefixes it with "[claude] ". */
   | Readonly<{ _tag: "ClaudeSaid"; text: string }>;
 
@@ -65,9 +66,9 @@ export const describeEvent = (event: UiEvent): string => {
     case "QuestionAsked":
       return `question: ${event.question} (${plural(event.options.length, "option")})`;
     case "InterviewTurn":
-      return `${event.heading}: ${event.message}`;
+      return `${event.heading} (${event.answered} of ${event.total} answered): ${event.message}`;
     case "InterviewOpened":
-      return `${event.heading} opened`;
+      return `${event.heading} opened, ${plural(event.total, "question")}`;
     case "ClaudeSaid":
       return `Claude Code said: ${event.text}`;
   }

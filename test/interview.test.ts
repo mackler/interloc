@@ -9,7 +9,7 @@ import { finished, runFails, runTask, tempRepo, testLayer } from "./helpers.ts";
 type QuestionEntry = typeof S.QuestionEntry.Type;
 const noQuestions = { questions_for_user: [] };
 const q = (id: string, defaultAnswer = "A"): QuestionEntry => ({ id, question: `question ${id}?`, reason: "r", proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }], default_answer: defaultAnswer });
-const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, answered_ids: [], complete, summary });
+const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, asked_ids: [], answered_ids: [], complete, summary });
 const read = (dir: string, name: string): string => fs.readFileSync(path.join(dir, name), "utf8");
 
 test("a turn that is complete with a blank summary continues the conversation instead of proposing a summary", async () => {
@@ -81,9 +81,11 @@ test("the question phase notifies its beginning and end and every interview turn
   assert.deepEqual(probe.ui.notified[0], { _tag: "PhaseBegan", phase: { kind: "questions" } });
   const turns = probe.ui.notified.filter((e) => e._tag === "InterviewTurn");
   assert.deepEqual(turns, [
-    { _tag: "InterviewTurn", heading: "Conversation before planning", message: "Anything to add?", summary: null },
-    { _tag: "InterviewTurn", heading: "Conversation before planning", message: "Done.", summary: "# Requirements\n\nNone." },
+    { _tag: "InterviewTurn", heading: "Conversation before planning", message: "Anything to add?", summary: null, answered: 0, total: 0 },
+    { _tag: "InterviewTurn", heading: "Conversation before planning", message: "Done.", summary: "# Requirements\n\nNone.", answered: 0, total: 0 },
   ]);
+  // Issue #21: the conversation after an empty agreed list is a clarification with nothing agreed to count.
+  assert.deepEqual(probe.ui.notified.find((e) => e._tag === "InterviewOpened"), { _tag: "InterviewOpened", heading: "Conversation before planning", stage: "conversation", total: 0 });
   assert.ok(probe.ui.notified.some((e) => e._tag === "PhaseEnded" && e.phase.kind === "questions"));
   assert.ok(tags.indexOf("PhaseEnded") < tags.lastIndexOf("PhaseBegan"), "the question phase ends before planning begins");
   // The terminal lines of the turns are unchanged.

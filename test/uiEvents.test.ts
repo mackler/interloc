@@ -20,8 +20,8 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   ToolUsed: [{ _tag: "ToolUsed", agent: "claude", tool: "Read", target: "src/run.ts" }, /Claude Code used Read src\/run\.ts/],
   AgentCallEnded: [{ _tag: "AgentCallEnded", agent: "claude", ok: false }, /Claude Code call ended: failed/],
   QuestionAsked: [{ _tag: "QuestionAsked", question: "Which?", options: [{ label: "A", description: "" }] }, /question: Which\? \(1 option\)/],
-  InterviewTurn: [{ _tag: "InterviewTurn", heading: "Interview", message: "Hello", summary: null }, /Interview: Hello/],
-  InterviewOpened: [{ _tag: "InterviewOpened", heading: "Interview" }, /Interview opened/],
+  InterviewTurn: [{ _tag: "InterviewTurn", heading: "Clarification", message: "Hello", summary: null, answered: 1, total: 3 }, /Clarification \(1 of 3 answered\): Hello/],
+  InterviewOpened: [{ _tag: "InterviewOpened", heading: "Clarification", stage: "clarification", total: 3 }, /Clarification opened, 3 questions/],
   ClaudeSaid: [{ _tag: "ClaudeSaid", text: "done" }, /Claude Code said: done/],
 };
 

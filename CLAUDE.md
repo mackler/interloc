@@ -217,6 +217,7 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect), 26 Sep 2026 (the web GUI and th
   repositories with docker and npm stubbed. The developer's first release settles the rest. The test
   suite was made to pass on a machine at load 20–30 (27 Sep 2026); whether that holds on a shared
   runner is also settled by the first run.
+- The interview turn's schema with `asked_ids` (issue #21, 27 Sep 2026) is not proven by the prototype. Its two files in `prototypes/proto-schema-output/` (`interviewTurn.raw.json`, `interviewTurn.strict.json`) were regenerated from `src/schema.ts` in the container, not written by an accepted run, so the fact above about the seven agent schemas does not yet cover this one. The proof is the developer's run of `node prototypes/proto-schema.ts <project> --only=:interviewTurn` in a project container.
 - Threads that the orchestrator starts are stored in the same `~/.codex` volume as the developer's interactive Codex sessions; the effect on `codex resume --last` is unverified.
 
 ## Pinned versions

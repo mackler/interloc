@@ -56,7 +56,7 @@ const schemas: Record<string, Schema.Top> = {
   execReport: Schema.Struct({ status: Schema.Literals(["finished", "needs_input", "blocked"]), summary: Str, question: Str, remaining_work: Str }),
   questionList: Schema.Struct({ questions: Schema.Array(QuestionEntry) }),
   questionListResponse: Schema.Struct({ ...plannerFields, questions: Schema.Array(QuestionEntry) }),
-  interviewTurn: Schema.Struct({ message_to_user: Str, answered_ids: Strings, complete: Schema.Boolean, summary: Str }),
+  interviewTurn: Schema.Struct({ message_to_user: Str, asked_ids: Strings, answered_ids: Strings, complete: Schema.Boolean, summary: Str }),
 };
 
 type Json = Record<string, any>;

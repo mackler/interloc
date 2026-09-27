@@ -24,7 +24,8 @@ const disposition: legacy.Disposition = { id: "P1-R1-1", action: "accepted", rat
 const selfCorrection: legacy.SelfCorrection = { id: "A", new_action: "plan_error", explanation: "x" };
 const plannerResponse: legacy.PlannerResponse = { dispositions: [disposition], self_corrections: [selfCorrection], reviewer_feedback: "", questions_for_user: ["q?"] };
 const questionEntry: legacy.QuestionEntry = { id: "Q1", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: "A" };
-const interviewTurn: legacy.InterviewTurn = { message_to_user: "m", answered_ids: ["Q1"], complete: false, summary: "" };
+// Issue #21 (Q6 follow-up): the one field the interview turn has beyond the frozen legacy shape.
+const interviewTurn: legacy.InterviewTurn & { asked_ids: string[] } = { message_to_user: "m", asked_ids: ["Q1", "F1"], answered_ids: ["Q1"], complete: false, summary: "" };
 const execReport: legacy.ExecReport = { status: "finished", summary: "s", question: "", remaining_work: "" };
 const execOutcome: legacy.ExecOutcome = { status: "needs_input", summary: "s", question: "q", remainingWork: "w", userInput: null };
 // Version 2 (Q5): three shapes tagged by source.
@@ -64,7 +65,7 @@ test("each schema decodes a valid sample and its type matches the legacy type", 
   sameType<Equals<DeepMutable<typeof S.QuestionEntry.Type>, DeepMutable<legacy.QuestionEntry>>>();
   sameType<Equals<DeepMutable<typeof S.QuestionList.Type>, DeepMutable<legacy.QuestionList>>>();
   sameType<Equals<DeepMutable<typeof S.QuestionListResponse.Type>, DeepMutable<legacy.QuestionListResponse>>>();
-  sameType<Equals<DeepMutable<typeof S.InterviewTurn.Type>, DeepMutable<legacy.InterviewTurn>>>();
+  sameType<Equals<DeepMutable<typeof S.InterviewTurn.Type>, DeepMutable<legacy.InterviewTurn & { asked_ids: readonly string[] }>>>();
   sameType<Equals<DeepMutable<typeof S.ExecReport.Type>, DeepMutable<legacy.ExecReport>>>();
   sameType<Equals<DeepMutable<typeof S.ExecOutcome.Type>, DeepMutable<legacy.ExecOutcome>>>();
   sameType<Equals<DeepMutable<typeof S.Config.Type>, DeepMutable<legacy.Config>>>();
@@ -80,6 +81,7 @@ test("each schema rejects a wrong enum value, a missing field and a wrong type",
   rejects(S.PlannerResponse, { ...plannerResponse, reviewer_feedback: 1 }, "numeric reviewer_feedback");
   rejects(S.QuestionEntry, { ...questionEntry, proposed_answers: [{ label: "A" }] }, "a proposed answer without a description");
   rejects(S.InterviewTurn, { ...interviewTurn, complete: "yes" }, "complete as a string");
+  rejects(S.InterviewTurn, { message_to_user: "m", answered_ids: [], complete: false, summary: "" }, "a turn without asked_ids");
   rejects(S.ExecReport, { ...execReport, status: "done" }, "status done");
   rejects(S.ExecOutcome, { ...execOutcome, userInput: 5 }, "numeric userInput");
   rejects(S.LogEntry, { ...reviewEntry, source: "robot" }, "source robot");

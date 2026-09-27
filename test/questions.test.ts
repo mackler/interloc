@@ -18,6 +18,7 @@ const q = (id: string): QuestionEntry => ({
 });
 const turn = (message: string, answered: string[], summary = ""): InterviewTurn => ({
   message_to_user: message,
+  asked_ids: answered,
   answered_ids: answered,
   complete: summary !== "",
   summary,
@@ -126,6 +127,10 @@ test("a gap that Claude Code accepts produces a second interview and a revised r
   // The user reads "Clarification" and "Follow-up clarification"; conversation.md keeps its record headings.
   const headings = probe.ui.notified.flatMap((e) => (e._tag === "InterviewOpened" || e._tag === "InterviewTurn" ? [e.heading] : []));
   assert.deepEqual([...new Set(headings)], ["Clarification", "Follow-up clarification"]);
+  // Issue #21 (Q6, Q7): each clarification opens with its total, the agreed questions or the accepted gaps, and each
+  // turn carries the count of answered questions against the total so far.
+  const counted = probe.ui.notified.flatMap((e) => (e._tag === "InterviewOpened" ? [`opened ${e.stage} ${e.total}`] : e._tag === "InterviewTurn" ? [`${e.answered} of ${e.total}`] : []));
+  assert.deepEqual(counted, ["opened clarification 1", "0 of 1", "1 of 1", "opened followUp 1", "0 of 1", "1 of 1"]);
 });
 
 test("/done ends the interview early", async () => {
@@ -139,4 +144,25 @@ test("/done ends the interview early", async () => {
   await runTask(layer);
   assert.ok(probe.planner.prompts.some((p) => p.startsWith("The user ends the interview now")));
   assert.match(read(probe.dir, "requirements.md"), /default A/);
+});
+
+// Issue #21 (Q6): a follow-up question raises the total; Claude reports it in asked_ids with an id of its own.
+test("a follow-up asked during the clarification raises its total", async () => {
+  const withFollowUp = (message: string, asked: string[], answered: string[], summary = ""): InterviewTurn => ({ message_to_user: message, asked_ids: asked, answered_ids: answered, complete: summary !== "", summary });
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["A", "3", ""],
+    steps: [
+      { output: { questions: [q("Q1"), q("Q2")] } },
+      { output: withFollowUp("Q1?", ["Q1"], []) },
+      { output: withFollowUp("How many retries? (a follow-up)", ["Q1", "F1"], ["Q1"]) },
+      { output: withFollowUp("Complete.", ["Q1", "F1", "Q2"], ["Q1", "F1"], "Q1: A\nRetries: 3\nQ2: default") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: withQuestions,
+  });
+  await runTask(layer);
+  const counts = probe.ui.notified.flatMap((e) => (e._tag === "InterviewTurn" ? [`${e.answered} of ${e.total}`] : []));
+  assert.deepEqual(counts, ["0 of 2", "1 of 3", "2 of 3"]);
 });

@@ -20,7 +20,7 @@ import { LONG_ANSWERS } from "./longAnswers.ts";
 import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from "../test/helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
-const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, answered_ids: [], complete, summary });
+const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, asked_ids: [], answered_ids: [], complete, summary });
 const LONG = 60;
 export const SCENARIOS: Record<string, TestOptions> = {
   converge: {

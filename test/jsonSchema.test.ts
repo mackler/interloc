@@ -14,7 +14,14 @@ const agentSchemas = {
   execReport: { effect: S.ExecReport, legacy: legacy.execReportSchema },
   questionList: { effect: S.QuestionList, legacy: legacy.questionListSchema },
   questionListResponse: { effect: S.QuestionListResponse, legacy: legacy.questionListResponseSchema },
-  interviewTurn: { effect: S.InterviewTurn, legacy: legacy.interviewTurnSchema },
+  // Issue #21 (Q6 follow-up): the interview turn has asked_ids beyond the frozen legacy schema, which stays frozen.
+  interviewTurn: {
+    effect: S.InterviewTurn,
+    legacy: {
+      ...legacy.interviewTurnSchema,
+      properties: (({ message_to_user, ...rest }) => ({ message_to_user, asked_ids: { type: "array", items: { type: "string" } }, ...rest }))(legacy.interviewTurnSchema.properties),
+    },
+  },
 };
 
 const proven = (name: string, variant: "raw" | "strict"): Json =>
