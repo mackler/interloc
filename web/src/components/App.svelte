@@ -72,7 +72,7 @@
   });
   /** Whether a column is shown: both at expanded width, the selected one below it. */
   const shown = (pane: Pane): boolean => !compact || layout.selected === pane;
-  const TITLES: Record<Pane, string> = { left: "You and Interloq", right: "Claude Code and Codex" };
+  const TITLES: Record<Pane, string> = { left: "You and Interloq", right: "Claude and Codex" };
   /** The one-line progress of a compact window: the current phase and its latest round (the text: src/prompts.ts). */
   const progressOf = (r: NonNullable<ViewState["run"]>): string => {
     const entry = [...r.timeline].reverse().find((e) => e.state === "active") ?? r.timeline[r.timeline.length - 1];

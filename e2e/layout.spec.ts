@@ -7,7 +7,7 @@ import { LONG_ANSWERS } from "./longAnswers.ts";
 // new messages, and a prompt selects "You and Interloq". The "tabs" server asks two decisions in a row.
 const URL = "http://127.0.0.1:8106/";
 const LEFT = "You and Interloq";
-const RIGHT = "Claude Code and Codex";
+const RIGHT = "Claude and Codex";
 const panel = (page: Page, name: string) => page.getByRole("region", { name });
 const box = async (locator: Locator) => {
   const b = await locator.boundingBox();

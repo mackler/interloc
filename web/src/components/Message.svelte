@@ -10,7 +10,7 @@
 
   type Props = { message: Message };
   let { message }: Props = $props();
-  const AUTHOR: Record<Author, string> = { program: "Interloq", user: "You", codex: "Codex", claude: "Claude Code" };
+  const AUTHOR: Record<Author, string> = { program: "Interloq", user: "You", codex: "Codex", claude: "Claude" };
 </script>
 
 <article class="message {message.author}" data-author={message.author}>

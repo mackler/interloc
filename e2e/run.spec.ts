@@ -7,7 +7,7 @@ const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, wor
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
-const right = (page: Page) => page.getByRole("region", { name: "Claude Code and Codex" });
+const right = (page: Page) => page.getByRole("region", { name: "Claude and Codex" });
 const rail = (page: Page) => page.getByRole("navigation", { name: "Progress of the run" });
 
 /** Opens the page, returns to the form if a run has ended, and starts a task. */

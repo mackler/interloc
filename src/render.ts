@@ -43,6 +43,9 @@ export function renderQuestions(list: RenderableQuestions): string {
 export const interviewSays = (turn: TurnVariant): readonly string[] =>
   turn.kind === "summary_proposed" ? [`\n${turn.message}\n`, `Summary proposed by Claude Code:\n\n${turn.summary}\n`] : [`\n${turn.message}\n`];
 
+/** Claude Code's prose as the terminal prints it (issue #5): the prefix is the terminal's only attribution. */
+export const claudeLine = (text: string): string => `[claude] ${text}`;
+
 /** Codex's half of a round (the page shows it as Codex's message). */
 export const renderReview = (review: Review): string =>
   `### Codex\n\n${review.issues.map((i) => `- **[${i.id}]** (${i.severity}, ${i.location}) ${i.problem}\n  Evidence: ${i.evidence}`).join("\n")}\n\n`;

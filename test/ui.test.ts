@@ -141,3 +141,10 @@ test("notify renders the interview's opening help in the terminal, with the mult
   assert.ok(io.written().includes(prompts.interviewHelp("Interview", "terminal")));
   assert.match(io.written(), /""" on its own line/);
 });
+
+// Issue #5 (Q2): the terminal keeps the "[claude] " prefix, its only attribution of Claude Code's prose.
+test("notify renders Claude Code's prose in the terminal with the [claude] prefix", async () => {
+  const io = streams();
+  await withUi(io, (ui) => ui.notify({ _tag: "ClaudeSaid", text: "done" }));
+  assert.equal(io.written(), "[claude] done\n");
+});

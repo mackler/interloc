@@ -46,6 +46,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("QuestionAsked" as const), question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }) }),
   fc.record({ _tag: fc.constant("InterviewTurn" as const), heading: text, message: text, summary: fc.option(text, { nil: null }) }),
   fc.record({ _tag: fc.constant("InterviewOpened" as const), heading: text }),
+  fc.record({ _tag: fc.constant("ClaudeSaid" as const), text }),
 );
 const promptTexts = [prompts.decisionPrompt("x"), prompts.limitPrompt(3, "go"), prompts.permissionPrompt, prompts.interviewMessagePrompt, "unknown > "];
 const runEvent: fc.Arbitrary<RunEvent> = fc.oneof(
@@ -189,3 +190,11 @@ holds<Carried<Responses[2]>>();
 holds<Carried<Responses[3]>>();
 // The check itself refuses a response with a field the event does not carry.
 fails<Carried<PlannerResponse & { extra: string }>>();
+
+// Issue #5: Claude Code's prose travels to the page as data, attributed to Claude.
+test("a ClaudeSaid event survives the round trip, live and in a replay", () => {
+  const event: RunEvent = { _tag: "Notified", event: { _tag: "ClaudeSaid", text: "**done**" } };
+  for (const m of [{ type: "event", run: 1, seq: 0, time: T, event }, { type: "replay", runs: [{ id: 1, events: [{ time: T, event }] }] }] as ServerMessage[]) {
+    assert.deepEqual(decoded(decodeServer(JSON.stringify(m))), m);
+  }
+});

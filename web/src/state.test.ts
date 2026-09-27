@@ -59,7 +59,7 @@ describe("ordering and the panels", () => {
     const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Hello", summary: null };
     const summary: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Done.", summary: "# R" };
     const events: RunEvent[] = [started, notified(turn), said("\nHello\n"), notified(summary), said("\nDone.\n"), said("Summary proposed by Claude Code:\n\n# R\n"), said("\nHello\n")];
-    const expected = ["program:Hello", "program:Done.\n\n**Summary proposed by Claude Code:**\n\n# R", "program:\nHello\n"];
+    const expected = ["claude:Hello", "claude:Done.\n\n**Summary proposed by Claude:**\n\n# R", "program:\nHello\n"];
     expect(bodies(fold(live(events)))).toEqual(expected);
     expect(bodies(replayed(events))).toEqual(expected);
   });
@@ -69,7 +69,8 @@ describe("ordering and the panels", () => {
     for (const s of [fold(live(events)), replayed(events)]) {
       const m = s.run?.left.at(-1);
       expect(m?.format).toBe("markdown");
-      expect(m?.body).toMatch(/planning phase 1/);
+      expect(m?.author).toBe("program");
+      expect(m?.body).toMatch(/^\*\*Claude wrote the plan \(planning phase 1\)\.\*\*/);
       expect(m?.body).toMatch(/I wrote the plan\./);
       expect(m?.body).toMatch(/- Which\?/);
     }
@@ -85,6 +86,35 @@ describe("ordering and the panels", () => {
     expect(s.run?.right.map((m) => m.body)).not.toContainEqual(expect.stringMatching(/^### /));
     const none = fold(live([started, notified({ _tag: "ReviewReceived", subject: { plan: 1 }, round: 3, review: { issues: [] }, counted: 0 })]));
     expect(none.run?.right[0].body).toBe("No issue: the review has converged.");
+  });
+});
+
+// Issue #5: what Claude Code writes is attributed to Claude, as data; the page names it "Claude".
+describe("who speaks in the left panel", () => {
+  const claudeSaid = notified({ _tag: "ClaudeSaid", text: "done" });
+
+  test("Claude's prose is one message of Claude, without a prefix, live and after a replay", () => {
+    for (const s of [fold(live([started, claudeSaid])), replayed([started, claudeSaid])]) {
+      expect(s.run?.left.map((m) => [m.author, m.body, m.format])).toEqual([["claude", "done", "text"]]);
+    }
+  });
+
+  test("an interview turn and its proposed summary are Claude's; a plan write stays Interloq's", () => {
+    const turn = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null });
+    const summary = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Done.", summary: "# R" });
+    const plan = notified({ _tag: "PlanWritten", phase: 1, questions: [], resultText: "" });
+    for (const s of [fold(live([started, turn, summary, plan])), replayed([started, turn, summary, plan])]) {
+      expect(s.run?.left.map((m) => m.author)).toEqual(["claude", "claude", "program"]);
+    }
+  });
+
+  test("the activity line and the page's prompts say Claude", () => {
+    const s = fold(live([started, notified({ _tag: "AgentCallStarted", agent: "claude", purpose: "planning" })]));
+    expect(s.run?.activity).toBe("Claude — planning");
+    const tool = fold(live([started, notified({ _tag: "ToolUsed", agent: "claude", tool: "Read", target: "x" })]));
+    expect(tool.run?.activity).toBe("Claude — Read: x");
+    expect(prompts.pagePromptText("execInput", prompts.execInputPrompt)).toBe("Your input for Claude");
+    expect(prompts.pagePromptText("startOrTalk", prompts.startOrTalkPrompt)).toBe("Claude and Codex agree that no question is needed. Start planning, or write a message to open a conversation with Claude.");
   });
 });
 
@@ -303,7 +333,7 @@ describe("a replay of a question phase", () => {
     expect(right.length).toBe(2);
     expect(right[0]).toMatch(/^codex:.*The list does not ask for the database\./s);
     expect(right[1]).toMatch(/^claude:.*\[Q-R1-1\]\*\* accepted: Added the database question\./s);
-    expect(bodies(s).slice(0, 2)).toEqual([prompts.interviewHelp("Interview", "page"), "Which database should the service use?\n1. PostgreSQL\n2. SQLite"].map((b) => `program:${b}`));
+    expect(bodies(s).slice(0, 2)).toEqual([`program:${prompts.interviewHelp("Interview", "page")}`, "claude:Which database should the service use?\n1. PostgreSQL\n2. SQLite"]);
     expect(s.run?.pending?.asked.kind).toBe("interviewMessage");
     expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["1. PostgreSQL=1", "2. SQLite=2"]);
     expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End interview=/done", "Quit=/quit"]);

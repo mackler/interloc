@@ -8,8 +8,9 @@ import StartForm from "./components/StartForm.svelte";
 import TimelineRail from "./components/TimelineRail.svelte";
 import TopBar from "./components/TopBar.svelte";
 import MessageView from "./components/Message.svelte";
+import ChatPanel from "./components/ChatPanel.svelte";
 import { clockTime, fullTime } from "./time.ts";
-import { emptyRun, type Message, type Widget } from "./state.ts";
+import { emptyRun, initialState, type Message, reduce, type Widget } from "./state.ts";
 
 // Plan step 4.5: the components, mounted in jsdom.
 let mounted: ReturnType<typeof mount>[] = [];
@@ -69,7 +70,37 @@ describe("Message", () => {
   });
 });
 
+// Issue #5: Claude's messages are headed "Claude" and carry no "[claude]" prefix.
+describe("Claude's messages", () => {
+  test("a message of Claude is headed Claude, not Claude Code", () => {
+    const root = show(MessageView, { message: { key: "1-1", author: "claude", heading: null, body: "x", format: "text", time: "2026-09-27T14:00:00.000Z", showTime: true } });
+    expect(one(root, "header").textContent).toMatch(/^Claude(?! Code)/);
+  });
+
+  test("the panel shows Claude's prose from the reducer as Claude's article, without the prefix", () => {
+    const time = "2026-09-27T14:00:00.000Z";
+    const state = [
+      { type: "hello", cwd: "/p", current: 1, incarnation: "a" },
+      { type: "event", run: 1, seq: 0, time, event: { _tag: "Started", project: "/p", task: "t" } },
+      { type: "event", run: 1, seq: 1, time, event: { _tag: "Notified", event: { _tag: "ClaudeSaid", text: "done" } } },
+    ].reduce((s, m) => reduce(s, m as Parameters<typeof reduce>[1]), initialState);
+    const root = show(ChatPanel, { title: "You and Interloq", messages: state.run?.left ?? [], empty: "none" });
+    const article = one(root, "article[data-author=claude]");
+    expect(article.classList.contains("claude")).toBe(true);
+    expect(one(article, ".body").textContent?.trim()).toBe("done");
+    expect(article.textContent).not.toContain("[claude]");
+  });
+});
+
 describe("StartForm", () => {
+  test("the description is the page's help text from src/prompts.ts, and says Claude (issue #5)", () => {
+    const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, onStart: () => undefined, onBrowse: () => undefined });
+    const text = (one(root, ".help").textContent ?? "").replace(/\s+/g, " ").trim();
+    expect(text).toContain("Claude writes a plan, Codex reviews it");
+    expect(text).not.toContain("Claude Code");
+    expect(text).toBe(prompts.START_FORM_DESCRIPTION.map((part) => part.text).join("").replace(/\s+/g, " ").trim());
+  });
+
   test("Start is disabled while a field is empty or a run is active, and sends the project and the task", () => {
     const started: string[][] = [];
     const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, onStart: (p: string, t: string) => void started.push([p, t]), onBrowse: () => undefined });
@@ -88,7 +119,7 @@ describe("StartForm", () => {
 
   test("the form says what happens after Start (help and documentation)", () => {
     const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, onStart: () => undefined, onBrowse: () => undefined });
-    expect(root.textContent).toMatch(/Claude Code writes a plan, Codex reviews it/);
+    expect(root.textContent).toMatch(/Claude writes a plan, Codex reviews it/);
     expect(root.textContent).toMatch(/Stop task/);
   });
 
@@ -418,6 +449,12 @@ describe("App and the draft", () => {
     vi.unstubAllGlobals();
     vi.useRealTimers();
     FakeWebSocket.all = [];
+  });
+
+  test("the right panel is titled Claude and Codex (issue #5)", async () => {
+    const { root, ws } = await openPage();
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started]) }] });
+    expect(root.querySelector('section[aria-label="Claude and Codex"]')).not.toBe(null);
   });
 
   test("another tab's answer withdraws the draft with a notice; the next prompt's field is empty", async () => {

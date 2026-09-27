@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
-import { interviewHelp, pagePromptText, protocolErrorNotice, SERVER_CLOSED_NOTICE } from "../../src/prompts.ts";
+import { interviewHelp, pagePromptText, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
@@ -66,7 +66,7 @@ export type ViewState = Readonly<{
 
 export const initialState: ViewState = { connection: "connecting", cwd: "", current: null, incarnation: null, run: null, last: null, needsReconnect: false, notices: [], listing: null, unsent: [] };
 
-const AGENT: Record<"claude" | "codex", string> = { claude: "Claude Code", codex: "Codex" };
+const AGENT: Record<"claude" | "codex", string> = { claude: "Claude", codex: "Codex" };
 const sameSubject = (a: SubjectId, b: SubjectId): boolean => JSON.stringify(a) === JSON.stringify(b);
 const samePhase = (a: Phase, b: Phase): boolean => JSON.stringify(a) === JSON.stringify(b);
 
@@ -147,13 +147,14 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return withRight(run, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", `${subjectHeading(event.subject)}, round ${event.round}`));
     case "PlanWritten": {
       const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q}`).join("\n")}`;
-      const body = `**Claude Code wrote the plan (planning phase ${event.phase}).**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;
+      const body = `**${planWrittenHeading(event.phase)}**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;
       return withLeft(run, message(run, time, "program", body, "markdown"));
     }
     case "InterviewTurn": {
       const turn = event.summary === null ? { kind: "continuing" as const, message: event.message } : { kind: "summary_proposed" as const, message: event.message, summary: event.summary };
-      const body = event.summary === null ? event.message : `${event.message}\n\n**Summary proposed by Claude Code:**\n\n${event.summary}`;
-      return { ...withLeft(run, message(run, time, "program", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
+      const body = event.summary === null ? event.message : `${event.message}\n\n**${SUMMARY_PROPOSED_HEADING}**\n\n${event.summary}`;
+      // Issue #5: the interview's turns are Claude's words, so they are Claude's messages.
+      return { ...withLeft(run, message(run, time, "claude", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
     }
     case "InterviewOpened":
       // The page's own help (finding 8): no terminal """ convention, which the page does not implement.
@@ -170,6 +171,9 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return { ...run, activity: `${run.callLabel || AGENT[event.agent]} — ${event.ok ? "done" : "failed"}`, busy: false };
     case "ExecutionEnded":
       return run;
+    case "ClaudeSaid":
+      // Issue #5: Claude's prose is attributed as data, not by a prefix in its text.
+      return withLeft(run, message(run, time, "claude", event.text, "text"));
   }
 };
 

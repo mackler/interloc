@@ -8,6 +8,7 @@ import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
 import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
 import { interviewHelp } from "./prompts.ts";
+import { claudeLine } from "./render.ts";
 import { Ui as UiService, type UiShape } from "./services.ts";
 
 /**
@@ -64,8 +65,18 @@ export const terminalUi = (
 
     return {
       say: (text) => Effect.sync(() => void output.write(text + "\n")),
-      // The terminal prints only the interview's opening help (finding 8 of docs/gui-review.md); other events print nothing.
-      notify: (event) => (event._tag === "InterviewOpened" ? Effect.sync(() => void output.write(interviewHelp(event.heading, "terminal") + "\n")) : Effect.void),
+      // The terminal prints the interview's opening help (finding 8 of docs/gui-review.md) and Claude Code's prose with its
+      // "[claude] " prefix (issue #5); other events print nothing.
+      notify: (event) => {
+        switch (event._tag) {
+          case "InterviewOpened":
+            return Effect.sync(() => void output.write(interviewHelp(event.heading, "terminal") + "\n"));
+          case "ClaudeSaid":
+            return Effect.sync(() => void output.write(claudeLine(event.text) + "\n"));
+          default:
+            return Effect.void;
+        }
+      },
       ask: (prompt) =>
         Effect.gen(function* () {
           yield* showPrompt(prompt);

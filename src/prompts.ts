@@ -301,7 +301,7 @@ export function pagePromptText(kind: string, text: string): string {
         : `${rounds} rounds completed without convergence. Add rounds or stop.`;
     }
     case "execInput":
-      return "Your input for Claude Code";
+      return "Your input for Claude";
     case "optionOrText":
       return "Choose one of the options, or type your own answer.";
     case "permission":
@@ -311,7 +311,7 @@ export function pagePromptText(kind: string, text: string): string {
     case "confirmSummary":
       return "Confirm the summary, or write what should change.";
     case "startOrTalk":
-      return "Claude Code and Codex agree that no question is needed. Start planning, or write a message to open a conversation with Claude Code.";
+      return "Claude and Codex agree that no question is needed. Start planning, or write a message to open a conversation with Claude.";
     default:
       return text.replace(/\s*>\s*$/, "").trim();
   }
@@ -327,6 +327,21 @@ export function interviewHelp(heading: string, ui: "terminal" | "page"): string 
 // ---- the page's help and notices (W2-R1-4) --------------------------------------------------------------------------
 // Texts that the web page shows the user besides the prompts: the answer field's hint, the notices, the compact
 // layout's progress line and badge. Field and button labels stay in the components.
+
+/** The opening line of the page's message about a plan written in a planning phase (issue #5: the page says "Claude"). */
+export function planWrittenHeading(phase: number): string {
+  return `Claude wrote the plan (planning phase ${phase}).`;
+}
+/** The heading of the summary Claude proposes at the end of an interview, in the page. */
+export const SUMMARY_PROPOSED_HEADING = "Summary proposed by Claude:";
+/** The start form's description, in parts: plain text, a path, and the name of a button. */
+export const START_FORM_DESCRIPTION: readonly Readonly<{ text: string; style: "plain" | "code" | "strong" }>[] = [
+  { text: "Claude writes a plan, Codex reviews it until no issue remains, Claude implements it, and Codex reviews the work; the page asks you only where a decision is needed. The records are kept in the project's ", style: "plain" },
+  { text: "plan-review/", style: "code" },
+  { text: " directory. ", style: "plain" },
+  { text: "Stop task", style: "strong" },
+  { text: " ends a task like Ctrl+C in the terminal.", style: "plain" },
+];
 
 /** The hint under the answer field. */
 export function answerHint(free: "line" | "message"): string {

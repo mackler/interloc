@@ -3,6 +3,7 @@
   // active; help users recognise, diagnose and recover: the server's refusal is the field's error text;
   // recognition rather than recall: the directory browser, and the last path remembered].
   import { Button, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
+  import { START_FORM_DESCRIPTION } from "../../../src/prompts.ts";
   import { readRemembered, remember } from "../storage.ts";
 
   // Offline (the page has stopped reconnecting) Start and Browse… cannot reach the server and are disabled; the fields
@@ -32,11 +33,7 @@
 
 <form class="start" onsubmit={(e) => { e.preventDefault(); start(); }}>
   <h2 class="m3-font-title-large">New task</h2>
-  <p class="help m3-font-body-medium">
-    Claude Code writes a plan, Codex reviews it until no issue remains, Claude Code implements it, and Codex reviews
-    the work; the page asks you only where a decision is needed. The records are kept in the project's
-    <code>plan-review/</code> directory. <strong>Stop task</strong> ends a task like Ctrl+C in the terminal.
-  </p>
+  <p class="help m3-font-body-medium">{#each START_FORM_DESCRIPTION as part}{#if part.style === "code"}<code>{part.text}</code>{:else if part.style === "strong"}<strong>{part.text}</strong>{:else}{part.text}{/if}{/each}</p>
   <div class="row">
     <div class="field">
       <TextFieldOutlined label="Project directory" name="project" value={project} error={refused !== null} oninput={(e: Event) => (edited = (e.currentTarget as HTMLInputElement).value)} />

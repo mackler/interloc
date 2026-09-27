@@ -264,7 +264,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
             }
           } else if (message.type === "assistant") {
             for (const block of message.message.content) {
-              if (show === "text" && block.type === "text" && block.text.trim() !== "") yield* ui.say(`[claude] ${block.text.trim()}`);
+              if (show === "text" && block.type === "text" && block.text.trim() !== "") yield* ui.notify({ _tag: "ClaudeSaid", text: block.text.trim() });
               if (block.type === "tool_use" && block.name !== "StructuredOutput") {
                 const input = block.input as Record<string, unknown>;
                 const target = String(input?.file_path ?? input?.pattern ?? input?.command ?? "");

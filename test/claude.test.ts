@@ -225,6 +225,14 @@ test("an invalid execution report without a stop yields aborted, and no repair p
   assert.equal(fake.sdk.calls.length, 1);
 });
 
+// Issue #5: Claude Code's prose is attributed as data; the "[claude] " prefix is the terminal's rendering, not the text.
+test("Claude Code's prose in an execution call is a ClaudeSaid event, trimmed, and no line is said with the [claude] prefix", async () => {
+  const fake = await planner([messages(init(), assistantText("  working  "), success(null, "text only"))]);
+  await run(fake.planner.executing("implement the plan"));
+  assert.deepEqual(fake.ui.notified.filter((e) => e._tag === "ClaudeSaid"), [{ _tag: "ClaudeSaid", text: "working" }]);
+  assert.ok(!fake.ui.said.some((l) => l.startsWith("[claude]")), "Claude Code's prose was said with the prefix");
+});
+
 test("execution without a report and without a stop is aborted", async () => {
   const fake = await planner([messages(init(), assistantText("working"), success(null, "text only"))]);
   const outcome = await run(fake.planner.executing("implement the plan"));
