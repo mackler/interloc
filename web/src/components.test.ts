@@ -161,6 +161,9 @@ describe("StartForm", () => {
 // Issue #12: the agent's options are cards in a group of their own, the fixed choices buttons below them.
 const optionsGroup = (root: ParentNode) => root.querySelector<HTMLElement>(`[role=group][aria-label="${prompts.PROPOSED_ANSWERS_LABEL}"]`);
 const cardsOf = (root: ParentNode): HTMLButtonElement[] => [...(optionsGroup(root)?.querySelectorAll<HTMLButtonElement>("button") ?? [])];
+/** An m3-svelte Card: its container and variant, without the size and icon classes only m3-svelte's Button sets. */
+const isCard = (el: Element) =>
+  el.classList.contains("m3-container") && el.classList.contains("outlined") && !el.classList.contains("s") && ![...el.classList].some((c) => c.startsWith("icon-"));
 const paragraph = (n: number, topic: string) =>
   `${n}. ${topic}: ${"a sentence long enough to wrap over several lines of any window, with its reason and its consequences, ".repeat(3)}and its end ${n}.`;
 
@@ -175,7 +178,7 @@ describe("PromptWidget", () => {
     for (const card of cards) {
       expect(card.tagName).toBe("BUTTON");
       expect(card.type).toBe("button");
-      expect(card.classList.contains("outlined")).toBe(true);
+      expect(isCard(card), `${card.className} is a card`).toBe(true);
       expect(card.classList.contains("filled") || card.classList.contains("tonal")).toBe(false);
     }
     cards[1].click();
@@ -193,7 +196,7 @@ describe("PromptWidget", () => {
     const root = show(PromptWidget, { widget: widget(prompts.optionOrTextPrompt, options), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const cards = cardsOf(root);
     expect(cards.map((c) => c.textContent?.trim())).toEqual(options.map((o) => o.label));
-    expect(cards.every((c) => c.classList.contains("outlined"))).toBe(true);
+    expect(cards.map((c) => isCard(c))).toEqual([true, true, true]);
     cards[2].click();
     expect(sent).toEqual(["3"]);
     const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
