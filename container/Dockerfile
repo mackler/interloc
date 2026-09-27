@@ -42,6 +42,14 @@ RUN git clone --depth 1 --branch v${BATS_VERSION} https://github.com/bats-core/b
  && bats --version
 
 USER node
+
+# The runtime hands an exec session umask 0000, so everything created inside the container lands
+# world-writable (777 directories, 666 files) in the bind-mounted clone. 002 gives 775 and 664, which
+# is what files created on the host already have. Git records only the executable bit, so this
+# changes no committed mode; it keeps the working tree tidy.
+RUN printf 'umask 002\n' >> /home/node/.bashrc \
+ && printf 'umask 002\n' >> /home/node/.profile
+
 ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 ENV DISABLE_AUTOUPDATER=1
 WORKDIR /workspace
