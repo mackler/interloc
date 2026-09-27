@@ -2,6 +2,7 @@
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
 import { Data, Result, Schema } from "effect";
 import { type Change, renderChange } from "./snapshot.ts";
+import { cycleInvalidText, cycleLimitStopText } from "./prompts.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
 export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: readonly Change[] }> {}
@@ -79,7 +80,7 @@ export const describe = (error: RunErrorFields): string => {
       if (error.unknownDispositions.length > 0) parts.push(`Claude Code returned a disposition for an id that is not in the review: ${error.unknownDispositions.join(", ")}`);
       if (error.emptyIds.length > 0) parts.push(`an empty id in ${error.emptyIds.join(" and ")}`);
       if (error.collidingIds.length > 0) parts.push(`a generated self-correction id already exists in the log: ${error.collidingIds.join(", ")}`);
-      return `the cycle is invalid: ${parts.join("; ")}`;
+      return cycleInvalidText(parts);
     }
     case "QuestionListInvalid": {
       const parts: string[] = [];
@@ -88,7 +89,7 @@ export const describe = (error: RunErrorFields): string => {
       return `the question list is invalid: ${parts.join("; ")}`;
     }
     case "RoundLimitStop":
-      return `stopped by the user at the cycle limit of ${error.heading}`;
+      return cycleLimitStopText(error.heading);
     case "ClaudeCallFailed":
       return `Claude Code planning call failed: ${error.message}`;
     case "CodexCallFailed":

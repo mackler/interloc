@@ -278,6 +278,14 @@ export function unexplainedChangeSubject(fileLabel: string, heading: string, cyc
   return `the unexplained change to ${fileLabel} in ${cycleHeading(heading, cycle)}`;
 }
 
+/** The halt at the cycle limit, and a cycle whose round failed validation, as the user reads them (issue #14, W1-R1-1). */
+export function cycleLimitStopText(heading: string): string {
+  return `stopped by the user at the cycle limit of ${heading}`;
+}
+export function cycleInvalidText(parts: readonly string[]): string {
+  return `the cycle is invalid: ${parts.join("; ")}`;
+}
+
 // ---- work review ----------------------------------------------------------------------------------
 
 /** What the work review of phase k ended with: convergence, or leaving for a planning phase in a round. */

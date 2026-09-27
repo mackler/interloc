@@ -160,3 +160,9 @@ test("the interview rules define asked_ids with follow-up ids, and answered_ids 
   }
   assert.match(prompts.interviewGapsPrompt("r.json", ["G-R1-1"]), /use the issue ids in asked_ids and answered_ids/);
 });
+
+// W1-R1-1: the error texts the user reads at a halt are in src/prompts.ts too.
+test("the texts of an invalid cycle and of the stop at the cycle limit", () => {
+  assert.equal(prompts.cycleInvalidText(["a", "b"]), "the cycle is invalid: a; b");
+  assert.equal(prompts.cycleLimitStopText("Planning phase 1"), "stopped by the user at the cycle limit of Planning phase 1");
+});
