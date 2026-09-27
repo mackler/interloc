@@ -98,6 +98,16 @@ test("a user message in Markdown renders its emphasis", () => {
   expect(one(root, ".body strong").textContent).toBe("x");
 });
 
+// Issue #2: each author's article carries the class and data-author that its side rule in Message.svelte selects.
+test("every author's message carries its author as class and data-author", () => {
+  for (const author of ["claude", "codex", "user", "program"] as const) {
+    const root = show(MessageView, { message: { key: `1-${author}`, author, heading: null, body: "x", format: "text", time: "2026-09-27T14:00:00.000Z", showTime: true } });
+    const article = one(root, "article");
+    expect(article.classList.contains(author)).toBe(true);
+    expect(article.dataset.author).toBe(author);
+  }
+});
+
 describe("StartForm", () => {
   test("the description is the page's help text from src/prompts.ts, and says Claude (issue #5)", () => {
     const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, onStart: () => undefined, onBrowse: () => undefined });

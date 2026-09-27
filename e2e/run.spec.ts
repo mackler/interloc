@@ -1,4 +1,4 @@
-import type { Page, WebSocketRoute } from "@playwright/test";
+import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
@@ -9,6 +9,22 @@ const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
 const right = (page: Page) => page.getByRole("region", { name: "Claude and Codex" });
 const rail = (page: Page) => page.getByRole("navigation", { name: "Progress of the run" });
+
+type Edges = { left: number; right: number };
+/** The horizontal edges of an element's content box: less its padding and, on the right, any scrollbar (P1-R2-2). */
+const contentEdges = (el: Locator): Promise<Edges> =>
+  el.evaluate((e) => {
+    const r = e.getBoundingClientRect();
+    const cs = getComputedStyle(e);
+    const left = r.left + e.clientLeft;
+    return { left: left + parseFloat(cs.paddingLeft), right: left + e.clientWidth - parseFloat(cs.paddingRight) };
+  });
+const edges = (el: Locator): Promise<Edges> => el.evaluate((e) => ({ left: e.getBoundingClientRect().left, right: e.getBoundingClientRect().right }));
+/** Issue #2: a message lies on the named side of its container's content box, within 2 px. */
+const onSide = async (message: Locator, container: Locator, side: "left" | "right") => {
+  const [m, c] = [await edges(message), await contentEdges(container)];
+  expect(Math.abs(m[side] - c[side]), `${side} edge ${m[side]} against ${c[side]}`).toBeLessThanOrEqual(2);
+};
 
 /** Opens the page, returns to the form if a run has ended, and starts a task. */
 const startTask = async (page: Page, scenario: Scenario, task: string) => {
@@ -40,6 +56,10 @@ test("(1) a run from the form: the timeline shows its phases and the right panel
   await expect(right(page).getByText(/accepted: rationale P1-R1-1/)).toBeVisible();
   await expect(left(page).getByText(/finished after 1 execution phase/)).toBeVisible();
   await expect(page.locator("button[name=new]")).toBeVisible();
+  // Issue #2: in the right panel Claude speaks from the left and Codex from the right.
+  const list = right(page).locator(".list");
+  await onSide(list.locator("article[data-author=claude]").first(), list, "left");
+  await onSide(list.locator("article[data-author=codex]").first(), list, "right");
 });
 
 test("(2) a decision prompt with its buttons: No decision continues, and the answer is the user's message", async ({ page }) => {
@@ -90,6 +110,11 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await expect(left(page).getByText('"""')).toHaveCount(0);
   await page.getByRole("button", { name: "1. PostgreSQL" }).click();
   await expect(left(page).getByText("Anything else?")).toBeVisible();
+  // Issue #2 (Q5): in the left panel Claude and Interloq speak from the left, the user from the right.
+  const list = left(page).locator(".list");
+  await onSide(list.locator("article[data-author=claude]").first(), list, "left");
+  await onSide(list.locator("article[data-author=program]").first(), list, "left");
+  await onSide(list.locator("article[data-author=user]").first(), list, "right");
   await page.getByRole("button", { name: "End interview" }).click();
   await expect(left(page).getByText("The service uses PostgreSQL.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();

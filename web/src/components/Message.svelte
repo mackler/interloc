@@ -4,6 +4,7 @@
   // (issue #1) [visibility of system status]: shown in the header, small and low-emphasis, unless the message is grouped
   // with the one before it (decision Q3) [aesthetic and minimalist design]; then it stays for assistive technology and
   // the title. It never changes, so the panel's polite live region announces it once, with the message.
+  // The side of a message is its author's: Interloq and Claude on the left, the user and Codex on the right (issue #2).
   import { render } from "../markdown.ts";
   import type { Author, Message } from "../state.ts";
   import { clockTime, fullTime } from "../time.ts";
@@ -26,8 +27,9 @@
   .message { position: relative; max-width: 85%; padding: 0.5rem 0.875rem; border-radius: var(--m3-shape-large); margin: 0.25rem 0; overflow-wrap: anywhere; }
   .program { align-self: flex-start; background: var(--m3c-surface-container-high); color: var(--m3c-on-surface); }
   .user { align-self: flex-end; background: var(--m3c-primary-container); color: var(--m3c-on-primary-container); }
-  .codex { align-self: flex-start; background: var(--m3c-tertiary-container); color: var(--m3c-on-tertiary-container); }
-  .claude { align-self: flex-end; background: var(--m3c-secondary-container); color: var(--m3c-on-secondary-container); }
+  /* Issue #2: Claude speaks from the left in both panels (beside Interloq in the left one), Codex from the right. */
+  .claude { align-self: flex-start; background: var(--m3c-secondary-container); color: var(--m3c-on-secondary-container); }
+  .codex { align-self: flex-end; background: var(--m3c-tertiary-container); color: var(--m3c-on-tertiary-container); }
   header { opacity: 0.8; margin-bottom: 0.25rem; }
   .time { opacity: 0.7; margin-left: 0.5rem; white-space: nowrap; }
   .visually-hidden { position: absolute; width: 1px; height: 1px; margin: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
