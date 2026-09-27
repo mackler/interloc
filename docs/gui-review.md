@@ -115,8 +115,8 @@ The documented open question about streamed thread context is deliberately not a
 ## Disposition
 
 Applied 26 Sep 2026 in the stages of `docs/gui-review-response.md`, which is the agreed disposition of every finding.
-Stage A was committed first and alone; the rest ran through plan-review itself (decision D2), from the installed
-copy at `/opt/plan-review`, which did not yet contain stage A. Row 15 was found by the developer after the review.
+Stage A was committed first and alone; the rest ran through Interloq itself (decision D2), from the installed
+copy at `/opt/interloq`, which did not yet contain stage A. Row 15 was found by the developer after the review.
 
 | # | Severity | Outcome | Commit |
 |---|---|---|---|
@@ -126,7 +126,7 @@ copy at `/opt/plan-review`, which did not yet contain stage A. Row 15 was found 
 | 4 | Medium | Done: the project must be a worktree's top-level directory; a subdirectory is refused with the root named, a bare repository is refused, before anything is archived or initialised | `45c4c67` |
 | 5 | Medium | Done: the draft is keyed by (incarnation, run, prompt) and reconciled with the view after every message, live or replayed; another tab's answer withdraws it with a notice that quotes it; a two-tab browser scenario | `837b954`, `061f499` |
 | 6 | Medium | Done: a composing Enter does not send; persistent field labels, a hint and a visible Send (the hint's text moved to `src/prompts.ts` after work review 2, W2-R1-4) | `837b954`, `061f499`, `5112ae7` |
-| 7 | Medium | Done (decision D1: in scope; decision Q3: selectable panels): below 840 px a progress disclosure, one panel at a time with a badge, a prompt selecting "You and plan-review", a wrapping top bar; layout tests at 390 × 844, 640 × 400 and 1280 × 800. After work review 2 (W2-R1-1, W2-R1-3) and planning 3 (P3-R1-1): the panels stay mounted and keep their reading position across a switch or a resize, a hidden panel follows its end when shown again, and a prompt is recognised by its full key | `9aa731e`, `5112ae7` |
+| 7 | Medium | Done (decision D1: in scope; decision Q3: selectable panels): below 840 px a progress disclosure, one panel at a time with a badge, a prompt selecting "You and Interloq", a wrapping top bar; layout tests at 390 × 844, 640 × 400 and 1280 × 800. After work review 2 (W2-R1-1, W2-R1-3) and planning 3 (P3-R1-1): the panels stay mounted and keep their reading position across a switch or a resize, a hidden panel follows its end when shown again, and a prompt is recognised by its full key | `9aa731e`, `5112ae7` |
 | 8 | Low | Done: the interview's opening is the event `InterviewOpened`, rendered by the terminal with `"""` and by the page with Shift+Enter; an interview scenario in the browser | `837b954`, `061f499` |
 | 9 | Medium | Done: the vacuous exclusion property deleted and replaced by one against an independent path policy; the driver's script selection fixed; the first exit, its round and its pauses checked against an independent model, and nothing after a correction's logged checkpoint but the exit | `061f499` |
 | 10 | Medium | Done: every browser test fails on an uncaught or console error in any page of its context; scenarios for the interview, a work correction through phase 2, two tabs with a draft, a dropped socket, a long transcript, refused storage and composition. Recurred 27 Sep 2026: the interview scenario's question review raised no issue, so no scenario carried a question list's response, and defect A of `docs/page-question-phase-defects.md` (the response's `questions` refused by the page's decoding) reached the first real run with a question phase; now a replay fold of a question phase through `decodeServer` and the end-to-end scenario `questionReview` (the list, its review with an issue, the response, an interview turn, an answer, the requirements review, and a second tab's replay) cover it | `061f499`, `9aa731e`, `04811df`, `d2caaea` |

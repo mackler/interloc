@@ -6,7 +6,7 @@ import { expect, test } from "./fixtures.ts";
 const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109 } as const;
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
-const left = (page: Page) => page.getByRole("region", { name: "You and plan-review" });
+const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
 const right = (page: Page) => page.getByRole("region", { name: "Claude Code and Codex" });
 const rail = (page: Page) => page.getByRole("navigation", { name: "Progress of the run" });
 

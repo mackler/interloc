@@ -17,7 +17,7 @@
 </script>
 
 <header class="bar">
-  <h1 class="m3-font-title-large">plan-review</h1>
+  <h1 class="m3-font-title-large">Interloq</h1>
   <div class="task">
     {#if run !== null}
       <span class="m3-font-body-medium project">{run.project}</span>

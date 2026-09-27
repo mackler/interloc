@@ -48,11 +48,11 @@ approved; two decisions are marked for the developer.
 
 ## Sequencing, and why finding 1 comes first
 
-The obvious route is to hand this to plan-review itself, as with the functional design review, so that
+The obvious route is to hand this to Interloq itself, as with the functional design review, so that
 the new work review checks the result. That route is unsound until finding 1 is fixed: a work-review
 response can today rewrite `plan.md`, so the phase meant to police the work can silently rewrite the
 plan the work is judged against. **Fix finding 1 by hand, test first, and commit it before any run of
-the program on this repository.** Everything after that can go through plan-review normally.
+the program on this repository.** Everything after that can go through Interloq normally.
 
 ## Work
 
@@ -93,8 +93,8 @@ the program on this repository.** Everything after that can go through plan-revi
    trip on the orchestrator's own writes during the call: `usage.jsonl` and `invalid-replies/` are
    written by the program, and the invalid-reply file precedes a repair turn. Hook-prevention tests
    and detection tests are separate: the latter bypass the hook deliberately.
-2. **Committing stage A here is not the handoff.** The run uses `/opt/plan-review`, a read-only mount
-   of `~/work/plan-review`, so stage A reaches a run only after `git pull` and `npm ci` there. And
+2. **Committing stage A here is not the handoff.** The run uses `/opt/interloq`, a read-only mount
+   of `~/work/interloq`, so stage A reaches a run only after `git pull` and `npm ci` there. And
    stage A does not make everything else safe: the lifecycle defects of findings 11 and 12 are in the
    page's Start and Answer paths, so the terminal is the sound interface until stage C is committed
    and installed.
@@ -124,7 +124,7 @@ the program on this repository.** Everything after that can go through plan-revi
 
 - **D1, finding 7.** Is a usable page below roughly 900 pixels a requirement, or is the desktop window
   the agreed scope with the limit recorded in CLAUDE.md?
-- **D2, route.** After stage A is committed by hand, does the rest go through plan-review as one task
+- **D2, route.** After stage A is committed by hand, does the rest go through Interloq as one task
   in stages, or by hand here? Through the program is the better test of the program; by hand is
   cheaper and faster.
 
@@ -147,7 +147,7 @@ test green and committed on its own with the observed failures in the commit mes
 and alone in its own commit: work-review responses become read-only, enforced by a capability rather
 than a list of tool names, because a work response can today write any file under plan-review/ and so
 rewrite the plan it is judged against. Note while you work that the orchestrator running this task is
-the installed copy at /opt/plan-review, which does not contain stage A, so this run is not itself
+the installed copy at /opt/interloq, which does not contain stage A, so this run is not itself
 protected by it; do not rely on the work review to catch a change to plan-review/ during this run.
 Then the remaining stages in the order of the response document: typed edges, identity and lifecycle,
 page input and help, verification, and the adaptive layout of finding 7. The verification stage

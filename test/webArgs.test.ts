@@ -12,7 +12,7 @@ test("parsePort: the default, a given port, and the invalid ones", () => {
 });
 
 test("distMissingMessage names the file and the command that builds it", () => {
-  const text = distMissingMessage("/opt/plan-review/web/dist/index.html");
-  assert.match(text, /\/opt\/plan-review\/web\/dist\/index\.html/);
+  const text = distMissingMessage("/opt/interloq/web/dist/index.html");
+  assert.match(text, /\/opt\/interloq\/web\/dist\/index\.html/);
   assert.match(text, /npm run build/);
 });

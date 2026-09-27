@@ -1,4 +1,4 @@
-// Usage: node /opt/plan-review/src/web.ts [port]   (default 8090)
+// Usage: node /opt/interloq/src/web.ts [port]   (default 8090)
 // Untested wiring (plan step 3.5): the web server with the live wiring per run,
 // under the platform runner. The page is served from web/dist (npm run build).
 
@@ -54,7 +54,7 @@ const main = Effect.gen(function* () {
   // Registered after serveEffect, so that it runs before the HTTP shutdown, which would wait for the open tabs (finding 15).
   yield* Effect.addFinalizer(() => web.closeAll);
   yield* Effect.sync(() => void process.stdout.write(
-    `plan-review web GUI on http://localhost:${port}/ (working directory ${process.cwd()}); Ctrl+C ends the server.\n`));
+    `Interloq web GUI on http://localhost:${port}/ (working directory ${process.cwd()}); Ctrl+C ends the server.\n`));
   return yield* Effect.never;
 }).pipe(
   Effect.scoped,

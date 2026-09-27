@@ -3,9 +3,9 @@ import { expect, test } from "./fixtures.ts";
 
 // Finding 7 of docs/gui-review.md, decision Q3: the layout adapts. At M3's expanded width (840 px and wider) the rail
 // and both panels are side by side; below it, one panel at a time, chosen by its title, with a badge for the other's
-// new messages, and a prompt selects "You and plan-review". The "tabs" server asks two decisions in a row.
+// new messages, and a prompt selects "You and Interloq". The "tabs" server asks two decisions in a row.
 const URL = "http://127.0.0.1:8106/";
-const LEFT = "You and plan-review";
+const LEFT = "You and Interloq";
 const RIGHT = "Claude Code and Codex";
 const panel = (page: Page, name: string) => page.getByRole("region", { name });
 const box = async (locator: Locator) => {
@@ -41,7 +41,7 @@ const compactChecks = async (page: Page, context: import("@playwright/test").Bro
   expect((await box(page.locator("[name=answer]"))).width, "the answer field's width").toBeGreaterThanOrEqual(280);
   await expect(panel(page, RIGHT)).toBeHidden();
 
-  // The other panel by its title; a prompt brings "You and plan-review" back.
+  // The other panel by its title; a prompt brings "You and Interloq" back.
   await page.getByRole("button", { name: new RegExp(RIGHT) }).click();
   await expect(panel(page, RIGHT)).toBeVisible();
   await expect(panel(page, LEFT)).toBeHidden();
@@ -156,7 +156,7 @@ test("(L7) with the right panel shown, the page still says that the server has e
 
 // W2-R1-1: prompt 1 of a new run is a new prompt, although its number is that of the old run's prompt. The page is
 // disconnected while run 1 ends and run 2 starts, so the replay brings run 2's prompt 1 with no step without a prompt.
-test("(L8) a new run's first prompt selects 'You and plan-review' although the old run waited on a prompt of the same number", async ({ page, context }) => {
+test("(L8) a new run's first prompt selects 'You and Interloq' although the old run waited on a prompt of the same number", async ({ page, context }) => {
   let hold = false;
   let current: import("@playwright/test").WebSocketRoute | null = null;
   await page.routeWebSocket(/\/ws$/, (ws) => {

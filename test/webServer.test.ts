@@ -24,7 +24,7 @@ const managerOf = async (repo: string, scripts: TestOptions[]): Promise<RunManag
 };
 const dist = (): string => {
   const d = tempDir("pr-dist-");
-  fs.writeFileSync(path.join(d, "index.html"), "<!doctype html><title>plan-review</title>");
+  fs.writeFileSync(path.join(d, "index.html"), "<!doctype html><title>Interloq</title>");
   fs.mkdirSync(path.join(d, "assets"));
   fs.writeFileSync(path.join(d, "assets", "app.js"), "console.log(1)");
   return d;
@@ -103,7 +103,7 @@ test("the page and its assets are served; any other path, and a path out of the 
     const get = (p: string) => fetch(`http://127.0.0.1:${port}${p}`);
     const page = await get("/");
     assert.equal(page.status, 200);
-    assert.match(await page.text(), /plan-review/);
+    assert.match(await page.text(), /Interloq/);
     assert.equal((await get("/assets/app.js")).status, 200);
     assert.equal((await get("/nope")).status, 404);
     assert.equal((await get("/assets/..%2F..%2Fetc%2Fpasswd")).status, 404);

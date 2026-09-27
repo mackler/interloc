@@ -1,4 +1,4 @@
-// Usage: node /opt/plan-review/src/main.ts "task description" [project directory]
+// Usage: node /opt/interloq/src/main.ts "task description" [project directory]
 // The project directory defaults to the current directory.
 // Untested code U2 (plan step 6.2): the platform runner applied to the program with the live wiring.
 

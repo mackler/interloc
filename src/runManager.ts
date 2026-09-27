@@ -113,7 +113,7 @@ export const makeRunManager = (wiring: (ui: WebUi) => Wiring, cwd: string, incar
         if (top.code !== 0) return `${project} is not in a git working tree`;
         const here = yield* fs.realPath(project).pipe(Effect.catch(() => Effect.succeed(project)));
         const root = yield* fs.realPath(top.out).pipe(Effect.catch(() => Effect.succeed(top.out)));
-        return here === root ? null : `${project} is inside the git repository ${root}; choose its top-level directory, the project that plan-review reviews`;
+        return here === root ? null : `${project} is inside the git repository ${root}; choose its top-level directory, the project that Interloq reviews`;
       });
 
     /** The run with that id, if it is the current one. */

@@ -8,7 +8,7 @@ as CLAUDE.md's section "User interface" requires. "Changed" names what this revi
 | Heuristic | Where the page satisfies it | Changed in this review |
 |---|---|---|
 | 1. Visibility of system status | Timeline rail with every phase done, active or stopped, and the rounds per review loop; progress indicator while an agent works; activity line with the current agent call and its last tool use; the connection chip in the app bar ("connected", "reconnecting…"); a notice when a queued action was discarded | — |
-| 2. Match between the system and the real world | Two chat panels like a messaging app, with the authors named (plan-review, You, Codex, Claude Code); the agents' Markdown rendered | Prompts were shown with the terminal's key conventions ("Enter = none, q = quit >"), which do not exist in the page; they are now stated in the page's words (`pagePromptText` in `src/prompts.ts`), and the buttons carry the choices. That removal was incomplete (finding 8 of `docs/gui-review.md`): the interview's opening still taught the terminal's `"""` convention, which the page does not implement. The opening is now the event `InterviewOpened`, which the terminal renders with `"""` and the page with Shift+Enter (`interviewHelp` in `src/prompts.ts`) |
+| 2. Match between the system and the real world | Two chat panels like a messaging app, with the authors named (Interloq, You, Codex, Claude Code); the agents' Markdown rendered | Prompts were shown with the terminal's key conventions ("Enter = none, q = quit >"), which do not exist in the page; they are now stated in the page's words (`pagePromptText` in `src/prompts.ts`), and the buttons carry the choices. That removal was incomplete (finding 8 of `docs/gui-review.md`): the interview's opening still taught the terminal's `"""` convention, which the page does not implement. The opening is now the event `InterviewOpened`, which the terminal renders with `"""` and the page with Shift+Enter (`interviewHelp` in `src/prompts.ts`) |
 | 3. User control and freedom | Stop task at any time (like Ctrl+C); Quit at every prompt, as in the terminal; the chat does not scroll away from a user who has scrolled up (a "new messages" chip instead); New task after the end | — |
 | 4. Consistency and standards | Every button sends exactly the text the terminal would receive; one top app bar; M3 components and colour roles throughout | — |
 | 5. Error prevention | Start is disabled until the directory and the task are filled and no run is active; the path is checked by the server before a run starts (a worktree's top-level directory); an unsent draft belongs to its prompt, and an answer from another tab withdraws it with a notice that quotes it, instead of leaving it under the next prompt; Enter while an input method is composing does not send; a failure to remember the directory never blocks Start; Stop is outlined, labelled "Stop task", placed in the app bar away from the prompt, and disabled without a run (no confirmation dialog, which behaviour 1 excludes) | — |
@@ -40,7 +40,7 @@ layout now follows M3's window size classes (`web/src/layout.ts`, `App.svelte`, 
   is one tap away]. One panel is shown at a time, chosen in an M3 segmented group labelled with the panels' own titles
   [consistency and standards: the same names as the wide page; recognition rather than recall]. The hidden panel's
   button counts its new messages ("· 3 new") [visibility of system status], and a new prompt selects "You and
-  plan-review", where it is answered; otherwise only the user changes the panel [user control and freedom]. Below
+  Interloq", where it is answered; otherwise only the user changes the panel [user control and freedom]. Below
   that height the page scrolls vertically, and a panel keeps at least 12.5rem.
 - **The top bar** wraps: the title, the connection and Stop stay on the first line (the title at M3's 22 px below
   600 px), and the project and the task move to a second line.
@@ -50,7 +50,7 @@ layout now follows M3's window size classes (`web/src/layout.ts`, `App.svelte`, 
   hidden goes to its end when shown again if it was following, and otherwise keeps the user's place with the chip
   counting what arrived; the latest notice stands above the panels in a compact window, so the server's end or a
   withdrawn draft is seen whichever panel is shown [visibility of system status]; a new prompt is recognised by its
-  full identity, so a new run's first prompt selects "You and plan-review" after a reconnection too.
+  full identity, so a new run's first prompt selects "You and Interloq" after a reconnection too.
 
 `e2e/layout.spec.ts` checks, at 390 × 844 and at 640 × 400, that nothing overflows sideways, that the shown panel is
 at least 300 px wide (and 400 or 200 px high) and the answer field at least 280 px wide, the panel switch, the badge

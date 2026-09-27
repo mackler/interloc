@@ -1,6 +1,6 @@
 // The page's layout state at compact widths (finding 7 of docs/gui-review.md, decision Q3), pure. Below M3's expanded
 // breakpoint only one of the two panels is shown; the other's new messages are counted for its badge, and a new
-// prompt selects "You and plan-review", where the prompt is answered.
+// prompt selects "You and Interloq", where the prompt is answered.
 
 import type { DraftKey } from "./draft.ts";
 

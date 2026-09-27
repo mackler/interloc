@@ -1,13 +1,13 @@
-# compose.cc.yaml — Claude Code container for developing plan-review.
+# compose.cc.yaml — Claude Code container for developing Interloq.
 # Use it from the development clone only; the mount below is the current directory.
 # The container also carries the Codex credentials and the installed program at
-# /opt/plan-review, so that the installed orchestrator can be run against this clone.
+# /opt/interloq, so that the installed orchestrator can be run against this clone.
 # This container has no firewall: Claude Code and Codex in it reach every host.
-name: plan-review-dev
+name: interloq-dev
 
 services:
   cc:
-    container_name: plan-review-claude
+    container_name: interloq-claude
     build:
       context: ../claude-code-image
     image: claude-code-base
@@ -17,10 +17,10 @@ services:
       - ./:/workspace
       - claude-config:/home/node/.claude
       - codex-config:/home/node/.codex
-      - ${HOME}/work/plan-review:/opt/plan-review:ro
+      - ${HOME}/work/interloq:/opt/interloq:ro
     environment:
       - CLAUDE_CODE_OAUTH_TOKEN
-    # The web GUI (node /opt/plan-review/src/web.ts, default port 8090), reached from the host's browser at
+    # The web GUI (node /opt/interloq/src/web.ts, default port 8090), reached from the host's browser at
     # http://localhost:8090/ without a token or login. A new ports line takes effect when the container is recreated.
     ports:
       - "8090:8090"
@@ -32,7 +32,11 @@ services:
     init: true
 
 volumes:
+  # Created under the compose project's former name, plan-review-dev, and named explicitly here so that
+  # renaming the project to interloq-dev keeps the Claude Code login instead of making an empty volume.
   claude-config:
+    external: true
+    name: plan-review-dev_claude-config
   codex-config:
     external: true
     name: iou-notes-codex_codex-config

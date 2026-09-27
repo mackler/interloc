@@ -1,4 +1,4 @@
-# History of plan-review
+# History of Interloq
 
 A record of the decisions made while the program was designed, written for a reader who was not
 present. Dates are 20 and 21 September 2026.
@@ -83,7 +83,7 @@ thread context is kept across turns with a schema per turn.
   fetch fails), so the keyword can only be set in the start command.
 - The Codex credentials volume of the Codex compose project (`iou-notes-codex_codex-config`) is
   mounted into the `cc` service as an external volume, so one login serves both containers.
-- This repository is mounted read-only at `/opt/plan-review` in project containers.
+- This repository is mounted read-only at `/opt/interloq` in project containers.
   `node_modules` installed on the developer's desktop (Linux x86-64 glibc, Node 24) works in the
   containers (Node 22/26).
 
@@ -134,9 +134,9 @@ corrections:
 
 ## Development arrangement
 
-`~/work/plan-review` is the installed program that project containers mount. Development happens in
-a separate clone, `~/work/plan-review-dev`, in its own Claude Code container (`compose.cc.yaml`,
-`bin/dev-claude`). The developer adopts a version with `git pull ~/work/plan-review-dev main` in the
+`~/work/interloq` is the installed program that project containers mount. Development happens in
+a separate clone, `~/work/interloq-dev`, in its own Claude Code container (`compose.cc.yaml`,
+`bin/dev-claude`). The developer adopts a version with `git pull ~/work/interloq-dev main` in the
 installed directory. A worktree was rejected for the development clone because its `.git` file
 refers to a host path that does not exist inside the container. In the development container the
 state file is stored in the `claude-config` volume because the base image sets

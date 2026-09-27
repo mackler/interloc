@@ -31,7 +31,8 @@ more achieving. That's Interloq.
 Interloq asks you only where a decision is needed, for example when the two agents disagree
 repeatedly or a review reaches its round limit.
 
-Behind the brand, the program's command and its records directory are both called `plan-review`.
+Behind the brand, the records each run leaves behind go in a directory called `plan-review/` inside
+your project; that name is unchanged from before the program was called Interloq.
 
 ## What you need
 
@@ -55,11 +56,11 @@ Interloq uses two clones of this repository on the host:
 
 | Copy | Path on the host | Purpose |
 |---|---|---|
-| Installed copy | `~/work/plan-review` | What real runs use. Containers mount it read-only at `/opt/plan-review`. |
-| Development copy | `~/work/plan-review-dev` | Where changes are made. Use `bin/dev-claude` to start its container. |
+| Installed copy | `~/work/interloq` | What real runs use. Containers mount it read-only at `/opt/interloq`. |
+| Development copy | `~/work/interloq-dev` | Where changes are made. Use `bin/dev-claude` to start its container. |
 
 `bin/dev-claude` manages the development container (`compose.cc.yaml`). That container mounts the
-development copy at `/workspace` and the installed copy at `/opt/plan-review`, holds both agents'
+development copy at `/workspace` and the installed copy at `/opt/interloq`, holds both agents'
 credentials, and publishes port 8090 for the web page.
 
 | Command | What it does |
@@ -73,12 +74,12 @@ credentials, and publishes port 8090 for the web page.
 
 ## First-time setup
 
-1. Clone the repository twice: once to `~/work/plan-review` (the installed copy) and once to
-   `~/work/plan-review-dev` (the development copy).
+1. Clone the repository twice: once to `~/work/interloq` (the installed copy) and once to
+   `~/work/interloq-dev` (the development copy).
 2. On the host, in the installed copy, install the dependencies and build the page:
 
    ```sh
-   cd ~/work/plan-review
+   cd ~/work/interloq
    npm ci
    npm run build
    ```
@@ -87,7 +88,7 @@ credentials, and publishes port 8090 for the web page.
    commits:
 
    ```sh
-   cd ~/work/plan-review-dev
+   cd ~/work/interloq-dev
    npm ci
    git config core.hooksPath .githooks
    ```
@@ -109,11 +110,11 @@ credentials, and publishes port 8090 for the web page.
 
    ```sh
    bin/dev-claude shell
-   node /opt/plan-review/src/web.ts
+   node /opt/interloq/src/web.ts
    ```
 
    The server listens on port 8090, which the container publishes to the host. To use another port,
-   start the server with the port as its argument (`node /opt/plan-review/src/web.ts <port>`). Also
+   start the server with the port as its argument (`node /opt/interloq/src/web.ts <port>`). Also
    add a matching `ports` line to `compose.cc.yaml`, run `bin/dev-claude down` and start the
    container again so that the line takes effect, and open `http://localhost:<port>/` instead.
 2. On the host, open **http://localhost:8090/** in your browser.
@@ -127,14 +128,14 @@ credentials, and publishes port 8090 for the web page.
    ending.
 
 If the server reports that "the page has not been built", run `npm run build` on the host in
-`~/work/plan-review`, then start the server again.
+`~/work/interloq`, then start the server again.
 
 ## Run from the terminal instead
 
 Inside the container:
 
 ```sh
-node /opt/plan-review/src/main.ts "task description" [project directory]
+node /opt/interloq/src/main.ts "task description" [project directory]
 ```
 
 Or from the host, in the development copy:
@@ -154,7 +155,7 @@ the following:
 1. **Test and commit in the development copy.**
 
    ```sh
-   cd ~/work/plan-review-dev   # or /workspace inside the development container
+   cd ~/work/interloq-dev   # or /workspace inside the development container
    npm test
    git commit ...
    ```
@@ -164,8 +165,8 @@ the following:
 2. **Pull into the installed copy, on the host.**
 
    ```sh
-   cd ~/work/plan-review
-   git pull ~/work/plan-review-dev main
+   cd ~/work/interloq
+   git pull ~/work/interloq-dev main
    ```
 
 3. **Check whether the dependencies changed.**
@@ -188,7 +189,7 @@ the following:
    npm run build
    ```
 6. **Restart the web server.** It loads its code only at startup. Press Ctrl+C in its terminal, then
-   start it again with `node /opt/plan-review/src/web.ts`.
+   start it again with `node /opt/interloq/src/web.ts`.
 7. **Reload every open browser tab.** A tab reconnects by itself, but it keeps running the old page
    until you reload it.
 8. **Terminal runs** pick up the change the next time they start. No further step is needed.

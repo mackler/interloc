@@ -6,7 +6,7 @@
   // chosen by its title in a segmented group [aesthetic and minimalist design: nothing is squeezed to unreadable
   // widths; visibility of system status: the current phase stays in view and a badge counts the hidden panel's new
   // messages; user control: the user chooses the panel, and only a new prompt, which is answered in "You and
-  // plan-review", selects it].
+  // Interloq", selects it].
   import { Button, ConnectedButtons } from "m3-svelte";
   import { untrack } from "svelte";
   import { CONNECTION_FAILED_NOTICE, notSentNotice, progressLine, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
@@ -72,7 +72,7 @@
   });
   /** Whether a column is shown: both at expanded width, the selected one below it. */
   const shown = (pane: Pane): boolean => !compact || layout.selected === pane;
-  const TITLES: Record<Pane, string> = { left: "You and plan-review", right: "Claude Code and Codex" };
+  const TITLES: Record<Pane, string> = { left: "You and Interloq", right: "Claude Code and Codex" };
   /** The one-line progress of a compact window: the current phase and its latest round (the text: src/prompts.ts). */
   const progressOf = (r: NonNullable<ViewState["run"]>): string => {
     const entry = [...r.timeline].reverse().find((e) => e.state === "active") ?? r.timeline[r.timeline.length - 1];

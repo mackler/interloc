@@ -8,7 +8,7 @@ export type StorageLike = { getItem: (key: string) => string | null; setItem: (k
 export type AcquireStorage = () => StorageLike | undefined;
 export type Stored<A> = { ok: true; value: A } | { ok: false };
 
-const KEY = "plan-review.project";
+const KEY = "interloq.project";
 export const browserStorage: AcquireStorage = () => (typeof localStorage === "undefined" ? undefined : localStorage);
 
 /** The remembered project directory ("" when none was remembered). */

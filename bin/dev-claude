@@ -8,7 +8,7 @@ compose=(docker compose -f "$root/compose.cc.yaml")
 
 usage() {
     cat <<'EOF'
-dev-claude -- Claude Code in the development container of plan-review.
+dev-claude -- Claude Code in the development container of Interloq.
 
 Usage:
   bin/dev-claude [run] [claude arguments]   start the container if needed, then start Claude Code
@@ -28,7 +28,7 @@ Examples:
 
 The script uses compose.cc.yaml in the root of the clone that contains the script, and that
 file mounts the same clone at /workspace. Run it from the development clone, not from the
-installed directory that project containers mount at /opt/plan-review.
+installed directory that project containers mount at /opt/interloq.
 EOF
 }
 
@@ -64,7 +64,7 @@ case "$command" in
         ;;
     review)
         ensure_running
-        exec "${compose[@]}" exec -it cc node /opt/plan-review/src/main.ts "$@"
+        exec "${compose[@]}" exec -it cc node /opt/interloq/src/main.ts "$@"
         ;;
     down)
         exec "${compose[@]}" down

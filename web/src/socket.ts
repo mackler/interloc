@@ -93,7 +93,7 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
   /** A frame that did not decode is never dropped in silence: logged, reported, and the connection renewed with backoff. */
   const protocolError = (s: SocketLike, reason: string) => {
     protocolErrors += 1;
-    env.logError(`plan-review: a message from the server could not be read (${protocolErrors} in a row): ${reason}`);
+    env.logError(`Interloq: a message from the server could not be read (${protocolErrors} in a row): ${reason}`);
     handlers.onProtocolError(reason, protocolErrors);
     if (protocolErrors >= PROTOCOL_ERROR_LIMIT) return fail(s);
     // Detached before it closes (W1-R1-1): a browser's close event comes later, and an action sent meanwhile would
