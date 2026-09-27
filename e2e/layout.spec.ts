@@ -20,11 +20,16 @@ const startTask = async (page: Page, task: string, url = URL) => {
   await expect(page.locator("textarea[name=task], button[name=new], button[name=stop]:not([disabled])").first()).toBeVisible();
   const stop = page.locator("button[name=stop]");
   const again = page.locator("button[name=new]");
-  if (await stop.isEnabled()) {
-    await stop.click();
-    await again.click();
-  } else if (await again.isVisible()) await again.click();
-  await page.locator("textarea[name=task]").fill(task);
+  const form = page.locator("textarea[name=task]");
+  // Retried as a whole: the left run can end between the check and the click (it did on a loaded machine), after
+  // which Stop stays disabled and a plain click would wait for the test's whole timeout.
+  await expect(async () => {
+    if (await form.isVisible()) return;
+    if (await stop.isEnabled({ timeout: 1_000 }).catch(() => false)) await stop.click({ timeout: 2_000 });
+    await again.click({ timeout: 5_000 });
+    await expect(form).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 60_000 });
+  await form.fill(task);
   await page.locator("button[name=start]").click();
 };
 const FIRST = "Decision on: question from Claude Code: Which database should the service use?";
