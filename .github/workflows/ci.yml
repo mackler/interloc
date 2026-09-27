@@ -1,0 +1,69 @@
+# The gate of the release route (README, "Deploying an update"): every push to main and every pull request runs
+# the whole npm test; only a main whose suite passed advances the release branch, which the installed copy follows.
+# The versions below are those of the development container's image; test/ci.test.ts fails when they drift apart.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    # A genuine hang fails the job instead of holding a runner for six hours; a loaded run takes about 20 minutes.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: npm
+      - run: npm ci
+      - name: Chromium for the end-to-end tests
+        run: npx playwright install --with-deps chromium
+      - name: bats for test/cli, at the image's version
+        run: |
+          git clone --depth 1 --branch v1.11.1 https://github.com/bats-core/bats-core "$RUNNER_TEMP/bats-core"
+          sudo "$RUNNER_TEMP/bats-core/install.sh" /usr/local
+          bats --version
+      - name: Ruby for bashly (bashly 2.0.0 requires Ruby >= 3.3; the runner's system Ruby is older)
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3.8"
+      - name: bashly for test/cli/generated.bats, with the Ruby set up above
+        run: |
+          gem install bashly -v 2.0.0
+          bashly --version
+      - run: npm test
+
+  release:
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: release
+      cancel-in-progress: false
+    steps:
+      # The ruleset on release admits only the deploy key (README, "One-time setup on GitHub"), so the push uses it.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+      - name: Fast-forward release to the tested commit
+        run: |
+          git fetch origin release || true
+          if git rev-parse --verify --quiet refs/remotes/origin/release >/dev/null \
+            && git merge-base --is-ancestor "$GITHUB_SHA" refs/remotes/origin/release; then
+            echo "::notice::release is already at or past $GITHUB_SHA"
+            exit 0
+          fi
+          # No --force: git rejects anything but a fast-forward (or the branch's creation).
+          git push origin "$GITHUB_SHA:refs/heads/release"
+          echo "::notice::release advanced to $GITHUB_SHA"
