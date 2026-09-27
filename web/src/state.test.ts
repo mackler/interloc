@@ -4,7 +4,7 @@ import * as prompts from "../../src/prompts.ts";
 import { decodeServer, type RunEvent, type ServerMessage, type Stamped } from "../../src/protocol.ts";
 import type { UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { dismissUnsent, initialState, keepUnsent, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
+import { type Band, bandsOf, dismissUnsent, initialState, keepUnsent, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
 const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
@@ -420,9 +420,17 @@ describe("the time of a message", () => {
     expect(shown(s, "right")).toEqual([true, false]);
   });
 
-  test("the gap is measured from the message just before, not from the last one that showed its time", () => {
-    const s = fold(live([started, said("a"), said("b"), said("c"), said("d")], 1, [0, 0, 90, 180, 270]));
-    expect(shown(s)).toEqual([true, false, false, false]);
+  // Issue #15: the gap is measured from the last time shown in the panel, so no long span goes unmarked.
+  test("thirty messages 90 s apart show a time whenever more than 2 minutes lie since the last time shown", () => {
+    const lines = Array.from({ length: 30 }, (_, i) => said(`line ${i}`));
+    const times = [0, ...lines.map((_, i) => i * 90)];
+    const expected = lines.map((_, i) => i % 2 === 0);
+    expect(shown(fold(live([started, ...lines], 1, times)))).toEqual(expected);
+    expect(shown(replayed([started, ...lines], 1, 1, times))).toEqual(expected);
+  });
+
+  test("a message just inside 2 minutes of the last time shown stays grouped", () => {
+    expect(shown(fold(live([started, said("a"), said("b"), said("c")], 1, [0, 0, 60, 119])))).toEqual([true, false, false]);
   });
 
   test("an event that makes no message (a blank line, an absorbed line, Ended) does not count as the message before", () => {
@@ -449,13 +457,94 @@ describe("the time of a message", () => {
     expect(liveView.run?.left.map((m) => [m.time, m.showTime])).toEqual([[at(1), true], [at(30), false], [at(200), true], [at(210), true], [at(400), true]]);
   });
 
-  test("showsTime: no message before, another author, more than 120 s, or a time that cannot be read", () => {
-    const m = { key: "1-1", author: "program" as const, heading: null, body: "a", format: "text" as const, time: at(0), showTime: true };
-    expect(showsTime(undefined, "program", at(0))).toBe(true);
-    expect(showsTime(m, "user", at(1))).toBe(true);
-    expect(showsTime(m, "program", at(120))).toBe(false);
-    expect(showsTime(m, "program", at(121))).toBe(true);
-    expect(showsTime(m, "program", "not a time")).toBe(true);
-    expect(showsTime({ ...m, time: "not a time" }, "program", at(1))).toBe(true);
+  test("showsTime: no message before, another author, more than 120 s since the last time shown, or a time that cannot be read", () => {
+    const m = { key: "1-1", author: "program" as const, heading: null, body: "a", format: "text" as const, time: at(0), showTime: true, band: null };
+    const next = (author: "program" | "user", time: string, band: Band | null = null) => ({ author, band, time });
+    expect(showsTime(undefined, null, next("program", at(0)))).toBe(true);
+    expect(showsTime(m, at(0), next("user", at(1)))).toBe(true);
+    expect(showsTime(m, at(0), next("program", at(120)))).toBe(false);
+    expect(showsTime(m, at(0), next("program", at(121)))).toBe(true);
+    // Measured from the last time shown, not from the message just before (issue #15).
+    expect(showsTime({ ...m, time: at(100) }, at(0), next("program", at(121)))).toBe(true);
+    expect(showsTime(m, at(0), next("program", "not a time"))).toBe(true);
+    expect(showsTime(m, "not a time", next("program", at(1)))).toBe(true);
+    // The first message of a band: measured from the band's label, whoever wrote it (G-R1-1).
+    const band: Band = { key: "planning-1", kind: "planning", name: "Planning 1", began: at(100) };
+    expect(showsTime(m, at(0), next("user", at(130), band))).toBe(false);
+    expect(showsTime(undefined, null, next("user", at(221), band))).toBe(true);
+    expect(showsTime({ ...m, band, time: at(130), showTime: false }, at(100), next("program", at(200), band))).toBe(false);
+  });
+});
+
+// Issue #15: each phase is a band in each panel where it places a message, opened by a label with its name and the
+// time it began; the label's time counts as shown (G-R1-1).
+describe("phase bands", () => {
+  const began = (phase: UiEvent extends infer E ? (E extends { _tag: "PhaseBegan"; phase: infer P } ? P : never) : never): RunEvent => notified({ _tag: "PhaseBegan", phase });
+  const planning = (n: number) => began({ kind: "planning", n });
+  const execution = (n: number) => began({ kind: "execution", n });
+  const review = notified({ _tag: "ReviewReceived", subject: { plan: 1 }, round: 1, review: { issues: [] }, counted: 0 });
+  const views = (events: readonly RunEvent[], times: readonly number[]) => [fold(live(events, 1, times)), replayed(events, 1, 1, times)];
+  const shown = (s: ViewState, panel: "left" | "right" = "left") => s.run?.[panel].map((m) => m.showTime) ?? [];
+
+  test("a message before any phase has no band and shows its time as the first of its panel", () => {
+    for (const s of views([started, said("a")], [0, 5])) {
+      expect(s.run?.left.map((m) => [m.band, m.showTime])).toEqual([[null, true]]);
+    }
+  });
+
+  test("the first message after a label shows no time within 2 minutes of it, although it is the first of its panel", () => {
+    for (const s of views([started, planning(1), said("a"), said("b"), said("c")], [0, 100, 130, 200, 260])) {
+      expect(s.run?.left[0]?.band).toEqual({ key: "planning-1", kind: "planning", name: "Planning 1", began: at(100) });
+      expect(shown(s)).toEqual([false, false, true]);
+    }
+  });
+
+  test("the first message after a label shows its time more than 2 minutes after it, whoever wrote it", () => {
+    for (const s of views([started, said("a"), planning(1), said("b")], [0, 0, 10, 131])) {
+      expect(shown(s)).toEqual([true, true]);
+    }
+    const answered: RunEvent = { _tag: "Answered", prompt: 1, text: "y" };
+    for (const s of views([started, said("a"), planning(1), asked(1, prompts.permissionPrompt), answered], [0, 0, 10, 20, 30])) {
+      // The prompt is exempt from the change of author, being the band's first; the answer after it is not.
+      expect(shown(s)).toEqual([true, false, true]);
+    }
+  });
+
+  test("a message of the right panel opens the phase's band there; a phase without a message there makes none", () => {
+    for (const s of views([started, planning(1), said("a"), review, execution(1), said("x")], [0, 0, 1, 300, 310, 311])) {
+      expect(s.run?.right.map((m) => [m.band?.key, m.showTime])).toEqual([["planning-1", true]]);
+      expect(bandsOf(s.run?.right ?? []).map((g) => g.band?.key)).toEqual(["planning-1"]);
+      expect(bandsOf(s.run?.left ?? []).map((g) => g.band?.key)).toEqual(["planning-1", "execution-1"]);
+    }
+  });
+
+  test("the lines after a phase ends stay in its band until the next phase begins", () => {
+    const ended = notified({ _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" });
+    for (const s of views([started, planning(1), said("a"), ended, said("b")], [0, 0, 1, 2, 3])) {
+      expect(s.run?.left.map((m) => m.band?.key)).toEqual(["planning-1", "planning-1"]);
+    }
+  });
+
+  test("bandsOf groups consecutive messages of a band: before any phase, execution, planning, execution", () => {
+    const events = [started, said("m0"), execution(1), said("e1"), planning(2), said("p1"), said("p2"), execution(2), said("e2")];
+    for (const s of views(events, events.map((_, i) => i))) {
+      const groups = bandsOf(s.run?.left ?? []);
+      expect(groups.map((g) => [g.band?.kind ?? null, g.band?.name ?? null, g.messages.map((m) => m.body)])).toEqual([
+        [null, null, ["m0"]],
+        ["execution", "Execution 1", ["e1"]],
+        ["planning", "Planning 2", ["p1", "p2"]],
+        ["execution", "Execution 2", ["e2"]],
+      ]);
+    }
+  });
+
+  test("a tab that joins late folds the bands and their times as a live tab does", () => {
+    const events = [started, said("a"), began({ kind: "questions" }), said("b"), review, planning(1), said("c"), review];
+    const times = [0, 1, 2, 3, 4, 200, 201, 202];
+    const liveView = fold(live(events, 1, times));
+    const late = replayed(events, 1, 1, times);
+    expect(late.run?.left).toEqual(liveView.run?.left);
+    expect(late.run?.right).toEqual(liveView.run?.right);
+    expect(liveView.run?.right.map((m) => [m.band?.key, m.showTime])).toEqual([["questions", false], ["planning-1", false]]);
   });
 });

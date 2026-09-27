@@ -45,7 +45,7 @@ const widget = (text: string, options: Widget["options"] = []): Widget => {
 // Issue #1: a message's time, shown in its header or, when grouped, given to assistive technology only.
 describe("Message", () => {
   const ISO = "2026-09-27T14:03:27.000Z";
-  const m = (showTime: boolean): Message => ({ key: "1-1", author: "codex", heading: "Plan review, round 1", body: "No issue.", format: "text", time: ISO, showTime });
+  const m = (showTime: boolean): Message => ({ key: "1-1", author: "codex", heading: "Plan review, round 1", body: "No issue.", format: "text", time: ISO, showTime, band: null });
 
   test("a shown time is in the header as <time datetime title>, visible", () => {
     const root = show(MessageView, { message: m(true) });
@@ -73,7 +73,7 @@ describe("Message", () => {
 // Issue #5: Claude's messages are headed "Claude" and carry no "[claude]" prefix.
 describe("Claude's messages", () => {
   test("a message of Claude is headed Claude, not Claude Code", () => {
-    const root = show(MessageView, { message: { key: "1-1", author: "claude", heading: null, body: "x", format: "text", time: "2026-09-27T14:00:00.000Z", showTime: true } });
+    const root = show(MessageView, { message: { key: "1-1", author: "claude", heading: null, body: "x", format: "text", time: "2026-09-27T14:00:00.000Z", showTime: true, band: null } });
     expect(one(root, "header").textContent).toMatch(/^Claude(?! Code)/);
   });
 
@@ -94,14 +94,14 @@ describe("Claude's messages", () => {
 
 // Issue #7: the user's answer in the left panel is rendered as Markdown.
 test("a user message in Markdown renders its emphasis", () => {
-  const root = show(MessageView, { message: { key: "1-1", author: "user", heading: null, body: "use **x**", format: "markdown", time: "2026-09-27T14:00:00.000Z", showTime: true } });
+  const root = show(MessageView, { message: { key: "1-1", author: "user", heading: null, body: "use **x**", format: "markdown", time: "2026-09-27T14:00:00.000Z", showTime: true, band: null } });
   expect(one(root, ".body strong").textContent).toBe("x");
 });
 
 // Issue #2: each author's article carries the class and data-author that its side rule in Message.svelte selects.
 test("every author's message carries its author as class and data-author", () => {
   for (const author of ["claude", "codex", "user", "program"] as const) {
-    const root = show(MessageView, { message: { key: `1-${author}`, author, heading: null, body: "x", format: "text", time: "2026-09-27T14:00:00.000Z", showTime: true } });
+    const root = show(MessageView, { message: { key: `1-${author}`, author, heading: null, body: "x", format: "text", time: "2026-09-27T14:00:00.000Z", showTime: true, band: null } });
     const article = one(root, "article");
     expect(article.classList.contains(author)).toBe(true);
     expect(article.dataset.author).toBe(author);

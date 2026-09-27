@@ -13,7 +13,14 @@ export type Author = "program" | "user" | "codex" | "claude";
  * One chat message. `markdown` is rendered and sanitised; a program's plain text is shown as it is. `time` is the ISO
  * time its event was published (issue #1); `showTime` whether the time is shown, or only given to assistive technology.
  */
-export type Message = Readonly<{ key: string; author: Author; heading: string | null; body: string; format: "text" | "markdown"; time: string; showTime: boolean }>;
+export type Message = Readonly<{ key: string; author: Author; heading: string | null; body: string; format: "text" | "markdown"; time: string; showTime: boolean; band: Band | null }>;
+/**
+ * The phase a message belongs to, as its panel shows it (issue #15): a band of one tone per kind of phase, opened by a
+ * label with the phase's name and the time it began. `key` is unique per phase of a run; null before any phase.
+ */
+export type Band = Readonly<{ key: string; kind: Phase["kind"]; name: string; began: string }>;
+/** Consecutive messages of one band, in order: how a panel renders its bands. */
+export type BandGroup = Readonly<{ band: Band | null; messages: readonly Message[] }>;
 /** The rounds of one review loop within a phase. */
 export type RoundGroup = Readonly<{ subject: SubjectId; heading: string; rounds: readonly Readonly<{ round: number; limit: number }>[]; done: boolean }>;
 export type TimelineEntry = Readonly<{ phase: Phase; label: string; groups: readonly RoundGroup[]; state: "active" | "done" | "stopped" }>;
@@ -42,6 +49,10 @@ export type RunView = Readonly<{
   interviewChoices: readonly Choice[];
   /** The activity line's prefix while an agent call runs, for example "Codex — review". */
   callLabel: string;
+  /** The band of the phase the next message belongs to (issue #15): set when a phase begins, kept until the next one. */
+  phase: Band | null;
+  /** The last time each panel displays, a message's or a band label's: what the next message's time is measured from. */
+  lastShown: Readonly<{ left: string | null; right: string | null }>;
 }>;
 
 export type Listing = Readonly<{ path: string; parent: string | null; dirs: readonly string[]; error: string | null }>;
@@ -87,31 +98,61 @@ export const emptyRun = (id: number): RunView => ({
   questionOptions: [],
   interviewChoices: [],
   callLabel: "",
+  phase: null,
+  lastShown: { left: null, right: null },
 });
 
 /**
- * Decision Q3 of issue #1: consecutive messages of one author in one panel are grouped under one time, until more than
- * this lies between a message and the one before it.
+ * Decision Q3 of issue #1: consecutive messages of one author in one panel are grouped under one time. Issue #15: the
+ * grouping ends when more than this lies since the last time the panel displayed, not since the message before.
  */
 const GROUP_GAP_MS = 2 * 60 * 1000;
 
-/**
- * Whether a message shows its time: it is the first of its panel, its author differs from the message before it, or
- * more than two minutes lie between them. A time that cannot be read is shown rather than silently grouped. The gap
- * may be negative for events published concurrently (their times may differ slightly in order from their seq).
- */
-export const showsTime = (previous: Message | undefined, author: Author, time: string): boolean => {
-  if (previous === undefined || previous.author !== author) return true;
-  const gap = Date.parse(time) - Date.parse(previous.time);
+/** More than the grouping interval from `from` to `to`; a time that cannot be read counts as more (it is shown). */
+const beyondGap = (from: string, to: string): boolean => {
+  const gap = Date.parse(to) - Date.parse(from);
   return Number.isNaN(gap) || gap > GROUP_GAP_MS;
+};
+/** A message of `band` after `previous` opens the band in its panel: the band's label is displayed above it. */
+const opensBand = (previous: Message | undefined, band: Band | null): band is Band => band !== null && previous?.band?.key !== band.key;
+
+/**
+ * Whether a message shows its time (issues #1 and #15). The first message of a band shows it only if more than two
+ * minutes lie since the band's label, which displays the time the phase began, whoever wrote it (G-R1-1). Any other
+ * message shows it when it is the first of its panel (only before any phase), when its author differs from the message
+ * before it, or when more than two minutes lie since `lastShown`, the last time the panel displayed. A time that cannot
+ * be read is shown rather than silently grouped. The gap may be negative for events published concurrently.
+ */
+export const showsTime = (previous: Message | undefined, lastShown: string | null, { author, band, time }: Readonly<{ author: Author; band: Band | null; time: string }>): boolean => {
+  if (opensBand(previous, band)) return beyondGap(band.began, time);
+  if (previous === undefined || previous.author !== author || lastShown === null) return true;
+  return beyondGap(lastShown, time);
 };
 
 /** A message before it is placed in its panel, which decides whether it shows its time. */
 type Unplaced = Omit<Message, "showTime">;
-const message = (run: RunView, time: string, author: Author, body: string, format: Message["format"], heading: string | null = null): Unplaced => ({ key: `${run.id}-${run.nextSeq}`, author, heading, body, format, time });
-const placed = (panel: readonly Message[], m: Unplaced): readonly Message[] => [...panel, { ...m, showTime: showsTime(panel[panel.length - 1], m.author, m.time) }];
-const withLeft = (run: RunView, m: Unplaced): RunView => ({ ...run, left: placed(run.left, m) });
-const withRight = (run: RunView, m: Unplaced): RunView => ({ ...run, right: placed(run.right, m) });
+const message = (run: RunView, time: string, author: Author, body: string, format: Message["format"], heading: string | null = null): Unplaced => ({ key: `${run.id}-${run.nextSeq}`, author, heading, body, format, time, band: run.phase });
+/** The run with the message placed in a panel, and the panel's last displayed time after it. */
+const place = (run: RunView, side: "left" | "right", m: Unplaced): RunView => {
+  const panel = run[side];
+  const previous = panel[panel.length - 1];
+  const last = run.lastShown[side];
+  const showTime = showsTime(previous, last, m);
+  const shownLast = showTime ? m.time : opensBand(previous, m.band) ? m.band.began : last;
+  const next: readonly Message[] = [...panel, { ...m, showTime }];
+  return side === "left" ? { ...run, left: next, lastShown: { ...run.lastShown, left: shownLast } } : { ...run, right: next, lastShown: { ...run.lastShown, right: shownLast } };
+};
+const withLeft = (run: RunView, m: Unplaced): RunView => place(run, "left", m);
+const withRight = (run: RunView, m: Unplaced): RunView => place(run, "right", m);
+
+/** The band of a phase that began at `time`. */
+const bandOf = (phase: Phase, time: string): Band => ({ key: phase.kind === "questions" ? "questions" : `${phase.kind}-${phase.n}`, kind: phase.kind, name: phaseName(phase), began: time });
+
+/** The messages of a panel grouped into their bands, in order; linear in the number of messages. */
+export const bandsOf = (messages: readonly Message[]): readonly BandGroup[] => {
+  const starts = messages.flatMap((m, i) => (i === 0 || messages[i - 1].band?.key !== m.band?.key ? [i] : []));
+  return starts.map((start, j) => ({ band: messages[start].band, messages: messages.slice(start, starts[j + 1] ?? messages.length) }));
+};
 
 /** The half of a round as conversation.md has it, without its "### Codex" / "### Claude Code" heading, which the message's author shows. */
 const withoutAuthorHeading = (markdown: string): string => markdown.replace(/^### [^\n]*\n+/, "").trim();
@@ -132,7 +173,7 @@ const roundBegan = (timeline: readonly TimelineEntry[], subject: SubjectId, roun
 const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
   switch (event._tag) {
     case "PhaseBegan":
-      return { ...run, timeline: [...run.timeline, { phase: event.phase, label: phaseName(event.phase), groups: [], state: "active" }] };
+      return { ...run, phase: bandOf(event.phase, time), timeline: [...run.timeline, { phase: event.phase, label: phaseName(event.phase), groups: [], state: "active" }] };
     case "PhaseEnded":
       return { ...run, activity: "", busy: false, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? { ...e, state: "done" } : e)) };
     case "RoundBegan":

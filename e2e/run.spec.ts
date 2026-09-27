@@ -20,9 +20,13 @@ const contentEdges = (el: Locator): Promise<Edges> =>
     return { left: left + parseFloat(cs.paddingLeft), right: left + e.clientWidth - parseFloat(cs.paddingRight) };
   });
 const edges = (el: Locator): Promise<Edges> => el.evaluate((e) => ({ left: e.getBoundingClientRect().left, right: e.getBoundingClientRect().right }));
-/** Issue #2: a message lies on the named side of its container's content box, within 2 px. */
+/**
+ * Issue #2: a message lies on the named side of the content box of the element it is laid out in (its phase's band, or
+ * the panel's list before any phase, issue #15), within 2 px; `container` is the region it is looked up in.
+ */
 const onSide = async (message: Locator, container: Locator, side: "left" | "right") => {
-  const [m, c] = [await edges(message), await contentEdges(container)];
+  await expect(container.locator("xpath=.").first()).toBeVisible();
+  const [m, c] = [await edges(message), await contentEdges(message.locator("xpath=.."))];
   expect(Math.abs(m[side] - c[side]), `${side} edge ${m[side]} against ${c[side]}`).toBeLessThanOrEqual(2);
 };
 
@@ -60,6 +64,13 @@ test("(1) a run from the form: the timeline shows its phases and the right panel
   const list = right(page).locator(".list");
   await onSide(list.locator("article[data-author=claude]").first(), list, "left");
   await onSide(list.locator("article[data-author=codex]").first(), list, "right");
+  // Issue #15: each phase is a band opened by its label with the time it began; each kind of phase has its own tone.
+  await expect(left(page).locator(".phase-label", { hasText: /^Planning 1 · \S/ })).toBeVisible();
+  await expect(left(page).locator(".phase-label", { hasText: /^Execution 1 · \S/ })).toBeVisible();
+  const tone = (band: Locator) => band.evaluate((e) => getComputedStyle(e).backgroundColor);
+  const [planningTone, executionTone] = [await tone(left(page).locator(".band-planning").first()), await tone(left(page).locator(".band-execution").first())];
+  expect(planningTone).not.toBe(executionTone);
+  expect(planningTone).not.toBe(await left(page).locator(".list").evaluate((e) => getComputedStyle(e).backgroundColor));
 });
 
 test("(2) a decision prompt with its buttons: No decision continues, and the answer is the user's message", async ({ page }) => {
@@ -115,6 +126,13 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await onSide(list.locator("article[data-author=claude]").first(), list, "left");
   await onSide(list.locator("article[data-author=program]").first(), list, "left");
   await onSide(list.locator("article[data-author=user]").first(), list, "right");
+  // Issue #15 (P1-R1-1, P1-R2-1): inside a band the sides hold, and the band spans the list's content.
+  const band = list.locator(".band-questions").first();
+  await expect(band.locator("article[data-author=user]").first()).toBeVisible();
+  await onSide(band.locator("article[data-author=claude]").first(), band, "left");
+  await onSide(band.locator("article[data-author=user]").first(), band, "right");
+  const [b, c] = [await edges(band), await contentEdges(list)];
+  expect(Math.abs(b.right - b.left - (c.right - c.left)), "the band is as wide as the list's content").toBeLessThanOrEqual(2);
   await page.getByRole("button", { name: "End interview" }).click();
   await expect(left(page).getByText("The service uses PostgreSQL.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
@@ -128,6 +146,14 @@ test("(6) a work correction runs planning, execution and the work review a secon
   await expect(left(page).getByText(/finished after 2 execution phase/)).toBeVisible();
   for (const phase of ["Planning 1", "Execution 1", "Work review 1", "Planning 2", "Execution 2", "Work review 2"]) await expect(rail(page).getByText(phase, { exact: true })).toBeVisible();
   await expect(right(page).getByText("The step misses its test.")).toBeVisible();
+  // Issue #15: every planning phase has the same tone, and so has every execution phase, apart from the other's.
+  const tones = (kind: string) => left(page).locator(`.band-${kind}`).evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
+  const [planning, execution] = [await tones("planning"), await tones("execution")];
+  expect(planning.length).toBe(2);
+  expect(execution.length).toBe(2);
+  expect(new Set(planning).size).toBe(1);
+  expect(new Set(execution).size).toBe(1);
+  expect(planning[0]).not.toBe(execution[0]);
 });
 
 test("(7) two tabs: another tab's answer withdraws the unsent draft with a notice, and the run continues", async ({ context, page }) => {

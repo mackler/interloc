@@ -343,6 +343,11 @@ export const START_FORM_DESCRIPTION: readonly Readonly<{ text: string; style: "p
   { text: " ends a task like Ctrl+C in the terminal.", style: "plain" },
 ];
 
+/** The label that opens a phase's band in a chat panel (issue #15): the phase's name and the time it began. */
+export function phaseBandLabel(name: string, clock: string): string {
+  return `${name} · ${clock}`;
+}
+
 /** The hint under the answer field. */
 export function answerHint(free: "line" | "message"): string {
   return free === "line" ? "Enter sends." : "Enter sends; Shift+Enter starts a new line.";
