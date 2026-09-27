@@ -18,12 +18,18 @@ export type Environment = {
   open: (url: string) => SocketLike;
   setTimeout: (f: () => void, ms: number) => unknown;
   clearTimeout: (handle: unknown) => void;
+  /** The console of the page, for the full reason of a frame that could not be read. */
+  logError: (text: string) => void;
 };
 export type Handlers = {
   onMessage: (message: ServerMessage) => void;
-  onState: (state: "open" | "reconnecting") => void;
+  onState: (state: "open" | "reconnecting" | "failed") => void;
   /** An action of the page that was not sent, explained for the user. */
   onNotice: (text: string) => void;
+  /** A frame of the server that did not decode: its reason and how many in a row. */
+  onProtocolError: (reason: string, count: number) => void;
+  /** An action that will never be sent, because the page has stopped reconnecting. */
+  onUnsent: (message: ClientMessage) => void;
 };
 export type Connection = { send: (message: ClientMessage) => void; reconnect: () => void; close: () => void };
 
@@ -34,8 +40,12 @@ export const browserEnvironment = (): Environment => ({
   open: (url) => new WebSocket(url) as unknown as SocketLike,
   setTimeout: (f, ms) => globalThis.setTimeout(f, ms),
   clearTimeout: (handle) => globalThis.clearTimeout(handle as number),
+  logError: (text) => console.error(text),
 });
 
+
+/** Frames in a row that do not decode before the page stops reconnecting (decision Q5 of the defects' requirements). */
+export const PROTOCOL_ERROR_LIMIT = 3;
 
 export const connect = (url: string, handlers: Handlers, env: Environment = browserEnvironment()): Connection => {
   let socket: SocketLike | null = null;
@@ -45,6 +55,10 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
   let attempt = 0;
   let timer: unknown = null;
   let closed = false;
+  // Frames in a row that did not decode (defect B of docs/page-question-phase-defects.md); a decoded replay ends the run.
+  let protocolErrors = 0;
+  // After PROTOCOL_ERROR_LIMIT of them the page stops reconnecting, and every action is handed back unsent.
+  let failed = false;
 
   /** The queued actions after a hello: an answer or a stop of another incarnation or of an ended run is discarded with a notice (finding 12). */
   const flush = (hello: Readonly<{ current: number | null; incarnation: string }>) => {
@@ -57,7 +71,7 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
     }
   };
   const schedule = () => {
-    if (closed || timer !== null) return;
+    if (closed || failed || timer !== null) return;
     attempt += 1;
     handlers.onState("reconnecting");
     timer = env.setTimeout(() => {
@@ -65,20 +79,44 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
       open();
     }, backoff(attempt));
   };
+  /** The page stops reconnecting; the queued actions are handed back, in order. */
+  const fail = (s: SocketLike) => {
+    failed = true;
+    socket = null;
+    ready = false;
+    s.close();
+    handlers.onState("failed");
+    const pending = queue;
+    queue = [];
+    for (const m of pending) handlers.onUnsent(m);
+  };
+  /** A frame that did not decode is never dropped in silence: logged, reported, and the connection renewed with backoff. */
+  const protocolError = (s: SocketLike, reason: string) => {
+    protocolErrors += 1;
+    env.logError(`plan-review: a message from the server could not be read (${protocolErrors} in a row): ${reason}`);
+    handlers.onProtocolError(reason, protocolErrors);
+    if (protocolErrors >= PROTOCOL_ERROR_LIMIT) fail(s);
+    else s.close();
+  };
   const open = () => {
+    if (failed) return;
     ready = false;
     const s = env.open(url);
     socket = s;
     s.onmessage = (event) => {
       const decoded = decodeServer(String(event.data));
-      if (decoded._tag !== "Success") return;
+      if (decoded._tag !== "Success") return protocolError(s, decoded.failure);
       if (decoded.success.type === "hello") {
-        attempt = 0;
         ready = true;
         handlers.onState("open");
         handlers.onMessage(decoded.success);
         flush(decoded.success);
         return;
+      }
+      // The replay decoded: the connection is sound, so the backoff and the run of failures start again.
+      if (decoded.success.type === "replay") {
+        attempt = 0;
+        protocolErrors = 0;
       }
       handlers.onMessage(decoded.success);
     };
@@ -94,11 +132,13 @@ export const connect = (url: string, handlers: Handlers, env: Environment = brow
 
   return {
     send: (m) => {
-      if (ready && socket !== null) socket.send(JSON.stringify(m));
+      if (failed) handlers.onUnsent(m);
+      else if (ready && socket !== null) socket.send(JSON.stringify(m));
       else queue = [...queue, m];
     },
     /** A gap in the events: a new connection gives a fresh replay. */
     reconnect: () => {
+      if (failed) return;
       const s = socket;
       socket = null;
       ready = false;

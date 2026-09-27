@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import * as prompts from "../../src/prompts.ts";
-import type { ServerMessage } from "../../src/protocol.ts";
+import type { ClientMessage, ServerMessage } from "../../src/protocol.ts";
 import { backoff, connect, type Environment, type SocketLike } from "./socket.ts";
 
 // Plan step 4.3: reconnection with backoff, replay on reconnect, and the queue of actions while disconnected.
@@ -28,10 +28,16 @@ class FakeSocket implements SocketLike {
   drop() {
     this.onclose?.({});
   }
+  /** A frame that does not decode (defect B of docs/page-question-phase-defects.md). */
+  receiveRaw(text: string) {
+    this.onmessage?.({ data: text });
+  }
 }
 
 let sockets: FakeSocket[] = [];
+let logged: string[] = [];
 const env = (): Environment => ({
+  logError: (text) => void logged.push(text),
   open: () => {
     const s = new FakeSocket();
     sockets.push(s);
@@ -40,17 +46,24 @@ const env = (): Environment => ({
   setTimeout: (f, ms) => setTimeout(f, ms),
   clearTimeout: (h) => clearTimeout(h as ReturnType<typeof setTimeout>),
 });
-const handlers = () => ({ messages: [] as ServerMessage[], states: [] as string[], notices: [] as string[] });
-const wire = (h: ReturnType<typeof handlers>) => ({ onMessage: (m: ServerMessage) => void h.messages.push(m), onState: (s: string) => void h.states.push(s), onNotice: (t: string) => void h.notices.push(t) });
+const handlers = () => ({ messages: [] as ServerMessage[], states: [] as string[], notices: [] as string[], errors: [] as [string, number][], unsent: [] as ClientMessage[] });
+const wire = (h: ReturnType<typeof handlers>) => ({
+  onMessage: (m: ServerMessage) => void h.messages.push(m),
+  onState: (s: string) => void h.states.push(s),
+  onNotice: (t: string) => void h.notices.push(t),
+  onProtocolError: (reason: string, count: number) => void h.errors.push([reason, count]),
+  onUnsent: (m: ClientMessage) => void h.unsent.push(m),
+});
 
 beforeEach(() => {
   sockets = [];
+  logged = [];
   vi.useFakeTimers();
 });
 afterEach(() => vi.useRealTimers());
 
 describe("socket", () => {
-  test("a dropped connection is reopened after 1 s, 2 s, 4 s …, at most 30 s; a hello resets the backoff", () => {
+  test("a dropped connection is reopened after 1 s, 2 s, 4 s …, at most 30 s; a hello and a decoded replay reset the backoff", () => {
     expect([1, 2, 3, 4, 5, 6, 7].map(backoff)).toEqual([1000, 2000, 4000, 8000, 16000, 30000, 30000]);
     const h = handlers();
     connect("ws://x/ws", wire(h), env());
@@ -68,9 +81,17 @@ describe("socket", () => {
     sockets[2].open();
     sockets[2].receive({ type: "hello", cwd: "/", current: null, incarnation: "a" });
     expect(h.states.at(-1)).toBe("open");
+    // A hello alone does not reset the backoff (Q1): the replay that follows it may be the frame that cannot be read.
     sockets[2].drop();
-    vi.advanceTimersByTime(1000);
+    vi.advanceTimersByTime(3999);
+    expect(sockets.length).toBe(3);
+    vi.advanceTimersByTime(1);
     expect(sockets.length).toBe(4);
+    sockets[3].receive({ type: "hello", cwd: "/", current: null, incarnation: "a" });
+    sockets[3].receive({ type: "replay", runs: [] });
+    sockets[3].drop();
+    vi.advanceTimersByTime(1000);
+    expect(sockets.length).toBe(5);
   });
 
   test("the replay after a reconnection reaches the page", () => {
@@ -127,5 +148,110 @@ describe("socket across a server restart", () => {
     sockets[1].receive({ type: "hello", cwd: "/w", current: 1, incarnation: "b" });
     expect(sockets[1].sent).toEqual([]);
     expect(h.notices).toEqual([prompts.notSentNotice("stop", "restarted"), prompts.notSentNotice("answer", "restarted")]);
+  });
+});
+
+// Defect B of docs/page-question-phase-defects.md: a frame that does not decode is never dropped in silence. It is
+// logged, reported with its reason, and the page reconnects with backoff (Q1); after three in a row the page stops
+// reconnecting (Q5), and no action is queued or sent any more: each is handed back to the page (G-R1-1).
+describe("socket and a frame that does not decode", () => {
+  const hello: ServerMessage = { type: "hello", cwd: "/", current: 1, incarnation: "a" };
+  const failOnce = (i: number) => {
+    sockets[i].receive(hello);
+    sockets[i].receiveRaw("{\"type\":\"replay\",\"runs\":7}");
+  };
+
+  test("the reason is reported and logged, the socket is closed, and the page reconnects after 1 s, not at once", () => {
+    const h = handlers();
+    connect("ws://x/ws", wire(h), env());
+    failOnce(0);
+    expect(h.errors.length).toBe(1);
+    expect(h.errors[0][1]).toBe(1);
+    expect(h.errors[0][0]).toMatch(/runs/);
+    expect(logged.length).toBe(1);
+    expect(logged[0]).toContain(h.errors[0][0]);
+    expect(sockets[0].closed).toBe(true);
+    expect(sockets.length).toBe(1);
+    expect(h.states.at(-1)).toBe("reconnecting");
+    vi.advanceTimersByTime(999);
+    expect(sockets.length).toBe(1);
+    vi.advanceTimersByTime(1);
+    expect(sockets.length).toBe(2);
+  });
+
+  test("three in a row: the page fails and opens no socket again", () => {
+    const h = handlers();
+    connect("ws://x/ws", wire(h), env());
+    failOnce(0);
+    vi.advanceTimersByTime(1000);
+    failOnce(1);
+    vi.advanceTimersByTime(2000);
+    failOnce(2);
+    expect(h.errors.map(([, n]) => n)).toEqual([1, 2, 3]);
+    expect(h.states.at(-1)).toBe("failed");
+    expect(sockets[2].closed).toBe(true);
+    vi.advanceTimersByTime(600_000);
+    expect(sockets.length).toBe(3);
+  });
+
+  test("a decoded replay ends the run of failures: the count starts again at 1", () => {
+    const h = handlers();
+    connect("ws://x/ws", wire(h), env());
+    failOnce(0);
+    vi.advanceTimersByTime(1000);
+    failOnce(1);
+    vi.advanceTimersByTime(2000);
+    sockets[2].receive(hello);
+    sockets[2].receive({ type: "replay", runs: [] });
+    sockets[2].receiveRaw("not json");
+    expect(h.errors.map(([, n]) => n)).toEqual([1, 2, 1]);
+    vi.advanceTimersByTime(1000);
+    expect(sockets.length).toBe(4);
+  });
+
+  test("the actions queued when the page fails are handed back, and none reaches a socket", () => {
+    const h = handlers();
+    const c = connect("ws://x/ws", wire(h), env());
+    failOnce(0);
+    const queued: ClientMessage[] = [
+      { type: "answer", incarnation: "a", run: 1, prompt: 2, text: "A" },
+      { type: "stop", incarnation: "a", run: 1 },
+      { type: "start", project: "/p", task: "t" },
+      { type: "list", path: "/" },
+    ];
+    for (const m of queued) c.send(m);
+    // A hello would flush the queue; the frames that fail here arrive before any hello, so the actions stay queued.
+    vi.advanceTimersByTime(1000);
+    sockets[1].receiveRaw("not json");
+    vi.advanceTimersByTime(2000);
+    expect(h.unsent).toEqual([]);
+    sockets[2].receiveRaw("not json");
+    expect(h.unsent).toEqual(queued);
+    expect(sockets.flatMap((s) => s.sent)).toEqual([]);
+  });
+
+  test("an action sent after the page has failed is handed back at once and sent nowhere", () => {
+    const h = handlers();
+    const c = connect("ws://x/ws", wire(h), env());
+    failOnce(0);
+    vi.advanceTimersByTime(1000);
+    failOnce(1);
+    vi.advanceTimersByTime(2000);
+    failOnce(2);
+    const m: ClientMessage = { type: "answer", incarnation: "a", run: 1, prompt: 2, text: "B" };
+    c.send(m);
+    expect(h.unsent).toEqual([m]);
+    expect(sockets.flatMap((s) => s.sent)).toEqual([]);
+  });
+
+  test("a plain drop keeps retrying beyond three attempts", () => {
+    const h = handlers();
+    connect("ws://x/ws", wire(h), env());
+    for (let i = 0; i < 5; i++) {
+      sockets[i].drop();
+      vi.advanceTimersByTime(30_000);
+    }
+    expect(sockets.length).toBe(6);
+    expect(h.states).not.toContain("failed");
   });
 });

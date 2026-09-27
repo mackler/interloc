@@ -2,7 +2,8 @@ import { describe, expect, test } from "vitest";
 import * as prompts from "../../src/prompts.ts";
 import type { RunEvent, ServerMessage } from "../../src/protocol.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { type Draft, draftFor, pendingKey, reconcile } from "./draft.ts";
+import type { ClientMessage } from "../../src/protocol.ts";
+import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "./draft.ts";
 import { initialState, reduce, type ViewState } from "./state.ts";
 
 // Finding 5 of docs/gui-review.md: a draft belongs to (incarnation, run, prompt).
@@ -41,5 +42,41 @@ describe("draft", () => {
     const view = fold([hello("b"), { type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] }], live([started, asked(1)]));
     expect(reconcile(draft, view)).toEqual({ draft: null, notice: prompts.draftWithdrawnNotice("my unsent answer") });
     expect(reconcile({ ...draft, text: "" }, live([started, asked(1), answered(1)]))).toEqual({ draft: null, notice: null });
+  });
+});
+
+// Defect B of docs/page-question-phase-defects.md, G-R1-1 and P1-R1-2: an answer the page could not send never
+// overwrites text typed since; it goes back to an empty field or is quoted.
+describe("an answer not sent", () => {
+  const view = live([started, asked(1)]);
+  const key = { incarnation: "a", run: 1, prompt: 1 };
+  const answer = (text: string, prompt = 1): ClientMessage => ({ type: "answer", incarnation: "a", run: 1, prompt, text });
+
+  test("goes back to the pending prompt's empty field", () => {
+    expect(restoreUnsent(null, view, answer("A"))).toEqual({ draft: { key, text: "A" }, quoted: null });
+    expect(restoreUnsent({ key, text: "" }, view, answer("A"))).toEqual({ draft: { key, text: "A" }, quoted: null });
+  });
+
+  test("leaves newer text in the field and is quoted", () => {
+    expect(restoreUnsent({ key, text: "B" }, view, answer("A"))).toEqual({ draft: { key, text: "B" }, quoted: "A" });
+  });
+
+  test("two, in queue order: the first fills the empty field, the second is quoted", () => {
+    const first = restoreUnsent(null, view, answer("A"));
+    const second = restoreUnsent(first.draft, view, answer("C"));
+    expect([first.quoted, second.draft, second.quoted]).toEqual([null, { key, text: "A" }, "C"]);
+  });
+
+  test("an answer to a prompt no longer pending is quoted", () => {
+    expect(restoreUnsent(null, view, answer("old", 7))).toEqual({ draft: null, quoted: "old" });
+  });
+
+  test("an answer equal to the field's text, which was kept, quotes nothing", () => {
+    expect(restoreUnsent({ key, text: "same" }, view, answer("same"))).toEqual({ draft: { key, text: "same" }, quoted: null });
+  });
+
+  test("a stop, a start and a listing leave the draft and quote nothing", () => {
+    const d: Draft = { key, text: "B" };
+    for (const m of [{ type: "stop", incarnation: "a", run: 1 }, { type: "start", project: "/p", task: "t" }, { type: "list", path: "/" }] as const) expect(restoreUnsent(d, view, m)).toEqual({ draft: d, quoted: null });
   });
 });

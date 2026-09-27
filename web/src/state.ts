@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, RunEvent, ServerMessage } from "../../src/protocol.ts";
-import { interviewHelp, pagePromptText, SERVER_CLOSED_NOTICE } from "../../src/prompts.ts";
+import { interviewHelp, pagePromptText, protocolErrorNotice, SERVER_CLOSED_NOTICE } from "../../src/prompts.ts";
 import { interviewSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
@@ -41,7 +41,7 @@ export type RunView = Readonly<{
 
 export type Listing = Readonly<{ path: string; parent: string | null; dirs: readonly string[]; error: string | null }>;
 export type ViewState = Readonly<{
-  connection: "connecting" | "open" | "reconnecting";
+  connection: "connecting" | "open" | "reconnecting" | "failed";
   cwd: string;
   /** The id of the run in progress on the server, as the last hello or event reported it. */
   current: number | null;
@@ -55,9 +55,11 @@ export type ViewState = Readonly<{
   /** Messages from the server or the page for the user: refusals and notices. */
   notices: readonly string[];
   listing: Listing | null;
+  /** The answers the page could not send and could not put back into the answer field, in order, until dismissed. */
+  unsent: readonly string[];
 }>;
 
-export const initialState: ViewState = { connection: "connecting", cwd: "", current: null, incarnation: null, run: null, last: null, needsReconnect: false, notices: [], listing: null };
+export const initialState: ViewState = { connection: "connecting", cwd: "", current: null, incarnation: null, run: null, last: null, needsReconnect: false, notices: [], listing: null, unsent: [] };
 
 const AGENT: Record<"claude" | "codex", string> = { claude: "Claude Code", codex: "Codex" };
 const sameSubject = (a: SubjectId, b: SubjectId): boolean => JSON.stringify(a) === JSON.stringify(b);
@@ -178,6 +180,13 @@ const foldRun = (id: number, events: readonly RunEvent[]): RunView => events.red
 /** A notice for the user that the page itself produces (for example an action discarded after a reconnect). */
 export const notice = (state: ViewState, text: string): ViewState => ({ ...state, notices: [...state.notices, text] });
 
+/** A frame of the server the page could not read, the count-th in a row: one notice for a run of them (decision Q2). */
+export const protocolError = (state: ViewState, reason: string, count: number): ViewState => (count === 1 ? notice(state, protocolErrorNotice(reason)) : state);
+/** An answer not sent that could not go back to its field, kept for the user to copy (P1-R1-2). */
+export const keepUnsent = (state: ViewState, text: string): ViewState => ({ ...state, unsent: [...state.unsent, text] });
+/** The user dismisses one kept answer; the others stay. */
+export const dismissUnsent = (state: ViewState, index: number): ViewState => ({ ...state, unsent: state.unsent.filter((_, i) => i !== index) });
+
 /** The next state after a message of the server. Pure. */
 export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
   switch (message.type) {
@@ -197,7 +206,8 @@ export const reduce = (state: ViewState, message: ServerMessage): ViewState => {
       return notice(state, message.reason);
     case "closing":
       // [visibility of system status] The socket's reconnection keeps trying; the page says why it is disconnected.
-      return notice({ ...state, connection: "reconnecting" }, SERVER_CLOSED_NOTICE);
+      // A failed page stays failed: it no longer reconnects, so it must not claim to.
+      return notice({ ...state, connection: state.connection === "failed" ? "failed" : "reconnecting" }, SERVER_CLOSED_NOTICE);
     case "event": {
       const current = message.event._tag === "Started" ? message.run : message.event._tag === "Ended" ? null : state.current;
       if (state.run !== null && message.run === state.run.id) {

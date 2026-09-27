@@ -4,7 +4,7 @@ import * as prompts from "../../src/prompts.ts";
 import type { RunEvent, ServerMessage } from "../../src/protocol.ts";
 import type { UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { initialState, reduce, type ViewState } from "./state.ts";
+import { dismissUnsent, initialState, keepUnsent, protocolError, reduce, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
 const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
@@ -217,5 +217,29 @@ describe("the interview's opening help", () => {
     expect(body).toMatch(/Shift\+Enter/);
     expect(body).toMatch(/\/done/);
     expect(body).not.toMatch(/"""/);
+  });
+});
+
+// Defect B of docs/page-question-phase-defects.md: one notice per run of frames the page could not read (Q2), a failed
+// page that stays failed, and the answers not sent kept apart from the notices (P1-R1-2).
+describe("a frame the page could not read", () => {
+  test("the first of a run adds the notice with its reason; the second and third add none", () => {
+    const s = [1, 2, 3].reduce((acc, n) => protocolError(acc, `reason ${n}`, n), fold([hello()]));
+    expect(s.notices).toEqual([prompts.protocolErrorNotice("reason 1")]);
+    const long = protocolError(initialState, "z".repeat(500), 1);
+    expect(long.notices[0].endsWith(`${"z".repeat(200)}…`)).toBe(true);
+  });
+
+  test("the server's closing does not turn a failed page into a reconnecting one", () => {
+    const next = reduce({ ...fold([hello()]), connection: "failed" }, { type: "closing" });
+    expect(next.connection).toBe("failed");
+  });
+
+  test("the answers not sent are kept in order, and one is dismissed alone", () => {
+    const s = keepUnsent(keepUnsent(initialState, "A"), "C");
+    expect(s.unsent).toEqual(["A", "C"]);
+    expect(dismissUnsent(s, 0).unsent).toEqual(["C"]);
+    expect(dismissUnsent(s, 1).unsent).toEqual(["A"]);
+    expect(initialState.unsent).toEqual([]);
   });
 });

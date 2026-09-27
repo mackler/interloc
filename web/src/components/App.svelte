@@ -9,12 +9,12 @@
   // plan-review", selects it].
   import { Button, ConnectedButtons } from "m3-svelte";
   import { untrack } from "svelte";
-  import { progressLine, unseenBadge } from "../../../src/prompts.ts";
+  import { CONNECTION_FAILED_NOTICE, notSentNotice, progressLine, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
   import { EXPANDED_MIN_WIDTH, initialLayout, type Layout, observe, type Pane, select } from "../layout.ts";
   import type { ClientMessage } from "../../../src/protocol.ts";
-  import { type Draft, draftFor, pendingKey, reconcile } from "../draft.ts";
+  import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "../draft.ts";
   import { connect, type Connection } from "../socket.ts";
-  import { initialState, notice, reduce, type ViewState } from "../state.ts";
+  import { dismissUnsent, initialState, keepUnsent, notice, protocolError, reduce, type ViewState } from "../state.ts";
   import ActivityLine from "./ActivityLine.svelte";
   import ChatPanel from "./ChatPanel.svelte";
   import DirectoryDialog from "./DirectoryDialog.svelte";
@@ -47,6 +47,16 @@
       },
       onState: (s) => (view = { ...view, connection: s }),
       onNotice: (t) => (view = notice(view, t)),
+      // Defect B of docs/page-question-phase-defects.md: a frame the page cannot read is a notice with its reason.
+      onProtocolError: (reason, count) => (view = protocolError(view, reason, count)),
+      // An action the failed page cannot send: an answer goes back to its field or is kept under "Not sent", never
+      // over newer text, and the notice says which (G-R1-1, P1-R1-2).
+      onUnsent: (m) => {
+        const restored = restoreUnsent(draft, view, m);
+        draft = restored.draft;
+        const kept = restored.quoted === null ? view : keepUnsent(view, restored.quoted);
+        view = notice(kept, notSentNotice(m.type, "disconnected", restored.quoted ?? undefined));
+      },
     });
     return () => connection?.close();
   });
@@ -75,11 +85,29 @@
   const showForm = $derived(run === null || (run.ended !== null && formWanted));
   const latestNotice = $derived(view.notices.length > noticesSeen ? view.notices[view.notices.length - 1] : null);
   const refused = $derived(showForm ? latestNotice : null);
+  const offline = $derived(view.connection === "failed");
 </script>
 
 <svelte:window bind:innerWidth={width} />
 <div class="app">
   <TopBar {run} connection={view.connection} onStop={(id) => send({ type: "stop", incarnation: view.incarnation ?? "", run: id })} />
+  <!-- A failed page says so for as long as it lasts, apart from the notices, which a new task marks as seen, and keeps
+       the answers it could not send until each is dismissed [visibility of system status; help users recognise,
+       diagnose and recover from errors; user control and freedom: nothing typed is lost]. -->
+  {#if offline}<p class="notice failed m3-font-body-medium" role="alert">{CONNECTION_FAILED_NOTICE}</p>{/if}
+  {#if view.unsent.length > 0}
+    <section class="unsent" aria-label={UNSENT_HEADING}>
+      <h2 class="m3-font-title-small">{UNSENT_HEADING}</h2>
+      <ul>
+        {#each view.unsent as text, i (i)}
+          <li>
+            <span class="unsent-text m3-font-body-medium">{text}</span>
+            <Button variant="text" type="button" name="dismiss" onclick={() => (view = dismissUnsent(view, i))}>Dismiss</Button>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
   {#if showForm}
     <main class="form">
       <StartForm
@@ -87,6 +115,7 @@
         running={view.current !== null}
         {refused}
         {chosen}
+        {offline}
         onStart={(project, task) => { noticesSeen = view.notices.length; send({ type: "start", project, task }); }}
         onBrowse={(from) => { browsing = true; send({ type: "list", path: from || view.cwd }); }}
       />
@@ -116,6 +145,7 @@
         <ChatPanel title={TITLES.left} messages={run.left} empty="The run has started." visible={shown("left")} />
         <PromptWidget
           widget={run.pending}
+          {offline}
           bind:text={() => draftFor(draft, pendingKey(view)), (text) => { const key = pendingKey(view); draft = key === null ? null : { key, text }; }}
           onAnswer={(prompt, text) => send({ type: "answer", incarnation: view.incarnation ?? "", run: run.id, prompt, text })} />
         {#if !compact && latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
@@ -132,7 +162,7 @@
       </div>
     </main>
   {/if}
-  <DirectoryDialog open={browsing} listing={view.listing} onList={(path) => send({ type: "list", path })} onChoose={(path) => { chosen = path; browsing = false; }} onClose={() => (browsing = false)} />
+  <DirectoryDialog open={browsing} listing={view.listing} {offline} onList={(path) => send({ type: "list", path })} onChoose={(path) => { chosen = path; browsing = false; }} onClose={() => (browsing = false)} />
 </div>
 
 <style>
@@ -152,4 +182,9 @@
   .badge { font-weight: 700; }
   .ended { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.75rem; background: var(--m3c-surface-container); }
   .notice { margin: 0; padding: 0.5rem 0.75rem; color: var(--m3c-on-error-container); background: var(--m3c-error-container); }
+  .unsent { padding: 0.5rem 0.75rem; background: var(--m3c-surface-container-high); }
+  .unsent h2 { margin: 0 0 0.25rem; }
+  .unsent ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.25rem; }
+  .unsent li { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+  .unsent-text { white-space: pre-wrap; word-break: break-word; user-select: text; }
 </style>

@@ -8,11 +8,14 @@
 
   // The typed text is the page's draft of this prompt (../draft.ts, finding 5): App keeps it per (incarnation, run,
   // prompt) and withdraws it with a notice when another tab answers first [error prevention].
-  type Props = { widget: Widget | null; text?: string; onAnswer: (prompt: number, text: string) => void };
-  let { widget, text = $bindable(""), onAnswer }: Props = $props();
+  // Offline (the page has stopped reconnecting, decision G-R1-1 of the defects' requirements) the prompt stays usable:
+  // the socket refuses the answer with a notice, and the field keeps what was typed [user control and freedom: no
+  // typed text is lost; help users recognise and recover: the page's banner and notice say why nothing is sent].
+  type Props = { widget: Widget | null; text?: string; offline?: boolean; onAnswer: (prompt: number, text: string) => void };
+  let { widget, text = $bindable(""), offline = false, onAnswer }: Props = $props();
   const send = (value: string) => {
     if (widget === null) return;
-    text = "";
+    if (!offline) text = "";
     onAnswer(widget.asked.prompt, value);
   };
   const isQuit = (label: string) => label === "Quit";

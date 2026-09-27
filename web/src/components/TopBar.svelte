@@ -6,11 +6,13 @@
   // on the first line, and the project and the task move to a secondary line [visibility of system status: nothing
   // that says what runs or whether the page is connected is dropped].
   import { Button } from "m3-svelte";
-  import type { RunView } from "../state.ts";
+  import type { RunView, ViewState } from "../state.ts";
 
-  type Props = { run: RunView | null; connection: "connecting" | "open" | "reconnecting"; onStop: (run: number) => void };
+  // A failed page (defect B of docs/page-question-phase-defects.md) reads "disconnected", and Stop, which can no longer
+  // reach the server, is disabled [visibility of system status; error prevention].
+  type Props = { run: RunView | null; connection: ViewState["connection"]; onStop: (run: number) => void };
   let { run, connection, onStop }: Props = $props();
-  const CONNECTION = { connecting: "connecting…", open: "connected", reconnecting: "reconnecting…" } as const;
+  const CONNECTION: Record<ViewState["connection"], string> = { connecting: "connecting…", open: "connected", reconnecting: "reconnecting…", failed: "disconnected" };
   const running = $derived(run !== null && run.ended === null);
 </script>
 
@@ -23,7 +25,7 @@
     {/if}
   </div>
   <span class="connection m3-font-label-medium {connection}" role="status">{CONNECTION[connection]}</span>
-  <Button variant="outlined" type="button" name="stop" disabled={!running} onclick={() => run !== null && onStop(run.id)}>Stop task</Button>
+  <Button variant="outlined" type="button" name="stop" disabled={!running || connection === "failed"} onclick={() => run !== null && onStop(run.id)}>Stop task</Button>
 </header>
 
 <style>
@@ -41,5 +43,5 @@
   @media (max-width: 599px) {
     h1 { font-size: 1.375rem; line-height: 1.75rem; }
   }
-  .connection.reconnecting, .connection.connecting { background: var(--m3c-error-container); color: var(--m3c-on-error-container); }
+  .connection.reconnecting, .connection.connecting, .connection.failed { background: var(--m3c-error-container); color: var(--m3c-on-error-container); }
 </style>

@@ -3,6 +3,7 @@
 // another tab's answer withdraws it with a notice instead of leaving it attached to the next prompt.
 
 import { draftWithdrawnNotice } from "../../src/prompts.ts";
+import type { ClientMessage } from "../../src/protocol.ts";
 import type { ViewState } from "./state.ts";
 
 export type DraftKey = Readonly<{ incarnation: string; run: number; prompt: number }>;
@@ -33,4 +34,21 @@ export const reconcile = (draft: Draft | null, view: ViewState): Reconciled => {
   // A prompt neither pending nor answered in the same run (for example not yet replayed): the draft waits.
   if (!overtaken) return { draft, notice: null };
   return { draft: null, notice: draft.text.trim() === "" ? null : draftWithdrawnNotice(draft.text) };
+};
+
+/**
+ * An action the page could not send (G-R1-1, P1-R1-2 of the defects' plan). An answer to the pending prompt goes back
+ * to its field when the field is empty; when the field holds other text, or the prompt is no longer pending, it is
+ * quoted, to be kept apart. An answer equal to the field's text (the field was not cleared) needs neither. It never
+ * replaces text typed since. Other actions carry no text.
+ */
+export const restoreUnsent = (draft: Draft | null, view: ViewState, message: ClientMessage): Readonly<{ draft: Draft | null; quoted: string | null }> => {
+  if (message.type !== "answer") return { draft, quoted: null };
+  const pending = pendingKey(view);
+  const own = pending !== null && sameKey(pending, { incarnation: message.incarnation, run: message.run, prompt: message.prompt });
+  if (!own) return { draft, quoted: message.text.trim() === "" ? null : message.text };
+  const current = draftFor(draft, pending);
+  if (current === "") return { draft: { key: pending, text: message.text }, quoted: null };
+  if (current === message.text || message.text.trim() === "") return { draft, quoted: null };
+  return { draft, quoted: message.text };
 };

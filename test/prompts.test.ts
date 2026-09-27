@@ -90,3 +90,22 @@ test("the page's hint, notices, progress line and badge", () => {
   assert.equal(prompts.progressLine("Planning 1", { round: 2, limit: 5 }), "Progress: Planning 1, round 2 of 5");
   assert.equal(prompts.unseenBadge(3), "· 3 new");
 });
+
+// Defect B of docs/page-question-phase-defects.md: the notices of a frame the page cannot read and of the failed page.
+test("the protocol error's notice carries the reason, cut to 200 characters", () => {
+  assert.equal(prompts.protocolErrorNotice("Expected no excess property"), "The page could not read a message from the server; reconnecting. Reason: Expected no excess property");
+  const long = "x".repeat(500);
+  assert.equal(prompts.protocolErrorNotice(long), `The page could not read a message from the server; reconnecting. Reason: ${"x".repeat(200)}…`);
+  assert.equal(prompts.protocolErrorNotice("y".repeat(200)), `The page could not read a message from the server; reconnecting. Reason: ${"y".repeat(200)}`);
+  assert.match(prompts.CONNECTION_FAILED_NOTICE, /stopped reconnecting/);
+  assert.match(prompts.CONNECTION_FAILED_NOTICE, /[Rr]eload the page/);
+  assert.equal(prompts.UNSENT_HEADING, "Not sent");
+});
+
+test("an action not sent because the page is no longer connected, with the answer's text quoted or in the field", () => {
+  assert.equal(prompts.notSentNotice("answer", "disconnected"), "Your answer was not sent: the page is no longer connected to the server. Its text is still in the answer field.");
+  assert.equal(prompts.notSentNotice("answer", "disconnected", "my text"), "Your answer was not sent: the page is no longer connected to the server. Its text is kept under “Not sent”: «my text»");
+  assert.equal(prompts.notSentNotice("stop", "disconnected"), "Stop was not sent: the page is no longer connected to the server.");
+  assert.equal(prompts.notSentNotice("start", "disconnected"), "The new task was not sent: the page is no longer connected to the server.");
+  assert.equal(prompts.notSentNotice("list", "disconnected"), "The directory listing was not requested: the page is no longer connected to the server.");
+});

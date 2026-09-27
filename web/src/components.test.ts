@@ -111,6 +111,21 @@ describe("StartForm", () => {
     const root = show(StartForm, { cwd: "/work", running: false, refused: "/work is not a git repository", chosen: null, onStart: () => undefined, onBrowse: () => undefined });
     expect(root.textContent).toMatch(/is not a git repository/);
   });
+
+  test("offline, Start and Browse… are disabled, and the fields stay editable and keep their text", () => {
+    const started: string[] = [];
+    const root = show(StartForm, { cwd: "/work", running: false, refused: null, chosen: null, offline: true, onStart: () => void started.push("start"), onBrowse: () => void started.push("browse") });
+    const task = one(root, "textarea[name=task]") as HTMLTextAreaElement;
+    type(task, "Write the docs");
+    expect(task.disabled).toBe(false);
+    expect((one(root, "input[name=project]") as HTMLInputElement).disabled).toBe(false);
+    expect((one(root, "button[name=start]") as HTMLButtonElement).disabled).toBe(true);
+    expect((one(root, "button[name=browse]") as HTMLButtonElement).disabled).toBe(true);
+    one(root, "form").dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    flushSync();
+    expect(started).toEqual([]);
+    expect(task.value).toBe("Write the docs");
+  });
 });
 
 describe("PromptWidget", () => {
@@ -176,6 +191,35 @@ describe("PromptWidget", () => {
     expect(message.querySelector("label")?.textContent).toBe("Your message");
   });
 
+  // G-R1-1 of the defects' requirements: once the page has failed, answering stays possible and is refused by the
+  // socket, and nothing typed is cleared.
+  test("offline, the choices and Send stay enabled, and sending keeps the field's text; online it clears it", () => {
+    const sent: string[] = [];
+    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), offline: true, onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const input = one(root, "input[name=answer]") as HTMLInputElement;
+    type(input, "typed offline");
+    const send = one(root, "button[name=send]") as HTMLButtonElement;
+    expect(send.disabled).toBe(false);
+    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    flushSync();
+    expect(input.value).toBe("typed offline");
+    send.click();
+    flushSync();
+    expect(input.value).toBe("typed offline");
+    const choice = root.querySelectorAll(".choices button")[0] as HTMLButtonElement;
+    expect(choice.disabled).toBe(false);
+    choice.click();
+    flushSync();
+    expect(input.value).toBe("typed offline");
+    expect(sent).toEqual(["typed offline", "typed offline", ""]);
+    const online = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), offline: false, onAnswer: () => undefined });
+    const field = one(online, "input[name=answer]") as HTMLInputElement;
+    type(field, "sent online");
+    field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    flushSync();
+    expect(field.value).toBe("");
+  });
+
   test("without a pending prompt nothing can be sent", () => {
     const root = show(PromptWidget, { widget: null, onAnswer: () => undefined });
     expect(root.querySelector("button")).toBe(null);
@@ -214,6 +258,13 @@ describe("DirectoryDialog", () => {
     expect(listed).toEqual(["/work/b", "/"]);
     expect(chosen).toEqual(["/work"]);
   });
+
+  test("offline, the directories and Choose are disabled, and Cancel is not", () => {
+    const root = show(DirectoryDialog, { open: true, listing: { path: "/work", parent: "/", dirs: ["a"], error: null }, offline: true, onList: () => undefined, onChoose: () => undefined, onClose: () => undefined });
+    expect([...root.querySelectorAll<HTMLButtonElement>("[data-dir]")].map((b) => b.disabled)).toEqual([true, true]);
+    expect((one(root, "button[name=choose]") as HTMLButtonElement).disabled).toBe(true);
+    expect((one(root, "button[name=cancel]") as HTMLButtonElement).disabled).toBe(false);
+  });
 });
 
 describe("TopBar", () => {
@@ -232,12 +283,20 @@ describe("TopBar", () => {
     const ended = show(TopBar, { run: { ...run, ended: 0 }, connection: "open", onStop: () => undefined });
     expect((one(ended, "button[name=stop]") as HTMLButtonElement).disabled).toBe(true);
   });
+
+  test("a failed page: the chip reads disconnected and Stop is disabled", () => {
+    const run = { ...emptyRun(3), project: "/p", task: "the task" };
+    const root = show(TopBar, { run, connection: "failed", onStop: () => undefined });
+    expect(one(root, "[role=status]").textContent?.trim()).toBe("disconnected");
+    expect((one(root, "button[name=stop]") as HTMLButtonElement).disabled).toBe(true);
+  });
 });
 
 // Finding 5 of docs/gui-review.md: the page mounted whole over a fake WebSocket; a draft does not survive its prompt.
 describe("App and the draft", () => {
   class FakeWebSocket {
     static last: FakeWebSocket | null = null;
+    static all: FakeWebSocket[] = [];
     sent: string[] = [];
     onopen: ((e: unknown) => void) | null = null;
     onmessage: ((e: { data: unknown }) => void) | null = null;
@@ -245,13 +304,20 @@ describe("App and the draft", () => {
     onerror: ((e: unknown) => void) | null = null;
     constructor(_url: string) {
       FakeWebSocket.last = this;
+      FakeWebSocket.all.push(this);
     }
     send(data: string) {
       this.sent.push(data);
     }
-    close() {}
+    close() {
+      this.onclose?.({});
+    }
     receive(m: unknown) {
       this.onmessage?.({ data: JSON.stringify(m) });
+      flushSync();
+    }
+    receiveRaw(text: string) {
+      this.onmessage?.({ data: text });
       flushSync();
     }
   }
@@ -266,7 +332,11 @@ describe("App and the draft", () => {
     return { root, ws };
   };
   const field = (root: ParentNode) => one(root, "[name=answer]") as HTMLInputElement;
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.useRealTimers();
+    FakeWebSocket.all = [];
+  });
 
   test("another tab's answer withdraws the draft with a notice; the next prompt's field is empty", async () => {
     const { root, ws } = await openPage();
@@ -286,5 +356,68 @@ describe("App and the draft", () => {
     ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1), { _tag: "Answered", prompt: 1, text: "" }, asked(2)] }] });
     expect(field(root).value).toBe("");
     expect(root.textContent).toMatch(/your unsent text was discarded: «draft for question one»/);
+  });
+
+  // Defect B of docs/page-question-phase-defects.md: three frames in a row the page cannot read end in a failed page
+  // that says so, refuses what it cannot send, and loses no typed text (Q5, G-R1-1, P1-R1-2).
+  const failThreeTimes = () => {
+    for (let i = 0; i < 3; i++) {
+      FakeWebSocket.last!.receiveRaw("not json");
+      vi.advanceTimersByTime(30_000);
+      flushSync();
+    }
+  };
+  const enter = (el: HTMLElement) => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+    flushSync();
+  };
+
+  test("a failed page: the banner, Stop disabled, the prompt usable, the queued answer back in its field, a new one refused", async () => {
+    vi.useFakeTimers();
+    const { root, ws } = await openPage();
+    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    ws.close();
+    flushSync();
+    type(field(root), "queued answer");
+    enter(field(root));
+    expect(field(root).value).toBe("");
+    failThreeTimes();
+    expect(one(root, ".failed[role=alert]").textContent).toContain(prompts.CONNECTION_FAILED_NOTICE);
+    expect(one(root, "[role=status]").textContent?.trim()).toBe("disconnected");
+    expect((one(root, "button[name=stop]") as HTMLButtonElement).disabled).toBe(true);
+    expect((root.querySelectorAll(".choices button")[0] as HTMLButtonElement).disabled).toBe(false);
+    expect(field(root).value).toBe("queued answer");
+    expect(root.textContent).toContain(prompts.notSentNotice("answer", "disconnected"));
+    type(field(root), "typed after the failure");
+    enter(field(root));
+    expect(field(root).value).toBe("typed after the failure");
+    expect(FakeWebSocket.all.flatMap((s) => s.sent)).toEqual([]);
+  });
+
+  test("several actions discarded: the newer draft stays, and the answers are kept under Not sent until dismissed", async () => {
+    vi.useFakeTimers();
+    const { root, ws } = await openPage();
+    ws.receive({ type: "replay", runs: [{ id: 1, events: [started, asked(1)] }] });
+    ws.close();
+    flushSync();
+    type(field(root), "answer A");
+    enter(field(root));
+    type(field(root), "answer C");
+    enter(field(root));
+    (one(root, "button[name=stop]") as HTMLButtonElement).click();
+    flushSync();
+    type(field(root), "draft B");
+    failThreeTimes();
+    expect(field(root).value).toBe("draft B");
+    const kept = () => [...root.querySelectorAll(".unsent li .unsent-text")].map((e) => e.textContent);
+    expect(one(root, ".unsent").textContent).toContain(prompts.UNSENT_HEADING);
+    expect(kept()).toEqual(["answer A", "answer C"]);
+    expect(root.textContent).toContain(prompts.notSentNotice("stop", "disconnected"));
+    enter(field(root));
+    expect(root.textContent).toContain(prompts.notSentNotice("answer", "disconnected"));
+    expect(kept()).toEqual(["answer A", "answer C"]);
+    (root.querySelectorAll(".unsent button[name=dismiss]")[0] as HTMLButtonElement).click();
+    flushSync();
+    expect(kept()).toEqual(["answer C"]);
   });
 });

@@ -5,8 +5,10 @@
   import { Button, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
   import { readRemembered, remember } from "../storage.ts";
 
-  type Props = { cwd: string; running: boolean; refused: string | null; chosen: string | null; onStart: (project: string, task: string) => void; onBrowse: (from: string) => void };
-  let { cwd, running, refused, chosen, onStart, onBrowse }: Props = $props();
+  // Offline (the page has stopped reconnecting) Start and Browse… cannot reach the server and are disabled; the fields
+  // stay editable and keep their text [error prevention; user control and freedom].
+  type Props = { cwd: string; running: boolean; refused: string | null; chosen: string | null; offline?: boolean; onStart: (project: string, task: string) => void; onBrowse: (from: string) => void };
+  let { cwd, running, refused, chosen, offline = false, onStart, onBrowse }: Props = $props();
 
   // The storage is an edge (../storage.ts): a failing read falls back to the server's directory, a failing write
   // does not stop Start [error prevention: remembering is a convenience, never a prerequisite].
@@ -16,7 +18,7 @@
   let task = $state("");
   // The directory chosen in the dialog wins, then what the user typed, then the remembered path, then the server's directory.
   const project = $derived(edited ?? chosen ?? (remembered() || cwd));
-  const ready = $derived(project.trim() !== "" && task.trim() !== "" && !running);
+  const ready = $derived(project.trim() !== "" && task.trim() !== "" && !running && !offline);
 
   const start = () => {
     if (!ready) return;
@@ -44,7 +46,7 @@
         <p class="support m3-font-body-small">A git repository inside this container.</p>
       {/if}
     </div>
-    <Button variant="outlined" type="button" name="browse" onclick={() => onBrowse(project)}>Browse…</Button>
+    <Button variant="outlined" type="button" name="browse" disabled={offline} onclick={() => onBrowse(project)}>Browse…</Button>
   </div>
   <TextFieldOutlinedMultiline label="Task" name="task" bind:value={task} rows={6} />
   <div class="actions">

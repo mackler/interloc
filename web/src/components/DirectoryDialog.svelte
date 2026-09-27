@@ -4,8 +4,9 @@
   import { Button, Dialog } from "m3-svelte";
   import type { Listing } from "../state.ts";
 
-  type Props = { open: boolean; listing: Listing | null; onList: (path: string) => void; onChoose: (path: string) => void; onClose: () => void };
-  let { open, listing, onList, onChoose, onClose }: Props = $props();
+  // Offline (the page has stopped reconnecting) the directories and Choose are disabled; Cancel closes [error prevention].
+  type Props = { open: boolean; listing: Listing | null; offline?: boolean; onList: (path: string) => void; onChoose: (path: string) => void; onClose: () => void };
+  let { open, listing, offline = false, onList, onChoose, onClose }: Props = $props();
   const join = (dir: string, name: string): string => (dir.endsWith("/") ? `${dir}${name}` : `${dir}/${name}`);
 </script>
 
@@ -18,16 +19,16 @@
     <ul class="dirs">
       {#if listing.parent !== null}
         {@const parent = listing.parent}
-        <li><button type="button" class="dir m3-font-body-large" data-dir=".." onclick={() => onList(parent)}>.. (up)</button></li>
+        <li><button type="button" class="dir m3-font-body-large" data-dir=".." disabled={offline} onclick={() => onList(parent)}>.. (up)</button></li>
       {/if}
       {#each listing.dirs as dir (dir)}
-        <li><button type="button" class="dir m3-font-body-large" data-dir={dir} onclick={() => listing && onList(join(listing.path, dir))}>{dir}/</button></li>
+        <li><button type="button" class="dir m3-font-body-large" data-dir={dir} disabled={offline} onclick={() => listing && onList(join(listing.path, dir))}>{dir}/</button></li>
       {/each}
     </ul>
   {/if}
   {#snippet buttons()}
     <Button variant="text" type="button" name="cancel" onclick={onClose}>Cancel</Button>
-    <Button variant="filled" type="button" name="choose" disabled={listing === null || listing.error !== null} onclick={() => listing && onChoose(listing.path)}>Choose</Button>
+    <Button variant="filled" type="button" name="choose" disabled={offline || listing === null || listing.error !== null} onclick={() => listing && onChoose(listing.path)}>Choose</Button>
   {/snippet}
 </Dialog>
 

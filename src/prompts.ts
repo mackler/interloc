@@ -338,10 +338,38 @@ export function draftWithdrawnNotice(text: string): string {
 }
 /** The server is ending (finding 15). */
 export const SERVER_CLOSED_NOTICE = "The server has ended. The page reconnects when it is started again.";
-/** An action queued while disconnected that was not sent after the reconnection. */
-export function notSentNotice(kind: "answer" | "stop", reason: "ended" | "restarted"): string {
-  return `${kind === "answer" ? "Your answer was" : "Stop was"} not sent: ${reason === "ended" ? "the run has ended" : "the server has been restarted since"}.`;
+/** The heading of the answers the page could not send (G-R1-1, P1-R1-2 of the defects' plan). */
+export const UNSENT_HEADING = "Not sent";
+const NOT_SENT_SUBJECT: Record<"answer" | "stop" | "start" | "list", string> = {
+  answer: "Your answer was not sent",
+  stop: "Stop was not sent",
+  start: "The new task was not sent",
+  list: "The directory listing was not requested",
+};
+const NOT_SENT_REASON: Record<"ended" | "restarted" | "disconnected", string> = {
+  ended: "the run has ended",
+  restarted: "the server has been restarted since",
+  disconnected: "the page is no longer connected to the server",
+};
+/**
+ * An action that was not sent: queued while disconnected and overtaken by the reconnection, or refused because the page
+ * has stopped reconnecting. A disconnected answer says where its text is: in the answer field, or quoted and kept.
+ */
+export function notSentNotice(kind: "answer" | "stop" | "start" | "list", reason: "ended" | "restarted" | "disconnected", quoted?: string): string {
+  const base = `${NOT_SENT_SUBJECT[kind]}: ${NOT_SENT_REASON[reason]}.`;
+  if (kind !== "answer" || reason !== "disconnected") return base;
+  return quoted === undefined ? `${base} Its text is still in the answer field.` : `${base} Its text is kept under “${UNSENT_HEADING}”: «${quoted}»`;
 }
+/** How much of a decode reason the notice shows; the console has it in full. */
+const REASON_LENGTH = 200;
+/** A frame of the server the page could not read (defect B of docs/page-question-phase-defects.md, decision Q2). */
+export function protocolErrorNotice(reason: string): string {
+  const shown = reason.length > REASON_LENGTH ? `${reason.slice(0, REASON_LENGTH)}…` : reason;
+  return `The page could not read a message from the server; reconnecting. Reason: ${shown}`;
+}
+/** The page has stopped reconnecting after three frames in a row it could not read (decision Q5). */
+export const CONNECTION_FAILED_NOTICE =
+  "The page has stopped reconnecting: it could not read the server's messages three times in a row. Nothing you do here is sent any more, and your typed text is kept. Reload the page once the server has been fixed.";
 /** The one-line progress of a compact window: the current phase and its latest round, or none. */
 export function progressLine(label: string | null, round: Readonly<{ round: number; limit: number }> | null): string {
   if (label === null) return "Progress: no phase has begun";
