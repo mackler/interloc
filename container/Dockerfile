@@ -48,7 +48,14 @@ USER node
 # is what files created on the host already have. Git records only the executable bit, so this
 # changes no committed mode; it keeps the working tree tidy.
 RUN printf 'umask 002\n' >> /home/node/.bashrc \
- && printf 'umask 002\n' >> /home/node/.profile
+ && printf 'umask 002\n' >> /home/node/.profile \
+ && printf 'umask 002\n' > /home/node/.bashenv
+
+# .bashrc is read only by an interactive shell and .profile only by a login shell, and `docker exec`
+# gives neither: its shell is non-login and non-interactive, so it would keep the runtime's 0000.
+# BASH_ENV is the file bash reads for a non-interactive shell, which covers `docker exec` and every
+# command run through it.
+ENV BASH_ENV=/home/node/.bashenv
 
 ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 ENV DISABLE_AUTOUPDATER=1
