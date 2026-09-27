@@ -31,8 +31,10 @@
     "check": "tsc --noEmit && tsc --noEmit -p web && svelte-check --tsconfig web/tsconfig.json --fail-on-warnings",
     "build": "vite build --config web/vite.config.ts",
     "test:unit": "node --test test/*.test.ts",
+    "test:cli": "bats test/cli",
     "test:web": "vitest run --config web/vite.config.ts",
     "test:e2e": "playwright test",
-    "test": "npm run check && npm run test:unit && npm run test:web && npm run build && npm run test:e2e"
+    "test": "npm run check && npm run test:unit && npm run test:cli && npm run test:web && npm run build && npm run test:e2e",
+    "generate:cli": "BASHLY_SETTINGS_PATH=bin/ilcli.bashly/settings.yml bashly generate --quiet"
   }
 }

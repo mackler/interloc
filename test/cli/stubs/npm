@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Stub of npm for test/cli: records its argument vector and working directory as one line of $STUB_LOG.
+# STUB_NPM_FAIL="ci" or "run build" makes that invocation exit 1.
+line=npm
+for a in "$@"; do line+=" [$a]"; done
+printf '%s @%s\n' "$line" "$PWD" >> "$STUB_LOG"
+if [[ -n ${STUB_NPM_FAIL:-} && "$*" == "$STUB_NPM_FAIL" ]]; then
+  echo "stub: npm $* failed" >&2
+  exit 1
+fi
+exit 0

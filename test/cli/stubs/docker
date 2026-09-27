@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Stub of docker for test/cli: records its argument vector as one line of $STUB_LOG, each argument in brackets.
+# STUB_DOCKER_FAIL=up makes `docker compose -f <file> up …` print an error and exit 1.
+line=docker
+for a in "$@"; do line+=" [$a]"; done
+printf '%s\n' "$line" >> "$STUB_LOG"
+if [[ -n ${STUB_DOCKER_FAIL:-} && ${4:-} == "$STUB_DOCKER_FAIL" ]]; then
+  echo "stub: compose $STUB_DOCKER_FAIL failed" >&2
+  exit 1
+fi
+exit 0

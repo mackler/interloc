@@ -1,0 +1,3 @@
+# Strings of the generated usage text that differ from bashly's defaults.
+# --version and -v are passed to claude (initialize.sh), as bin/dev-claude passed them.
+version_flag_text: Passed to claude, as in bin/ilcli run --version

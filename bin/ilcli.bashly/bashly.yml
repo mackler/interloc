@@ -1,0 +1,77 @@
+name: ilcli
+help: |-
+  Interloq's development container, and the route of a change to the installed copy.
+
+  The docker commands (run, shell, review, build, down) and release run on the host in the development clone; upgrade runs on the host in the installed copy (~/work/interloq). The script uses compose.cc.yaml in the root of the clone that contains it, and that file mounts the same clone at /workspace.
+
+  Any first argument that is not a command, --version and -v included, is passed to claude, so run can be left out. After run and review, --help and -h are not ilcli's but passed on to claude and main.ts; their usage is bin/ilcli help run and bin/ilcli help review.
+
+  The route of a change: commit on main, bin/ilcli release (pushes main), CI runs npm test on GitHub and advances the release branch only if it passes, then bin/ilcli upgrade in the installed copy. The installed copy follows release, so it can only ever install a commit whose tests passed.
+version: "1"
+
+commands:
+- name: run
+  default: force
+  help: |-
+    Start the container if needed, then start Claude Code in it
+
+    --help and -h are passed to claude; ilcli's own usage of run is bin/ilcli help run.
+  catch_all:
+    label: claude arguments
+    help: Passed to claude unchanged, --help and -- included
+    catch_help: true
+  examples:
+  - bin/ilcli                  new session
+  - bin/ilcli --continue       most recent session
+  - bin/ilcli run --resume     session list
+  - bin/ilcli run --help       Claude Code's own help
+  - bin/ilcli help run         this usage
+
+- name: shell
+  help: Start the container if needed, then open a Bash shell in it
+  catch_all:
+    label: ignored
+    help: Accepted and ignored; --help and -h show this usage
+
+- name: review
+  help: |-
+    Start the container if needed, then run Interloq in the terminal inside it
+
+    --help and -h are passed to main.ts; ilcli's own usage of review is bin/ilcli help review.
+  catch_all:
+    label: arguments
+    help: 'Passed to node /opt/interloq/src/main.ts unchanged: "task description" [project directory]'
+    catch_help: true
+  examples:
+  - bin/ilcli review "task description" /path/to/project
+
+- name: build
+  help: Build the image from ../claude-code-image
+  catch_all:
+    label: ignored
+    help: Accepted and ignored; --help and -h show this usage
+
+- name: down
+  help: Stop and remove the container (the volumes are kept)
+  catch_all:
+    label: ignored
+    help: Accepted and ignored; --help and -h show this usage
+
+- name: release
+  help: |-
+    Push main to GitHub, where CI runs npm test and advances release only if it passes
+
+    Run on the host in the development clone, on main, with a clean working tree that is not behind origin/main. Nothing is pushed if a check fails.
+
+- name: upgrade
+  help: |-
+    Bring the installed copy to origin/release, then npm ci and npm run build
+
+    Run on the host in the installed copy: on branch release tracking origin/release, with no local changes and no commits that origin/release lacks. Nothing is changed if a check fails. npm ci and npm run build run every time, so running it again repeats a failed install or build. Afterwards restart the web server and reload the open tabs.
+
+- name: help
+  help: Show this text, or the usage of one command
+  args:
+  - name: command
+    help: The command whose usage to show
+    allowed: [run, shell, review, build, down, release, upgrade, help]

@@ -58,20 +58,22 @@ Interloq uses two clones of this repository on the host:
 | Copy | Path on the host | Purpose |
 |---|---|---|
 | Installed copy | `~/work/interloq` | What real runs use. Containers mount it read-only at `/opt/interloq`. |
-| Development copy | `~/work/interloq-dev` | Where changes are made. Use `bin/dev-claude` to start its container. |
+| Development copy | `~/work/interloq-dev` | Where changes are made. Use `bin/ilcli` to start its container. |
 
-`bin/dev-claude` manages the development container (`compose.cc.yaml`). That container mounts the
+`bin/ilcli` manages the development container (`compose.cc.yaml`). That container mounts the
 development copy at `/workspace` and the installed copy at `/opt/interloq`, holds both agents'
 credentials, and publishes port 8090 for the web page.
 
 | Command | What it does |
 |---|---|
-| `bin/dev-claude` or `bin/dev-claude run [args]` | Starts the container if needed, then starts Claude Code in it |
-| `bin/dev-claude shell` | Opens a Bash shell in the container |
-| `bin/dev-claude review "task" [project]` | Runs Interloq in the terminal inside the container |
-| `bin/dev-claude build` | Builds the image from `../claude-code-image` |
-| `bin/dev-claude down` | Stops and removes the container (the volumes are kept) |
-| `bin/dev-claude help` | Shows the usage text |
+| `bin/ilcli` or `bin/ilcli run [args]` | Starts the container if needed, then starts Claude Code in it |
+| `bin/ilcli shell` | Opens a Bash shell in the container |
+| `bin/ilcli review "task" [project]` | Runs Interloq in the terminal inside the container |
+| `bin/ilcli build` | Builds the image from `../claude-code-image` |
+| `bin/ilcli down` | Stops and removes the container (the volumes are kept) |
+| `bin/ilcli release` | Pushes `main` to GitHub, where the checks run (see "Deploying an update") |
+| `bin/ilcli upgrade` | In the installed copy: brings it to the tested `release` branch, then `npm ci` and `npm run build` |
+| `bin/ilcli help [command]` | Shows the usage text, which documents every command |
 
 ## First-time setup
 
@@ -99,7 +101,7 @@ credentials, and publishes port 8090 for the web page.
 
    ```sh
    export CLAUDE_CODE_OAUTH_TOKEN=...
-   bin/dev-claude build
+   bin/ilcli build
    ```
 
 5. Make sure that everything under "What you need" is in place, and that the Codex volume holds a
@@ -110,13 +112,13 @@ credentials, and publishes port 8090 for the web page.
 1. Open a shell in the container, then start the server:
 
    ```sh
-   bin/dev-claude shell
+   bin/ilcli shell
    node /opt/interloq/src/web.ts
    ```
 
    The server listens on port 8090, which the container publishes to the host. To use another port,
    start the server with the port as its argument (`node /opt/interloq/src/web.ts <port>`). Also
-   add a matching `ports` line to `compose.cc.yaml`, run `bin/dev-claude down` and start the
+   add a matching `ports` line to `compose.cc.yaml`, run `bin/ilcli down` and start the
    container again so that the line takes effect, and open `http://localhost:<port>/` instead.
 2. On the host, open **http://localhost:8090/** in your browser.
 3. Fill in the task and the project directory, then press Start. The project directory must be the
@@ -142,7 +144,7 @@ node /opt/interloq/src/main.ts "task description" [project directory]
 Or from the host, in the development copy:
 
 ```sh
-bin/dev-claude review "task description" [project directory]
+bin/ilcli review "task description" [project directory]
 ```
 
 You answer the questions in the terminal. Ctrl+C interrupts the run (exit code 130); the records are
