@@ -147,6 +147,15 @@ layout, typography, colour roles, elevation, motion and states. A component libr
 is a dependency and needs the developer's instruction like any other; without one, the guidelines are
 followed by hand.
 
+Command-line behaviour follows the Command Line Interface Guidelines (clig.dev): the terminal
+interface of the program (`src/main.ts`, `src/ui.ts`) and the developer's command `bin/ilcli`. It
+governs the command line only — the page answers to the heuristics and to Material Design above, and
+the program's internals to the Programming principles. Several of its points are already decided
+behaviour and stay as they are: configuration precedence (behaviour 9), the exit codes (behaviour 11:
+130 interrupted, 1 halted, 2 a missing task), and prompting the user only where a decision is
+required (behaviour 1). Where it adds something, it is the standard a command-line decision is argued
+from, as the heuristics are for the interfaces.
+
 ## Facts established by runs in the developer's containers
 
 Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect), 26 Sep 2026 (the web GUI and the work review).
