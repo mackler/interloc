@@ -113,32 +113,37 @@ test("analysisLines marks exactly the texts that oppose the column's option, and
     reason_the_effect_matters: el(`r ${id}`),
     extent: { per_person: el(`pp ${id}`), persons_affected: el(`pa ${id}`), likelihood: el(`l ${id}`), timing: el(`w ${id}`) },
   });
-  const chain = (p: string): Argument[] => [{ id: `${p}1`, text: `${p} one.`, equivalent_to: "", replies: [{ id: `${p}2`, text: `${p} two.`, equivalent_to: "", replies: [{ id: `${p}3`, text: `${p} three.`, equivalent_to: "", replies: [] }] }] }];
+  // W1-R1-2: texts of several lines, opposing and not: every physical line is checked.
+  const chain = (p: string): Argument[] => [{ id: `${p}1`, text: `${p} one.\n${p} one, continued.`, equivalent_to: "", replies: [{ id: `${p}2`, text: `${p} two.\n${p} two, continued.`, equivalent_to: "", replies: [{ id: `${p}3`, text: `${p} three.`, equivalent_to: "", replies: [] }] }] }];
+  const multiline = (e: Entry): Entry => ({ ...e, title: `${e.title}\nTitle continued.`, comparative_condition: { ...e.comparative_condition, text: `${e.comparative_condition.text}\nElement continued.` } });
   const analysis: DecisionAnalysis = {
     decision: "d",
     columns: [
-      { kind: "argued", option: "SQLite", advantages: [entry("E1", chain("a"))], disadvantages: [entry("E2", chain("d"))] },
-      { kind: "unclear", option: "PostgreSQL", unclear: "It could mean a server or a hosted service." },
+      { kind: "argued", option: "SQLite", advantages: [multiline(entry("E1", chain("a")))], disadvantages: [multiline(entry("E2", chain("d")))] },
+      { kind: "unclear", option: "PostgreSQL", unclear: "It could mean a server\nor a hosted service." },
     ],
     recommendation: { option: "", reason: "" },
   };
   const view = viewOf(analysis);
   const marked = (text: string, symbol: string | null) => (symbol === null ? text : `${text} ${symbol}`);
+  // Each item's physical lines, as [indentation, the text after the marker, opposes]: a bullet's continuation lines are
+  // indented past its "- ", and every line of an opposing text carries the marker after the indentation.
+  const physical = (indent: number, prefix: string, text: string, opposes: boolean) =>
+    text.split("\n").map((part, i) => [indent, `${i === 0 ? prefix : " ".repeat(prefix.length)}${part}`, opposes] as const);
   const expected = view.columns.flatMap((c) =>
     c.kind === "unclear"
-      ? []
+      ? physical(2, "", c.unclear, false)
       : [...c.advantages, ...c.disadvantages].flatMap((e) => [
-          [`${e.label} ${marked(e.title, e.symbol)}`, e.opposes],
-          ...e.elements.flatMap((x) => [[`- ${x.text}`, x.opposes], ...x.arguments.map((a) => [marked(a.text, a.symbol), a.opposes])]),
+          ...physical(2, "", `${e.label} ${marked(e.title, e.symbol)}`, e.opposes),
+          ...e.elements.flatMap((x) => [...physical(4, "- ", x.text, x.opposes), ...x.arguments.flatMap((a) => physical(6 + 2 * a.level, "", marked(a.text, a.symbol), a.opposes))]),
         ]),
   );
   const lines = analysisLines(1, "Which?", view);
-  const items = lines
-    .map((l) => l.trimStart())
-    .filter((l) => l !== "" && !/^(Decision|Option) \d/.test(l) && l !== "Advantages:" && l !== "Disadvantages:" && l !== "It could mean a server or a hosted service.")
-    .map((l) => (l.startsWith(OPPOSES_MARKER) ? [l.slice(OPPOSES_MARKER.length), true] : [l, false]));
-  assert.deepEqual(items, expected);
-  assert.ok(expected.some(([, opposes]) => opposes));
+  const rendered = ([indent, text, opposes]: readonly [number, string, boolean]) => `${" ".repeat(indent)}${opposes ? OPPOSES_MARKER : ""}${text}`;
+  const items = lines.filter((l) => l !== "" && !/^(Decision|Option) \d/.test(l) && l.trim() !== "Advantages:" && l.trim() !== "Disadvantages:");
+  assert.deepEqual(items, expected.map(rendered));
+  assert.ok(expected.some(([, , opposes]) => opposes));
+  assert.ok(expected.some(([, text]) => text.startsWith("  ")), "a bullet's continuation line is in the fixture");
   const unclear = lines.indexOf("Option 2: PostgreSQL");
-  assert.deepEqual(lines.slice(unclear, unclear + 3), ["Option 2: PostgreSQL", "", "  It could mean a server or a hosted service."]);
+  assert.deepEqual(lines.slice(unclear, unclear + 4), ["Option 2: PostgreSQL", "", "  It could mean a server", "  or a hosted service."]);
 });

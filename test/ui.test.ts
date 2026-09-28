@@ -7,6 +7,8 @@ import type { RunError } from "../src/errors.ts";
 import type { UiShape } from "../src/services.ts";
 import * as prompts from "../src/prompts.ts";
 import { terminalUi } from "../src/ui.ts";
+import { program } from "../src/program.ts";
+import { finished, tempRepo, testWiring } from "./helpers.ts";
 
 type Streams = { input: PassThrough; output: PassThrough; written: () => string };
 const streams = (): Streams => {
@@ -162,4 +164,57 @@ test("notify prints nothing for AnswerRejected", async () => {
   const io = streams();
   await withUi(io, (ui) => ui.notify({ _tag: "AnswerRejected" }));
   assert.equal(io.written(), "");
+});
+
+// W1-R1-2 (P2-R1-1): a run through the program with the terminal Ui over streams: a decision's analysis whose texts
+// span several lines prints every line indented, and every line of an opposing text with the marker.
+test("a run with the terminal Ui prints every line of a multiline analysis text indented, and marked where it opposes", async () => {
+  const el = (text: string, counterarguments: unknown[] = []) => ({ text, counterarguments });
+  const entry = (id: string, first: string, counter: unknown[] = []) => ({
+    id,
+    title: `Title ${id}.`,
+    comparative_condition: el(first, counter),
+    starting_cause: el(`s ${id}`),
+    intermediate_steps: el(`i ${id}`),
+    threshold: el(`t ${id}`),
+    effect_on_persons: el(`e ${id}`),
+    reason_the_effect_matters: el(`r ${id}`),
+    extent: { per_person: el(`pp ${id}`), persons_affected: el(`pa ${id}`), likelihood: el(`l ${id}`), timing: el(`w ${id}`) },
+  });
+  const defense = { id: "A1", text: "But one.", equivalent_to: "", replies: [{ id: "A2", text: "On the other hand two.\nStill two.", equivalent_to: "", replies: [] }] };
+  const analysis = {
+    decision: "Which database?",
+    columns: [
+      { kind: "argued", option: "SQLite", advantages: [], disadvantages: [entry("E1", "First sentence.\nSecond sentence.", [defense])] },
+      { kind: "unclear", option: "PostgreSQL", unclear: "It could mean a server.\nOr a hosted service." },
+    ],
+    recommendation: { option: "", reason: "" },
+  };
+  const question = { question: "Which database?", options: [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "a server" }] };
+  const io = streams();
+  const { wiring } = testWiring(tempRepo(), {
+    steps: [{ output: { questions_for_user: [question] }, plan: "1. [ ] the step\n" }, { output: analysis }, { output: { questions_for_user: [] } }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  const running = Effect.runPromise(Effect.scoped(program(["task"], { ...wiring, ui: terminalUi(io.input, io.output, () => undefined) })));
+  const offers = () => io.written().split(prompts.OFFER_LINE).length - 1;
+  await eventually("the offer", () => offers() >= 1);
+  io.input.write("/decide\n");
+  await eventually("the question asked again", () => offers() >= 2);
+  io.input.write("1\n");
+  assert.equal(await running, 0);
+  const lines = io.written().split("\n");
+  const m = prompts.OPPOSES_MARKER;
+  // The disadvantage's element: its bullet, and the continuation aligned under the text; both marked.
+  assert.ok(lines.includes(`    ${m}- First sentence.`), io.written());
+  assert.ok(lines.includes(`    ${m}  Second sentence.`), io.written());
+  // The defense under a disadvantage opposes the option, on both of its lines.
+  assert.ok(lines.includes(`          ${m}On the other hand two.`), io.written());
+  assert.ok(lines.includes(`          ${m}Still two.`), io.written());
+  // The counterargument to the disadvantage supports the option: no marker.
+  assert.ok(lines.includes("        But one."), io.written());
+  // The unclear statement: every line indented, none marked.
+  assert.ok(lines.includes("  It could mean a server."), io.written());
+  assert.ok(lines.includes("  Or a hosted service."), io.written());
 });

@@ -118,16 +118,19 @@ export const optionLines = (options: readonly Readonly<{ label: string; descript
  */
 export const analysisLines = (k: number, question: string, view: AnalysisView): readonly string[] => {
   const marked = (text: string, symbol: string | null) => (symbol === null ? text : `${text} ${symbol}`);
-  const line = (indent: number, opposes: boolean, text: string) => `${" ".repeat(indent)}${opposes ? OPPOSES_MARKER : ""}${text}`;
+  // Every physical line of a text (W1-R1-2): its indentation, the marker where it opposes the option, and the first-line
+  // prefix ("- " for an element), whose width indents the continuation lines so that they align under the text.
+  const lines = (indent: number, prefix: string, opposes: boolean, text: string): readonly string[] =>
+    text.split("\n").map((part, i) => `${" ".repeat(indent)}${opposes ? OPPOSES_MARKER : ""}${i === 0 ? prefix : " ".repeat(prefix.length)}${part}`);
   const entryLines = (entry: EntryView): readonly string[] => [
-    line(2, entry.opposes, `${entry.label} ${marked(entry.title, entry.symbol)}`),
-    ...entry.elements.flatMap((el) => [line(4, el.opposes, `- ${el.text}`), ...el.arguments.map((a) => line(6 + 2 * a.level, a.opposes, marked(a.text, a.symbol)))]),
+    ...lines(2, "", entry.opposes, `${entry.label} ${marked(entry.title, entry.symbol)}`),
+    ...entry.elements.flatMap((el) => [...lines(4, "- ", el.opposes, el.text), ...el.arguments.flatMap((a) => lines(6 + 2 * a.level, "", a.opposes, marked(a.text, a.symbol)))]),
   ];
   const columns = view.columns.flatMap((column, i) => [
     optionHeading(i + 1, column.option),
     "",
     ...(column.kind === "unclear"
-      ? [`  ${column.unclear}`]
+      ? lines(2, "", false, column.unclear)
       : [`  ${column.advantagesHeading}`, ...column.advantages.flatMap((e) => ["", ...entryLines(e)]), "", `  ${column.disadvantagesHeading}`, ...column.disadvantages.flatMap((e) => ["", ...entryLines(e)])]),
     "",
   ]);
