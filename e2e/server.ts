@@ -5,10 +5,10 @@
 // "interview", "workCorrection", "tabs", "drop", "long"; and "questionReview", the question phase whose review raises
 // an issue, so that Claude Code's response carries the amended list (defect A of docs/page-question-phase-defects.md);
 // "longChoices", an interview turn whose numbered answers are paragraphs (issue #12); "decide", a plan writer's question
-// with two options on which the user takes "Help me Decide" (decision support); "decideLong", the same with a
+// with two options on which the user takes "Help me decide" (decision support); "decideLong", the same with a
 // recommendation of several paragraphs (W1-R1-3); "decideRevise", an analysis whose first review raises an issue that
 // Claude accepts with an amended analysis (W2-R1-1); "decideBlank", an interview turn with numbered answers on which the
-// user takes "Help me Decide" and then sends an empty message, which the run rejects (W3-R1-1).
+// user takes "Help me decide" and then sends an empty message, which the run rejects (W3-R1-1).
 // PORT is the port.
 
 import { Effect } from "effect";

@@ -1,5 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
+import { HELP_ME_DECIDE } from "../src/prompts.ts";
 import { LONG_ANSWERS } from "./longAnswers.ts";
 
 // Finding 7 of docs/gui-review.md, decision Q3: the layout adapts. At M3's expanded width (840 px and wider) the rail
@@ -240,7 +241,7 @@ for (const [width, height] of [
 const DECIDE_URL = "http://127.0.0.1:8111/";
 const openAnalysis = async (page: Page) => {
   await startTask(page, "Add a database", DECIDE_URL);
-  await page.getByRole("button", { name: "Help me Decide" }).click();
+  await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
   const analysis = page.getByRole("region", { name: /^Decision 1: / });
   await expect(analysis).toBeVisible();
   return analysis;
@@ -284,7 +285,7 @@ test("(L12) the analysis at 360 × 640: a message asks for a wider window, and t
 test("(L13) a long recommendation at 1280 × 800: the columns keep their height, and the recommendation's end can be scrolled into view", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await startTask(page, "Add a database", "http://127.0.0.1:8112/");
-  await page.getByRole("button", { name: "Help me Decide" }).click();
+  await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
   const analysis = page.getByRole("region", { name: /^Decision 1: / });
   await expect(analysis).toBeVisible();
   expect((await box(analysis.locator(".column").nth(0))).height).toBeGreaterThanOrEqual(200);
@@ -303,7 +304,7 @@ test("(L13) a long recommendation at 1280 × 800: the columns keep their height,
 const openLongAnalysis = async (page: Page, width: number, height: number) => {
   await page.setViewportSize({ width, height });
   await startTask(page, "Add a database", "http://127.0.0.1:8112/");
-  await page.getByRole("button", { name: "Help me Decide" }).click();
+  await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
   const analysis = page.getByRole("region", { name: /^Decision 1: / });
   await expect(analysis).toBeVisible();
   return {

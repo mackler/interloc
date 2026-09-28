@@ -227,3 +227,10 @@ test("the decision respond and apply-decisions prompts ask for the complete anal
   assert.match(apply, /user-decisions\.md/);
   assert.match(apply, /complete analysis/);
 });
+
+// Issue #25, one line: only the first word of a button label is capitalized, and the terminal's offer line names the
+// button's label, built from the same constant.
+test("the offer's label reads Help me decide, and the terminal's offer line carries that label", () => {
+  assert.equal(prompts.HELP_ME_DECIDE, "Help me decide");
+  assert.ok(prompts.OFFER_LINE.includes(`/decide = ${prompts.HELP_ME_DECIDE}:`), prompts.OFFER_LINE);
+});

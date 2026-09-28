@@ -560,7 +560,7 @@ export function unseenBadge(n: number): string {
 }
 
 
-// ---- decision support ("Help me Decide") ----------------------------------------------------------
+// ---- decision support ("Help me decide") ----------------------------------------------------------
 
 /**
  * The binding sentence (by the developer's instruction): docs/decision-making.md is the authority for the representation,
@@ -689,9 +689,9 @@ export function decisionBeganLine(k: number): string {
   return `\nDecision ${k}: Claude Code works out the arguments for and against each option ...`;
 }
 /** The offer's label (docs/decision-support-design.md, section 1): one per question, never one per option. */
-export const HELP_ME_DECIDE = "Help me Decide";
+export const HELP_ME_DECIDE = "Help me decide";
 /** The line that carries the offer in a prompt text (D1): the terminal shows it, and the page turns it into a button. */
-export const OFFER_LINE = "/decide = Help me Decide: work out the arguments for and against each option before you choose";
+export const OFFER_LINE = `/decide = ${HELP_ME_DECIDE}: work out the arguments for and against each option before you choose`;
 /** A prompt with the offer: the offer line, then the prompt. */
 export const withOffer = (prompt: string): string => `${OFFER_LINE}\n${prompt}`;
 /** The prompt without the offer line, and whether it carried one. */

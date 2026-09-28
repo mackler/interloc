@@ -1,5 +1,6 @@
 import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
+import { HELP_ME_DECIDE } from "../src/prompts.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
 // fails on an uncaught error or a console error in any of its pages (e2e/fixtures.ts, finding 10 of docs/gui-review.md).
@@ -271,11 +272,11 @@ test("(12) a question phase through the page: the list's review and response, on
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
-// Decision support: "Help me Decide" on a question with options, the analysis over both chat columns, then the answer.
-test("(13) Help me Decide: the analysis covers the chat columns until the question is answered", async ({ page }) => {
+// Decision support: "Help me decide" on a question with options, the analysis over both chat columns, then the answer.
+test("(13) Help me decide: the analysis covers the chat columns until the question is answered", async ({ page }) => {
   await startTask(page, "decide", "Add a database");
   await expect(left(page).getByText("Decision on: question from Claude Code: Which database should the service use?")).toBeVisible();
-  await page.getByRole("button", { name: "Help me Decide" }).click();
+  await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
   const analysis = page.getByRole("region", { name: /^Decision 1: / });
   await expect(analysis).toBeVisible();
   await expect(analysis.locator(".column h3")).toHaveText(["SQLite", "PostgreSQL"]);
@@ -296,7 +297,7 @@ test("(13) Help me Decide: the analysis covers the chat columns until the questi
 // W2-R1-1: a decision whose analysis is revised in its review: the response reaches the page, which stays connected.
 test("(14) a revised analysis: the decision's response reaches the page, which stays connected and shows the amended analysis", async ({ page }) => {
   await startTask(page, "decideRevise", "Add a database");
-  await page.getByRole("button", { name: "Help me Decide" }).click();
+  await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
   const analysis = page.getByRole("region", { name: /^Decision 1: / });
   await expect(analysis).toBeVisible();
   await expect(analysis.getByText("The amended advantage: developers set up the service sooner.")).toBeVisible();
@@ -311,11 +312,11 @@ test("(14) a revised analysis: the decision's response reaches the page, which s
 // W3-R1-1: an empty message after the analysis is rejected and asked again; the analysis stays until the answer.
 test("(15) a rejected empty reply keeps the analysis shown; the answer that follows dismisses it", async ({ page }) => {
   await startTask(page, "decideBlank", "Add a service");
-  await page.getByRole("button", { name: "Help me Decide" }).click();
+  await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
   const analysis = page.getByRole("region", { name: /^Decision 1: / });
   await expect(analysis).toBeVisible();
   await page.locator("textarea[name=answer]").press("Enter");
-  // The Help me Decide answer and the empty one.
+  // The Help me decide answer and the empty one.
   await expect(page.locator("[data-author=user]")).toHaveCount(2);
   await expect(analysis).toBeVisible();
   await expect(analysis.locator(".column h3")).toHaveText(["PostgreSQL", "SQLite"]);

@@ -1,4 +1,4 @@
-// The offer of decision support ("Help me Decide", D2 of the decision-support plan): a question with two or more options
+// The offer of decision support ("Help me decide", D2 of the decision-support plan): a question with two or more options
 // carries it, whatever interface asks. Separate from src/decision.ts, which runs the loop, so that the places that ask
 // (src/review.ts, src/conversation.ts, src/claude.ts) do not import the loop (no import cycle).
 

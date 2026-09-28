@@ -54,7 +54,7 @@ export const foldLine = (fold: LineFold, line: string): LineFold => {
 
 // ---- decision support ---------------------------------------------------------------------------
 
-/** The offer's command (D1 of the decision-support plan): "Help me Decide" sends it, and the terminal user types it. */
+/** The offer's command (D1 of the decision-support plan): "Help me decide" sends it, and the terminal user types it. */
 export const DECIDE = "/decide";
 export const isDecide = (text: string): boolean => text.trim() === DECIDE;
 

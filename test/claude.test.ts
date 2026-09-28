@@ -557,7 +557,7 @@ const recordingDecider = (): { decider: DeciderShape; requests: unknown[] } => {
   return { decider, requests };
 };
 
-test("a relayed question with options offers Help me Decide, presents the question again, and relays the answer", async () => {
+test("a relayed question with options offers Help me decide, presents the question again, and relays the answer", async () => {
   const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
   const relayed: (PermissionResult | null)[] = [];
   const script: Script = (call) => (async function* () {
@@ -576,7 +576,7 @@ test("a relayed question with options offers Help me Decide, presents the questi
   assert.equal(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")).option, "B");
 });
 
-test("an execution permission request offers Help me Decide over Allow and Deny", async () => {
+test("an execution permission request offers Help me decide over Allow and Deny", async () => {
   const results: string[] = [];
   const script: Script = (call) => (async function* () {
     yield init();

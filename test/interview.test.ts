@@ -112,7 +112,7 @@ test("the interview's opening is an InterviewOpened event, not a terminal-only s
 
 // Decision support, plan step 3.5: an interview turn's numbered answers carry the offer; the decision is in the
 // requirements phase, and the chosen answer goes on to Claude Code as typed.
-test("an interview turn with numbered answers offers Help me Decide; after the analysis the number is the answer", async () => {
+test("an interview turn with numbered answers offers Help me decide; after the analysis the number is the answer", async () => {
   const labels = numberedOptionLabels(NUMBERED_MESSAGE).map((c) => c.label);
   const el = { text: "t", counterarguments: [] };
   const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });

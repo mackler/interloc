@@ -1,4 +1,4 @@
-// Decision support ("Help me Decide", docs/decision-support-design.md): a decision loop analyzes the options of a
+// Decision support ("Help me decide", docs/decision-support-design.md): a decision loop analyzes the options of a
 // question under docs/decision-making.md, reviewed by Codex in rounds like every other loop (reviewLoop), in a fresh
 // Claude Code session (decision Q3). Decisions are numbered across the run; the loop sits inside the phase in which
 // the question was asked and changes nothing about the phases.

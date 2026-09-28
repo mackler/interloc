@@ -88,7 +88,7 @@ test("every choice of numberedChoices sends the decimal number of its line", () 
 });
 
 // Decision support, plan step 3.2: the offer is a property of the prompt text (D1).
-test("a prompt with the offer line has the entry of its text plus Help me Decide before Quit; without the line nothing changes", () => {
+test("a prompt with the offer line has the entry of its text plus Help me decide before Quit; without the line nothing changes", () => {
   for (const [text, expected, choices] of catalog) {
     const offered = promptOf(prompts.withOffer(text));
     assert.equal(offered.kind, expected.kind);

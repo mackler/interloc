@@ -251,8 +251,8 @@ describe("PromptWidget", () => {
     expect(root.querySelector("input[name=answer]")).not.toBe(null);
   });
 
-  // Decision support, plan step 3.6: one "Help me Decide" per question, a tonal button that sends /decide.
-  test("Help me Decide is a tonal button that sends /decide, never the filled primary action", () => {
+  // Decision support, plan step 3.6: one "Help me decide" per question, a tonal button that sends /decide.
+  test("Help me decide is a tonal button that sends /decide, never the filled primary action", () => {
     const sent: string[] = [];
     const root = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.optionOrTextPrompt), [{ label: "A", sends: "1" }, { label: "B", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];

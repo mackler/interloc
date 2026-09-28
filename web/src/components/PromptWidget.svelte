@@ -24,7 +24,7 @@
     onAnswer(widget.asked.prompt, value);
   };
   const isQuit = (label: string) => label === "Quit";
-  // "Help me Decide" is an offer beside the answer, never the answer itself: tonal wherever it stands (decision support)
+  // "Help me decide" is an offer beside the answer, never the answer itself: tonal wherever it stands (decision support)
   // [consistency and standards: the filled button stays the program's primary action].
   const variantOf = (label: string, i: number): "filled" | "tonal" | "outlined" => (isQuit(label) ? "outlined" : label === HELP_ME_DECIDE ? "tonal" : i === 0 ? "filled" : "tonal");
   // An input method uses Enter to accept a candidate; that Enter is not an answer (finding 6) [error prevention].

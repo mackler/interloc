@@ -223,7 +223,7 @@ const runTaskWith = async (options: TestOptions) => {
   return { ...t, finished: await Effect.runPromise(run("task").pipe(Effect.provide(t.layer))) };
 };
 
-test("a disputed pause offers Help me Decide; the analysis runs in the phase, and the chosen position is the decision", async () => {
+test("a disputed pause offers Help me decide; the analysis runs in the phase, and the chosen position is the decision", async () => {
   const { probe } = await runTaskWith({
     answers: ["/decide", "1"],
     steps: [
@@ -268,7 +268,7 @@ test("a decision inside a decision: a pause of decision 1 opens decision 2 in th
   assert.match(fs.readFileSync(path.join(probe.dir, "user-decisions.md"), "utf8"), /Subject: question from Claude Code: Which database\?\nDecision: SQLite: a file/);
 });
 
-test("at the cycle limit Help me Decide is offered, and a number afterwards adds cycles", async () => {
+test("at the cycle limit Help me decide is offered, and a number afterwards adds cycles", async () => {
   const threeColumns: DecisionAnalysis = { ...analysis(), columns: [prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_MORE].map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })) };
   const { probe, finished } = await runTaskWith({
     config: { maxRounds: 1 },

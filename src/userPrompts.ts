@@ -52,7 +52,7 @@ const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
 
 /**
  * The widget of a prompt text. Total: a text that is not in the catalog is free text plus Quit. A text with the offer
- * line (decision support, D1) is the entry of the rest with "Help me Decide" before Quit.
+ * line (decision support, D1) is the entry of the rest with "Help me decide" before Quit.
  */
 export const promptOf = (text: string): UserPrompt => {
   const offer = prompts.withoutOffer(text);

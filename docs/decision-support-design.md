@@ -34,7 +34,7 @@ Quit is present on every prompt as an escape from the program, not as an option 
 does not make a single-action prompt into a choice.
 
 The offer is **one button per question**, not one per option: the analysis covers the whole decision.
-Its label is "Help me Decide".
+Its label is "Help me decide".
 
 The rule binds both interfaces. The page shows a button; the terminal, which has no buttons, offers
 it the way it offers every other choice.
