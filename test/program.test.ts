@@ -63,6 +63,17 @@ test("an invalid config prints HALTED with the file and field and exits 1, befor
   assert.ok(!fs.existsSync(path.join(probe.dir, "conversation.md")), "the records were initialised");
 });
 
+// Decision support, plan step 2.1 (D7): the representation's format is read from the program's own directory.
+test("an unreadable decision-making format prints HALTED with the file and exits 1, before any agent call and without records", async () => {
+  const { wiring, probe } = testWiring(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }] });
+  const missing = path.join(probe.dir, "no-such-format.md");
+  assert.equal(await runProgram(["task"], { ...wiring, decisionFormat: missing }), 1);
+  assert.match(said(probe), new RegExp(`HALTED: the decision-making format ${missing} could not be read`));
+  assertTail(probe);
+  assert.deepEqual(probe.planner.prompts, []);
+  assert.ok(!fs.existsSync(path.join(probe.dir, "conversation.md")), "the records were initialized");
+});
+
 /** Runs the program in a fiber, waits for the double to be reached, interrupts it, and returns its exit. */
 const interruptWhen = async (wiring: Wiring, reached: Promise<void>): Promise<Exit.Exit<number, never>> => {
   const fiber = Effect.runFork(Effect.scoped(program(["task"], wiring)));

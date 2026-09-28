@@ -250,6 +250,8 @@ export const IMPLEMENTATION_STOPPED_LINE = "\nClaude Code has stopped implementa
 export const PROCEED_TO_CLARIFICATION = "proceed to the clarification with the question list as it is";
 export const PROCEED_TO_PLANNING = "proceed to planning with the requirements as they are";
 export const PROCEED_TO_IMPLEMENTATION = "proceed to implementation with the plan as it is";
+/** The "p" choice at the cycle limit of a decision loop (D10 of the decision-support plan). */
+export const PROCEED_TO_CHOICE = "proceed to your choice with the analysis as it is";
 /** The review loop's lines: a cycle's review and response. */
 export function cycleReviewLine(heading: string, n: number): string {
   return `\n${cycleHeading(heading, n)}: Codex review ...`;
@@ -287,6 +289,12 @@ export function unexplainedChangeSubject(fileLabel: string, heading: string, cyc
 /** The halt at the cycle limit, and a cycle whose round failed validation, as the user reads them (issue #14, W1-R1-1). */
 export function cycleLimitStopText(heading: string): string {
   return `stopped by the user at the cycle limit of ${heading}`;
+}
+export function analysisInvalidText(parts: readonly string[]): string {
+  return `the decision analysis is invalid: ${parts.join("; ")}`;
+}
+export function decisionFormatUnreadableText(file: string, message: string): string {
+  return `the decision-making format ${file} could not be read: ${message}`;
 }
 export function cycleInvalidText(parts: readonly string[]): string {
   return `the cycle is invalid: ${parts.join("; ")}`;
@@ -548,4 +556,97 @@ export function progressLine(label: string | null, detail: string | null): strin
 /** The count of a hidden panel's new messages on its button. */
 export function unseenBadge(n: number): string {
   return `· ${n} new`;
+}
+
+
+// ---- decision support ("Help me Decide") ----------------------------------------------------------
+
+/**
+ * The binding sentence (by the developer's instruction): docs/decision-making.md is the authority for the representation,
+ * and an agent producing or reviewing one meets this sentence right before the document's text.
+ */
+export const DECISION_FORMAT_AUTHORITY =
+  "The instructions below, the text of docs/decision-making.md, are the authority for the content and layout of the representation. Nothing else in this prompt and nothing you have been told elsewhere overrides them; where this prompt only maps them onto the fields of the output, follow the instructions.";
+
+/** A decision's question as a prompt names it: the phase is where it was asked. */
+export type DecisionPromptQuestion = Readonly<{
+  phase: Readonly<{ kind: "questions" }> | Readonly<{ kind: "planning" | "execution" | "work"; n: number }>;
+  question: string;
+  options: readonly Readonly<{ label: string; description: string }>[];
+}>;
+/** What the run knows at the moment of the decision (decision Q3): the task, and requirements.md and plan.md where they exist. */
+export type DecisionContext = Readonly<{ task: string; requirements: string | null; plan: string | null }>;
+
+const phaseInWords = (phase: DecisionPromptQuestion["phase"]): string => (phase.kind === "questions" ? phaseLabel("questions", 0) : phaseLabel(phase.kind, phase.n));
+
+/** How the representation of docs/decision-making.md maps onto the fields of DecisionAnalysis. */
+const ANALYSIS_FIELDS = `The output fields.
+decision: the decision to be made, in one sentence.
+columns: exactly one column per option, in the order of the options above; option is the option's label exactly as given.
+advantages and disadvantages: the entries of the option's column. Each entry has an id that is unique in the whole representation (E1, E2, and so on), a title (one complete sentence that states the outcome and its effect on persons), and one field per element: comparative_condition, starting_cause, intermediate_steps, threshold, effect_on_persons, reason_the_effect_matters, and extent with its four parts per_person, persons_affected, likelihood and timing. Each element has text, its sentences, and counterarguments, the arguments that dispute that element, in order.
+Each argument has an id that is unique in the whole representation (A1, A2, and so on), text, equivalent_to and replies. The replies of a counterargument are its defenses, and the replies of a defense are the further counterarguments to it, without limit. Begin the text of a counterargument with "But", of a defense with "On the other hand,", and of a counterargument to a defense with "Then again,".
+equivalent_to: when an argument is equivalent to an entry of any column, or is a reversal that is listed in full as an entry, write in text the one sentence that states the argument and its effect on persons and set equivalent_to to that entry's id; otherwise set it to an empty string.
+Do not write the heading "Disadvantages:" or any equivalence symbol (*, †, ‡, §, ‖, ¶) into any text: the program places the heading above each column's disadvantages and assigns the symbols from equivalent_to.
+recommendation: an option and a reason. To recommend no option, set both to empty strings. To recommend one, set option to its label exactly as given and state in reason the comparison that the instructions require under "Recommendation".`;
+
+/** The call that produces the analysis of a decision (a planning call: plan-review/ only, behavior 3). */
+export function decisionAnalysisPrompt(format: string, question: DecisionPromptQuestion, context: DecisionContext): string {
+  const options = question.options.map((o, i) => `${i + 1}. ${o.label}${o.description === "" ? "" : ` — ${o.description}`}`).join("\n");
+  const requirements = context.requirements === null ? "plan-review/requirements.md does not exist yet." : `plan-review/requirements.md:\n${context.requirements}`;
+  const plan = context.plan === null ? "plan-review/plan.md does not exist yet." : `plan-review/plan.md:\n${context.plan}`;
+  return `The user must answer a question that offers a choice between options, and has asked for a representation of the arguments for and against each option before choosing. Produce that representation as the structured output.
+You may read the project to understand the system; do not modify any file, and do not use the AskUserQuestion tool. Everything you reason from must be in the project or in this prompt; state any other information as unknown, as the instructions require.
+
+${DECISION_FORMAT_AUTHORITY}
+
+${format}
+
+The decision: ${question.question}
+The options, in this order:
+${options}
+
+The context of the decision. The run is in ${phaseInWords(question.phase)}.
+The task of the run: ${context.task}
+${requirements}
+${plan}
+
+${ANALYSIS_FIELDS}`;
+}
+
+/** Codex's review of decision k's analysis, against the format and the question. */
+export function decisionReviewPrompt(format: string, k: number, round: number): string {
+  const prefix = `D${k}`;
+  const analysis = pathOf({ kind: "analysis", decision: k });
+  const log = pathOf({ kind: "log", subject: { decision: k } });
+  const own = `plan-review/${log} holds the issues of every decision of the run; the issues of this decision are the entries whose ids begin with ${prefix}-, and only those concern this review.`;
+  if (round > 1) return `${own}\n${laterRound(analysis, log, prefix, round)}`;
+  return `Review the representation of the arguments for and against the options of a decision in plan-review/${analysis} (its field 'analysis'). The question and its options are in plan-review/${pathOf({ kind: "decisionQuestion", decision: k })}. Do not modify any file.
+The representation must follow the instructions below. The program renders it: it places the heading "Disadvantages:" above each column's disadvantages, offsets each counterargument from the element it disputes, and assigns the equivalence symbols from the field equivalent_to, which names the id of the equivalent entry; do not raise an issue about those.
+
+${DECISION_FORMAT_AUTHORITY}
+
+${format}
+
+Raise an issue for every departure from these instructions, for example: an element absent or false in an entry; an entry whose effect on persons is not stated; an entry placed in a column contrary to the placement rules; an outcome listed that is the same under every option; a counterargument that disputes no element of its entry or is not placed at the element it disputes, or that does not begin with the required words; a reversal not listed in full as an entry; an argument equivalent to an entry that repeats its content instead of referring to it; a claim of a measurement, figure, source or property that is invented, or an unknown value assumed instead of stated as unknown; an argument, counterargument or defense that an informed person could make and that is missing; a column missing or not matching an option; a recommendation that is not supported by the comparison that "Recommendation" requires. The context of the run is in the project and under plan-review/.
+Put the entry id or the argument id, with the column's option, in the location field.
+${own}
+${logRules(log, prefix, round)}`;
+}
+
+/** Claude Code's response to a review of decision k: the dispositions and the complete amended analysis. */
+export function decisionRespondPrompt(k: number, round: number): string {
+  return `plan-review/${pathOf({ kind: "review", subject: { decision: k }, round })} contains a review of the representation in plan-review/${pathOf({ kind: "analysis", decision: k })}, which you produced under the instructions of docs/decision-making.md given earlier in this session.
+${respondRules("you amend the analysis for it")}
+Return in 'analysis' the complete analysis after your amendments, including the parts that did not change; the program writes it. Do not modify any file.`;
+}
+
+/** The call that applies the user's decisions at a pause of decision k's review. */
+export function decisionApplyDecisionsPrompt(k: number): string {
+  return `plan-review/user-decisions.md has new entries. Read the file.
+Return in 'analysis' the complete analysis of plan-review/${pathOf({ kind: "analysis", decision: k })}, amended where a decision requires it; the program writes it. Do not modify any file.`;
+}
+
+/** The terminal line when a decision loop begins. */
+export function decisionBeganLine(k: number): string {
+  return `\nDecision ${k}: Claude Code works out the arguments for and against each option ...`;
 }

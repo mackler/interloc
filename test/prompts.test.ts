@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
 import { test } from "node:test";
 import { planReviewPrompt, questionReviewPrompt } from "../src/prompts.ts";
 import * as prompts from "../src/prompts.ts";
@@ -183,4 +184,46 @@ test("every prompt that may return questions_for_user says how to fill a questio
     assert.match(prompts.QUESTION_OPTIONS_RULE, /two or more mutually exclusive options/);
     assert.match(prompts.QUESTION_OPTIONS_RULE, /empty options array/);
   }
+});
+
+// Decision support, plan step 2.2 (D7): the prompts carry docs/decision-making.md verbatim.
+const FORMAT = fs.readFileSync(new URL("../docs/decision-making.md", import.meta.url), "utf8");
+const decisionQuestion = { phase: { kind: "planning" as const, n: 2 }, question: "Which database?", options: [{ label: "SQLite", description: "one file" }, { label: "PostgreSQL", description: "a server" }] };
+
+test("the analysis prompt carries the format byte for byte, the binding sentence, the question, the options in order and the context", () => {
+  const text = prompts.decisionAnalysisPrompt(FORMAT, decisionQuestion, { task: "Build it.", requirements: "# R\nreq text", plan: null });
+  assert.ok(text.includes(FORMAT), "the format is not in the prompt verbatim");
+  assert.ok(text.includes(prompts.DECISION_FORMAT_AUTHORITY));
+  assert.match(prompts.DECISION_FORMAT_AUTHORITY, /authority for the content and layout/);
+  assert.ok(text.indexOf("SQLite") < text.indexOf("PostgreSQL"), "the options are not in the question's order");
+  assert.match(text, /Which database\?/);
+  assert.match(text, /Build it\./);
+  assert.match(text, /req text/);
+  assert.match(text, /plan-review\/plan\.md does not exist yet/);
+  assert.match(text, /Planning 2/);
+  assert.match(text, /equivalent_to/);
+  assert.match(text, /Disadvantages:/);
+});
+
+test("the decision review prompt carries the format in its first round, names the analysis and the question, and the ids D<k>-R<n>-<i>", () => {
+  const first = prompts.decisionReviewPrompt(FORMAT, 3, 1);
+  assert.ok(first.includes(FORMAT), "the format is not in the first review prompt verbatim");
+  assert.match(first, /plan-review\/decision-3\/analysis\.json/);
+  assert.match(first, /plan-review\/decision-3\/question\.json/);
+  assert.match(first, /D3-R1-1/);
+  assert.match(first, /recommendation/);
+  assert.match(first, /ids begin with D3-/);
+  const later = prompts.decisionReviewPrompt(FORMAT, 3, 2);
+  assert.match(later, /D3-R2-1/);
+  assert.match(later, /plan-review\/decision-3\/analysis\.json/);
+});
+
+test("the decision respond and apply-decisions prompts ask for the complete analysis and forbid file changes", () => {
+  const respond = prompts.decisionRespondPrompt(3, 2);
+  assert.match(respond, /plan-review\/decision-3\/review-2\.json/);
+  assert.match(respond, /complete analysis/);
+  assert.match(respond, /Do not modify any file/);
+  const apply = prompts.decisionApplyDecisionsPrompt(3);
+  assert.match(apply, /user-decisions\.md/);
+  assert.match(apply, /complete analysis/);
 });

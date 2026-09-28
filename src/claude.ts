@@ -64,7 +64,6 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   const ui = yield* Ui;
   const store = yield* Store;
   const config = yield* RunConfig;
-  const session = yield* Ref.make<string | null>(null);
   /** The model Claude Code last announced for the session; the announcement is repeated only when it changes. */
   const announcedModel = yield* Ref.make<string | null>(null);
 
@@ -212,7 +211,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
    * callback still rejects the callback's Promise. The messages are shown and the usage recorded as
    * they arrive; the outcome is the pure reduction of the list at the end.
    */
-  const call = (prompt: string, purpose: "planning" | "interview" | "execution", show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallOutcome, CallbackError> =>
+  const call = (session: Ref.Ref<string | null>, prompt: string, purpose: "planning" | "interview" | "execution", show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallOutcome, CallbackError> =>
     Effect.gen(function* () {
       yield* ui.notify({ _tag: "AgentCallStarted", agent: "claude", purpose });
       const controller = new AbortController();
@@ -292,10 +291,12 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       Effect.onExit((exit) => ui.notify({ _tag: "AgentCallEnded", agent: "claude", ok: Exit.isSuccess(exit) && exit.value.error === null })),
     );
 
-  return {
+  /** The planner over one session: the run's main one, or a fresh one of a decision loop (D4); the hooks and callbacks are shared. */
+  const plannerOver = (session: Ref.Ref<string | null>): PlannerShape => ({
     planning: (prompt, schema, purpose = "planning", capability: PlanningCapability = "records") =>
       Effect.gen(function* () {
         const outcome = yield* call(
+          session,
           prompt,
           purpose,
           purpose === "interview" ? "tools" : "none",
@@ -313,6 +314,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       Effect.gen(function* () {
         const stop = yield* Ref.make<Stop | null>(null);
         const outcome = yield* call(
+          session,
           prompt,
           "execution",
           "text",
@@ -326,7 +328,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         return interpretExecution(outcome, yield* Ref.get(stop));
       }),
     sessionId: Ref.get(session),
-  };
+    fresh: Ref.make<string | null>(null).pipe(Effect.map(plannerOver)),
+  });
+  return plannerOver(yield* Ref.make<string | null>(null));
 });
 
 export const claudePlannerLayer: Layer.Layer<Planner, never, Sdk | Ui | Store | RunConfig> = Layer.effect(Planner, makeClaudePlanner);

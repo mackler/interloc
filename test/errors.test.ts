@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { ConfigInvalid, decodeRunError, GitError, haltMessage, ProjectChanged, RecordsChanged, RoundInvalid, RoundLimitStop } from "../src/errors.ts";
+import { ConfigInvalid, DecisionFormatUnreadable, decodeRunError, GitError, haltMessage, ProjectChanged, RecordsChanged, RoundInvalid, RoundLimitStop } from "../src/errors.ts";
 
 test("haltMessage reports a typed error with its description", () => {
   const error = new ProjectChanged({ during: "planning", fileLabel: null, changes: [{ kind: "content_changed", path: "a.txt" }] });
@@ -49,4 +49,11 @@ test("the cycle limit's stop and an invalid cycle are described in cycles", () =
   assert.equal(haltMessage(new RoundLimitStop({ heading: "Planning phase 1" })), "HALTED: stopped by the user at the cycle limit of Planning phase 1");
   const invalid = new RoundInvalid({ duplicateIssues: ["A"], missing: [], duplicateDispositions: [], unknownDispositions: [], emptyIds: [], collidingIds: [] });
   assert.match(haltMessage(invalid) ?? "", /^HALTED: the cycle is invalid: /);
+});
+
+// Decision support, plan step 2.1: the format of docs/decision-making.md is read before the run.
+test("DecisionFormatUnreadable names the file, round-trips through decodeRunError and is rendered by haltMessage", () => {
+  const error = new DecisionFormatUnreadable({ file: "/opt/interloq/docs/decision-making.md", message: "ENOENT" });
+  assert.equal(haltMessage(error), "HALTED: the decision-making format /opt/interloq/docs/decision-making.md could not be read: ENOENT");
+  assert.equal(decodeRunError({ _tag: "DecisionFormatUnreadable", file: "f", message: "m" })?._tag, "DecisionFormatUnreadable");
 });

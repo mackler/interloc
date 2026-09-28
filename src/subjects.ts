@@ -8,7 +8,7 @@ import * as prompts from "./prompts.ts";
 import { subjectHeading } from "./render.ts";
 import type { Subject } from "./review.ts";
 import * as S from "./schema.ts";
-import type { PlannerResponse, PlanWriteResult, QuestionList, QuestionListResponse } from "./schema.ts";
+import type { DecisionAnalysis, DecisionApplied, DecisionResponse, PlannerResponse, PlanWriteResult, QuestionList, QuestionListResponse } from "./schema.ts";
 import { normalizeQuestionList } from "./schemaNormalize.ts";
 import { Store } from "./services.ts";
 
@@ -75,6 +75,29 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
     applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
     amend: null,
     proceed: prompts.PROCEED_TO_IMPLEMENTATION,
+    leaveOnAcceptance: false,
+    leaveOnDecision: false,
+    prepare: null,
+  };
+}
+
+/**
+ * Decision k (decision support): Codex reviews decision-<k>/analysis.json against docs/decision-making.md; Claude Code
+ * returns the complete amended analysis with every response, which the program validates and writes (D5). The phase is
+ * where the decision took place.
+ */
+export function decisionSubject(k: number, phase: number, format: string, accept: (analysis: DecisionAnalysis) => Effect.Effect<void, RunError, Store>): Subject<DecisionResponse, DecisionApplied> {
+  const id: SubjectId = { decision: k };
+  return {
+    id,
+    phase,
+    heading: subjectHeading(id),
+    fileLabel: "analysis.json",
+    reviewPrompt: (round) => prompts.decisionReviewPrompt(format, k, round),
+    respond: { prompt: (round) => prompts.decisionRespondPrompt(k, round), schema: S.DecisionResponse, after: (output) => accept(output.analysis), capability: "records" },
+    applyDecisions: { prompt: prompts.decisionApplyDecisionsPrompt(k), schema: S.DecisionApplied, after: (output) => accept(output.analysis) },
+    amend: null,
+    proceed: prompts.PROCEED_TO_CHOICE,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
     prepare: null,

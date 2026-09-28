@@ -49,6 +49,8 @@ export interface PlannerShape {
   /** A call in which Claude Code implements the plan. */
   executing(prompt: string): Effect.Effect<ExecOutcome, PlannerError>;
   readonly sessionId: Effect.Effect<string | null>;
+  /** A planner over a new session, with the same hooks and callbacks (a decision loop, D4 of the decision-support plan). */
+  readonly fresh: Effect.Effect<PlannerShape>;
 }
 export class Planner extends Context.Service<Planner, PlannerShape>()("plan-review/Planner") {}
 

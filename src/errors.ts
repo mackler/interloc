@@ -2,7 +2,7 @@
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
 import { Data, Result, Schema } from "effect";
 import { type Change, renderChange } from "./snapshot.ts";
-import { cycleInvalidText, cycleLimitStopText } from "./prompts.ts";
+import { analysisInvalidText, cycleInvalidText, cycleLimitStopText, decisionFormatUnreadableText } from "./prompts.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
 export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: readonly Change[] }> {}
@@ -32,6 +32,15 @@ export class ConfigInvalid extends Data.TaggedError("ConfigInvalid")<{ readonly 
 export class StateFileInvalid extends Data.TaggedError("StateFileInvalid")<{ readonly file: string; readonly message: string }> {}
 export class FileSystemError extends Data.TaggedError("FileSystemError")<{ readonly operation: string; readonly path: string; readonly message: string }> {}
 export class GitError extends Data.TaggedError("GitError")<{ readonly args: string[]; readonly message: string }> {}
+/** A decision analysis whose structure is invalid (decision support, D9): a halt without a repair turn, like RoundInvalid. */
+export class AnalysisInvalid extends Data.TaggedError("AnalysisInvalid")<{
+  readonly columns: Readonly<{ expected: readonly string[]; got: readonly string[] }> | null;
+  readonly duplicateIds: readonly string[];
+  readonly emptyIds: number;
+  readonly recommendation: string | null;
+}> {}
+/** docs/decision-making.md of the program could not be read before the run (decision support, D7). */
+export class DecisionFormatUnreadable extends Data.TaggedError("DecisionFormatUnreadable")<{ readonly file: string; readonly message: string }> {}
 export class Interrupted extends Data.TaggedError("Interrupted")<{ readonly where: string }> {}
 
 export type RunError =
@@ -51,6 +60,8 @@ export type RunError =
   | StateFileInvalid
   | FileSystemError
   | GitError
+  | DecisionFormatUnreadable
+  | AnalysisInvalid
   | Interrupted;
 
 const indent = (changes: readonly Change[]): string => changes.map((change) => `\n  ${renderChange(change)}`).join("");
@@ -104,6 +115,16 @@ export const describe = (error: RunErrorFields): string => {
       return `${error.operation} failed for ${error.path}: ${error.message}`;
     case "GitError":
       return `git ${error.args.join(" ")} failed: ${error.message}`;
+    case "DecisionFormatUnreadable":
+      return decisionFormatUnreadableText(error.file, error.message);
+    case "AnalysisInvalid": {
+      const parts: string[] = [];
+      if (error.columns !== null) parts.push(`columns ${error.columns.expected.join(", ")} expected, ${error.columns.got.join(", ") || "none"} given`);
+      if (error.duplicateIds.length > 0) parts.push(`more than one entry or argument with the id: ${error.duplicateIds.join(", ")}`);
+      if (error.emptyIds > 0) parts.push(`${error.emptyIds} empty id(s)`);
+      if (error.recommendation !== null) parts.push(`the analysis recommends ${error.recommendation}, which is not an option`);
+      return analysisInvalidText(parts);
+    }
     case "Interrupted":
       return `interrupted during ${error.where}`;
   }
@@ -145,6 +166,14 @@ const RunErrorData = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("StateFileInvalid"), file: Schema.String, message: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("FileSystemError"), operation: Schema.String, path: Schema.String, message: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("GitError"), args: Strings, message: Schema.String }),
+  Schema.Struct({ _tag: Schema.Literal("DecisionFormatUnreadable"), file: Schema.String, message: Schema.String }),
+  Schema.Struct({
+    _tag: Schema.Literal("AnalysisInvalid"),
+    columns: Schema.NullOr(Schema.Struct({ expected: Strings, got: Strings })),
+    duplicateIds: Strings,
+    emptyIds: Schema.Number,
+    recommendation: Schema.NullOr(Schema.String),
+  }),
   Schema.Struct({ _tag: Schema.Literal("Interrupted"), where: Schema.String }),
 ]);
 /** The fields of one of the program's errors; every `RunError` instance is one. */

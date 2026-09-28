@@ -1,9 +1,10 @@
 // The program: arguments, configuration, the live services, the run, and what is printed at the
 // end. main.ts applies the platform runner to it; the tests run it with scripted services.
 
-import { Cause, Context, Effect, Exit, Layer, Option, type Scope } from "effect";
+import { Cause, Context, Effect, Exit, FileSystem, Layer, Option, type Scope } from "effect";
 import * as path from "node:path";
-import { describe } from "./errors.ts";
+import { fileURLToPath } from "node:url";
+import { DecisionFormatUnreadable, describe } from "./errors.ts";
 import { taskFinishedLine } from "./prompts.ts";
 import { run } from "./run.ts";
 import type { AgentSdk } from "./sdk.ts";
@@ -25,11 +26,16 @@ export type Wiring = Readonly<{
   agents: Layer.Layer<Planner | Reviewer, never, Sdk | Ui | Store | RunConfig>;
   /** The shared config file (live: config.json of this repository). */
   sharedConfig: string;
+  /** The format of a decision analysis, read before the run (D7); by default docs/decision-making.md of this repository. */
+  decisionFormat?: string;
   /** The project directory when the arguments name none (live: process.cwd()). */
   cwd: string;
   /** Where the usage text goes when there is no task (live: stderr). */
   usage: (text: string) => Effect.Effect<void>;
 }>;
+
+/** The developer's format of the representation of a decision (docs/decision-making.md), beside the program. */
+export const DECISION_FORMAT = fileURLToPath(new URL("../docs/decision-making.md", import.meta.url));
 
 export const USAGE = 'usage: node main.ts "task description" [project directory]';
 
@@ -73,6 +79,22 @@ export const program = (args: readonly string[], wiring: Wiring): Effect.Effect<
       return yield* halted(describe(error.value), null, yield* store([]));
     }
     const config = configExit.value;
+
+    // The format of a decision analysis (D7), before any agent exists and before the records are initialized.
+    const formatFile = wiring.decisionFormat ?? DECISION_FORMAT;
+    const formatExit = yield* Effect.exit(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        return yield* fs.readFileString(formatFile);
+      }).pipe(Effect.provide(wiring.platform)),
+    );
+    if (Exit.isFailure(formatExit)) {
+      const error = Cause.findErrorOption(formatExit.cause);
+      if (Option.isNone(error)) return yield* Effect.die(Cause.squash(formatExit.cause));
+      return yield* halted(describe(new DecisionFormatUnreadable({ file: formatFile, message: error.value.message })), null, yield* store([]));
+    }
+    const decisionFormat = formatExit.value;
+    void decisionFormat; // Given to decision support in stage 3 (plan step 3.3).
 
     const records = yield* store(config.ignorePaths);
     const base = Layer.mergeAll(Layer.succeed(Store, records), Layer.succeed(Ui, ui), Layer.succeed(RunConfig, config), Layer.succeed(Sdk, wiring.sdk));

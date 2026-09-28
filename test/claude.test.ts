@@ -142,6 +142,19 @@ test("the session id of the first call is resumed by the next call", async () =>
   assert.equal(fake.sdk.calls[1].options.resume, "session-3");
 });
 
+// Decision support, plan step 2.4 (D4, decision Q3): a decision loop runs in a fresh session and never touches the main one.
+test("a fresh planner starts its own session, resumes it, and leaves the main session untouched", async () => {
+  const fake = await planner([messages(init("main-1"), success({})), messages(init("fresh-1"), success({})), messages(init("fresh-1"), success({})), messages(init("main-1"), success({}))]);
+  await run(fake.planner.planning("main first", schema));
+  const fresh = await run(fake.planner.fresh);
+  await run(fresh.planning("fresh first", schema));
+  await run(fresh.planning("fresh second", schema));
+  await run(fake.planner.planning("main second", schema));
+  assert.deepEqual(fake.sdk.calls.map((c) => c.options.resume), [undefined, undefined, "fresh-1", "main-1"]);
+  assert.equal(await run(fresh.sessionId), "fresh-1");
+  assert.equal(await run(fake.planner.sessionId), "main-1");
+});
+
 test("the configured model is passed, and no model key is set when claudeModel is null", async () => {
   const withModel = await planner([messages(init(), success({}))], [], { claudeModel: "opus" });
   await run(withModel.planner.planning("write the plan", schema));

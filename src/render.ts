@@ -89,3 +89,10 @@ export const recordHeading = (stage: InterviewStage): string => {
       return "Conversation before planning";
   }
 };
+
+/** A decision's opening in conversation.md: its heading, the question and the options (decision support). */
+export const renderDecisionOpened = (k: number, question: string, options: readonly Readonly<{ label: string; description: string }>[]): string =>
+  `## Decision ${k}\n\n${question}\n\n${options.map((o, i) => `${i + 1}. ${o.label}${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}\n\n`;
+/** A reference of a decision analysis that named no entry and was dropped (D9). */
+export const renderReferenceDropped = (argument: string, named: string): string =>
+  `**Reference dropped:** argument ${argument} names ${named}, which is no entry of the analysis; treated as no reference.\n\n`;

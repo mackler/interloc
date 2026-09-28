@@ -145,6 +145,12 @@ export class ScriptedPlanner implements PlannerShape {
     this.execs = [...execs];
   }
   readonly sessionId = Effect.succeed("test-session");
+  /** How often a fresh session was started (a decision loop); the fresh planner shares this script. */
+  freshSessions = 0;
+  readonly fresh: Effect.Effect<PlannerShape> = Effect.sync(() => {
+    this.freshSessions++;
+    return this;
+  });
   /** Returns the scripted output as it is: the caller decodes it, as with the real agent. */
   planning(prompt: string, schema: Schema.Top, _purpose?: PlanningPurpose, capability: PlanningCapability = "records"): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }> {
     return Effect.suspend(() => {
