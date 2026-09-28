@@ -84,7 +84,7 @@ export const RunEventSchema = Schema.Union([
   tagged("Asked", {
     prompt: Int,
     text: Str,
-    kind: Schema.Literals(["decision", "limit", "limitNoProceed", "execInput", "optionOrText", "permission", "interviewMessage", "confirmSummary", "startOrTalk", "unknown"]),
+    kind: Schema.Literals(["decision", "limit", "limitNoProceed", "unchanged", "execInput", "optionOrText", "permission", "interviewMessage", "confirmSummary", "startOrTalk", "unknown"]),
     mode: Schema.Literals(["ask", "message"]),
     choices: Schema.Array(ChoiceSchema),
     free: Schema.Literals(["none", "line", "message"]),

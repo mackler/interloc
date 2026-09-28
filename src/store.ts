@@ -195,6 +195,7 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
         }),
       saveReview: (subject, round, review) => saveRecord({ kind: "review", subject, round }, review),
       saveResponse: (subject, round, response) => saveRecord({ kind: "response", subject, round }, response),
+      saveCorrection: (subject, round, attempt, reply) => saveRecord({ kind: "correction", subject, round, attempt }, reply),
       saveRound: (subject, record) => saveRecord({ kind: "round", subject, round: record.round }, { version: VERSION, ...record }),
       savePlanWrite: (phase, result) => saveRecord({ kind: "planWrite", phase }, result),
       saveExecution: (phase, outcome) => saveRecord({ kind: "execution", phase }, outcome),

@@ -91,6 +91,8 @@ export interface StoreShape {
   saveReview(subject: SubjectId, round: number, review: Review): Effect.Effect<void, StoreError>;
   /** Claude Code's raw response of a round (`cc-<n>.json`). */
   saveResponse(subject: SubjectId, round: number, response: PlannerResponse): Effect.Effect<void, StoreError>;
+  /** The raw reply of corrective turn `attempt` of a round (issue #30): `<subject dir>/cc-<round>-corrective-<attempt>.json`. */
+  saveCorrection(subject: SubjectId, round: number, attempt: number, reply: unknown): Effect.Effect<void, StoreError>;
   /** The program's validated record of a round (`round-<n>.json`, version 2). */
   saveRound(subject: SubjectId, record: RoundRecord): Effect.Effect<void, StoreError>;
   /** The output of the call that wrote or revised the plan (`planning-<k>/cc-0.json`). */

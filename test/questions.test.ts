@@ -137,6 +137,31 @@ test("a gap that Claude Code accepts produces a second interview and a revised r
   assert.deepEqual(counted, ["opened clarification 1", "0 of 1", "1 of 1", "opened followUp 1", "0 of 1", "1 of 1"]);
 });
 
+// Issue #30 (G-R1-1): the requirements go straight to the pause, without a corrective turn; its Retry is another interview.
+test("a gap accepted but the confirmed summary unchanged: the pause, and Retry holds another interview", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["A", "", "no change", "", "r", "retries: 3", ""],
+    steps: [
+      { output: { questions: [q("Q1")] } },
+      { output: turn("Q1?", []) },
+      { output: turn("Complete.", ["Q1"], "Q1: A") },
+      { output: respond([["G-R1-1", "accepted"]]) },
+      { output: turn("How many retries?", []) },
+      { output: turn("Complete.", ["G-R1-1"], "Q1: A") }, // the summary confirmed unchanged
+      { output: turn("How many retries, then?", []) }, // Retry: another interview
+      { output: turn("Complete.", ["G-R1-1"], "Q1: A\nRetries: 3") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [issue("G-R1-1", "retry count absent")] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: withQuestions,
+  });
+  await runTask(layer);
+  assert.equal(read(probe.dir, "requirements.md"), "Q1: A\nRetries: 3\n");
+  assert.ok(probe.ui.asked.some((p) => /r = retry; p = proceed/.test(p)), "the pause was not asked");
+  assert.equal(probe.planner.prompts.some((p) => /did not change during your response/.test(p)), false, "a corrective turn was taken");
+});
+
 test("/done ends the interview early", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["/done", ""],

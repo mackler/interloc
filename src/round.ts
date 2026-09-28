@@ -2,7 +2,9 @@
 // guaranteed (findings 3, 4 and 7 of docs/functional-design-review.md; decisions Q2 and Q3). Pure.
 
 import { Result } from "effect";
-import { RoundInvalid } from "./errors.ts";
+import { CorrectionInvalid, RoundInvalid } from "./errors.ts";
+import { correctionRepairPrompt } from "./prompts.ts";
+import type { Validation } from "./review.ts";
 import type { Action, LogEntry, PlannerResponse, Review, UserQuestion } from "./schema.ts";
 
 import type { IssueId } from "./schema.ts";
@@ -91,3 +93,35 @@ export const validateRound = (review: ValidatedReview, response: PlannerResponse
 
   return Result.succeed({ phase, round, review, dispositions, selfCorrections, notes, reviewerFeedback: response.reviewer_feedback, questionsForUser: response.questions_for_user });
 };
+
+/**
+ * The validation of a corrective reply (issue #30), with the prompt of its repair turn: it may change only the action
+ * and the rationale of the dispositions that were accepted in full or in part (correctivePrompt names them); every
+ * other disposition, every reference and the rest of the response must be as in the previous response.
+ */
+export const correctiveValidation =
+  <T extends PlannerResponse>(previous: PlannerResponse, acceptedIds: readonly string[]): Validation<T> =>
+  (reply) => {
+    const allowed = new Set(acceptedIds);
+    const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
+    const before = new Map(previous.dispositions.map((d) => [d.id, d] as const));
+    const sameIds = reply.dispositions.length === previous.dispositions.length && reply.dispositions.every((d) => before.has(d.id));
+    const changedIds = unique(
+      reply.dispositions
+        .filter((d) => {
+          const was = before.get(d.id);
+          if (was === undefined) return false;
+          return allowed.has(d.id) ? d.duplicate_of !== was.duplicate_of || d.reverses !== was.reverses : !same(d, was);
+        })
+        .map((d) => d.id),
+    );
+    const other = [
+      ...(sameIds ? [] : ["dispositions"]),
+      ...(same(reply.self_corrections, previous.self_corrections) ? [] : ["self_corrections"]),
+      ...(reply.reviewer_feedback === previous.reviewer_feedback ? [] : ["reviewer_feedback"]),
+      ...(same(reply.questions_for_user, previous.questions_for_user) ? [] : ["questions_for_user"]),
+    ];
+    if (changedIds.length === 0 && other.length === 0) return Result.succeed({ value: reply, notes: [] });
+    const error = new CorrectionInvalid({ changedIds, other });
+    return Result.fail({ error, repair: correctionRepairPrompt(error, acceptedIds) });
+  };

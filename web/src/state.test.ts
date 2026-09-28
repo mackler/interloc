@@ -262,6 +262,32 @@ describe("the cycles of a review loop in the timeline", () => {
     expect(replayed(finished).run?.timeline).toEqual(s.run?.timeline);
   });
 
+  // Issue #30 (P1-R2-2): a corrective turn's reply is a second ResponseReceived of the same round; it replaces the
+  // round's contribution instead of adding to it.
+  test("a second response of the same round replaces that round's corrections", () => {
+    const response = (action: "accepted" | "rejected") => notified({ _tag: "ResponseReceived", subject: plan, round: 1, response: { dispositions: [disposition("A", action)], self_corrections: [], reviewer_feedback: "", questions_for_user: [] }, resultText: "" });
+    const head = [started, notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }), notified({ _tag: "RoundBegan", subject: plan, round: 1, limit: 5 }), notified({ _tag: "ReviewReceived", subject: plan, round: 1, review: { issues: [issueOf("A")] }, counted: 1 })];
+    for (const [second, expected] of [["accepted", 1], ["rejected", 0]] as const) {
+      const all = [...head, response("accepted"), response(second)];
+      expect(groupOf(fold(live(all)))?.corrections).toBe(expected);
+      expect(groupOf(replayed(all))?.corrections).toBe(expected);
+    }
+  });
+
+  test("property: any number of responses of one round leave the corrections of the last one", () => {
+    const head = [started, notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }), notified({ _tag: "RoundBegan", subject: plan, round: 1, limit: 5 }), notified({ _tag: "ReviewReceived", subject: plan, round: 1, review: { issues: [issueOf("A"), issueOf("B")] }, counted: 2 })];
+    const actionArb = fc.constantFrom("accepted", "partially_accepted", "rejected", "no_change_needed", "clarification_requested" as const);
+    const responseArb = fc.tuple(actionArb, actionArb).map(([a, b]) => notified({ _tag: "ResponseReceived", subject: plan, round: 1, response: { dispositions: [disposition("A", a), disposition("B", b)], self_corrections: [], reviewer_feedback: "", questions_for_user: [] }, resultText: "" }));
+    fc.assert(
+      fc.property(fc.array(responseArb, { minLength: 1, maxLength: 5 }), (responses) => {
+        const lastOne = responses.at(-1)!;
+        const expected = groupOf(fold(live([...head, lastOne])))?.corrections;
+        expect(groupOf(fold(live([...head, ...responses])))?.corrections).toBe(expected);
+        expect(groupOf(replayed([...head, ...responses]))?.corrections).toBe(expected);
+      }),
+    );
+  });
+
   test("a work review that leaves for a revision keeps its count of corrections due, even 0", () => {
     const work = { work: 1 };
     const s = fold(live([started, notified({ _tag: "PhaseBegan", phase: { kind: "work", n: 1 } }), notified({ _tag: "RoundBegan", subject: work, round: 1, limit: 5 }), notified({ _tag: "ReviewReceived", subject: work, round: 1, review: { issues: [issueOf("W1-R1-1")] }, counted: 1 }), notified({ _tag: "LoopFinished", subject: work, result: "revise" })]));

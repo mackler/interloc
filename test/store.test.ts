@@ -8,6 +8,7 @@ import { platformLayer } from "../src/platform.ts";
 import type { StoreShape } from "../src/services.ts";
 import { makeStore } from "../src/store.ts";
 import { compareRecords } from "../src/snapshot.ts";
+import { pathOf } from "../src/artifacts.ts";
 import { tempRepo } from "./helpers.ts";
 
 // Plan step 2.3 (decision Q7; P1-R1-5, P1-R2-1, P1-R2-2, P4-R1-1): the baseline tree at init, the change
@@ -215,4 +216,17 @@ test("observeFile gives the hash fileHash gives and the text of the same read", 
   const work = await run(store.observeFile({ work: 1 }));
   assert.equal(work.hash, await run(store.fileHash({ work: 1 })));
   assert.equal(work.text, "");
+});
+
+// Issue #30 (plan step S10): a corrective turn's raw reply is its own record beside the response of its round; the
+// store writes it where the catalog names it.
+test("saveCorrection writes the corrective reply at the catalog's path", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  const subject = { plan: 2 } as const;
+  await run(store.saveCorrection(subject, 3, 1, { dispositions: [] }));
+  const file = pathOf({ kind: "correction", subject, round: 3, attempt: 1 });
+  assert.equal(file, "planning-2/cc-3-corrective-1.json");
+  assert.deepEqual(json(repo, file), { dispositions: [] });
 });

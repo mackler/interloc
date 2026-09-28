@@ -95,8 +95,11 @@ test("reviewer feedback is recorded, and a dropped reference is noted", () => {
   assert.ok(noted.commands.some((c) => c.kind === "Converse" && /Reference dropped/.test(c.markdown)));
 });
 
-test("accepted without a change of the file halts", () => {
-  const t = run(afterReview(), response([["A", "accepted"]]), { kind: "FileObserved", hash: "h0", text: "" });
+// Behavior 7 as amended for issue #30: the condition is a pause, and its Stop halts with AcceptedWithoutChange.
+test("accepted without a change of the file is the pause; Stop halts", () => {
+  const paused = run(afterReview(), response([["A", "accepted"]]), { kind: "FileObserved", hash: "h0", text: "" });
+  assert.equal(last(paused).kind, "AskUnchanged");
+  const t = advance(paused.state, { kind: "UnchangedAnswer", answer: "stop" });
   const error = halt(t);
   assert.equal(error._tag, "AcceptedWithoutChange");
   assert.match(describe(error), /plan\.md is unchanged/);
@@ -450,4 +453,91 @@ test("an unmeasured subject (the work review) logs file_change null and observes
   const t = run(start(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]));
   assert.equal(changeOf(loggedBy(t)[0]), null);
   assert.deepEqual(last(t), { kind: "ObserveFile", stage: "response" });
+});
+
+// Issue #30 (plan step S11): an accepted issue with the file unchanged gets one corrective turn in the same session;
+// the corrective reply is validated and its dispositions re-evaluated against the log as the round began.
+const correctiveStart = (log: LogEntry[] = []): Transition =>
+  advance(initialState(measured, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", text: "a\n", log });
+const corrected = (dispositions: Parameters<typeof respond>[0], extra = {}): ReviewEvent => ({ kind: "CorrectionDecoded", response: respond(dispositions, extra), resultText: "", costUsd: 0.2 });
+const unchanged: ReviewEvent = { kind: "FileObserved", hash: "h0", text: "a\n" };
+const amended: ReviewEvent = { kind: "FileObserved", hash: "h1", text: "a\nb\n" };
+
+test("(a) an accepted issue with the file unchanged gets a corrective turn; its amendment ends the round as usual", () => {
+  const unchangedAfter = run(correctiveStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]), unchanged);
+  assert.deepEqual(last(unchangedAfter), { kind: "CallCorrective", round: 1, attempt: 1 });
+  assert.ok(kinds(unchangedAfter).indexOf("SaveLog") < kinds(unchangedAfter).indexOf("CallCorrective"), "the round was not logged before the corrective turn");
+  const reply = advance(unchangedAfter.state, corrected([["A", "accepted"]]));
+  assert.ok(kinds(reply).includes("SaveRound") && kinds(reply).includes("Checkpoint"));
+  assert.ok(reply.commands.some((c) => c.kind === "Notify" && c.event._tag === "ResponseReceived"));
+  assert.deepEqual(last(reply), { kind: "ObserveFile", stage: "response" });
+  const next = advance(reply.state, amended);
+  assert.deepEqual(changeOf(loggedBy(next).find((e) => e.id === "A")), { changed: true, added: 1, removed: 0 });
+  assert.deepEqual(last(next), { kind: "CallReviewer", round: 2 });
+});
+
+test("(b) a corrective turn that changes accepted to rejected resolves the condition; the log holds the new disposition", () => {
+  const t = run(correctiveStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]), unchanged, corrected([["A", "rejected"]]), unchanged);
+  const a = loggedBy(t).filter((e) => e.id === "A" && e.superseded !== true);
+  assert.equal(a.length, 1);
+  assert.equal(a[0]!.action, "rejected");
+  assert.equal((changeOf(a[0]) as { changed: boolean }).changed, false);
+  assert.equal(loggedBy(t).length, 1, "the first reply's entry was not replaced");
+  assert.notEqual(last(t).kind, "Halt");
+});
+
+test("(g) a corrective reply that turns an accepted issue into a second clarification request asks that pause once", () => {
+  const t0 = run(correctiveStart([entry("A", "clarification_requested")]), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]), unchanged);
+  assert.deepEqual(last(t0), { kind: "CallCorrective", round: 1, attempt: 1 });
+  const t = advance(t0.state, corrected([["A", "clarification_requested"]]));
+  const asks = t.commands.filter((c) => c.kind === "AskDecision");
+  assert.equal(asks.length, 1);
+  assert.match((asks[0] as { subject: string }).subject, /issue A, for which one clarification exchange did not produce a disposition/);
+});
+
+test("(h) a pause asked for the first reply is not asked again after the corrective turn", () => {
+  const history = [entry("C", "rejected")];
+  const first = run(correctiveStart(history), { kind: "ReviewDecoded", review: { issues: [issue("A"), issue("B")] } }, response([["A", "accepted"], ["B", "rejected"]], { dispositions: [{ id: "A", action: "accepted", rationale: "r", duplicate_of: "", reverses: "" }, { id: "B", action: "rejected", rationale: "r", duplicate_of: "C", reverses: "" }] }));
+  assert.equal(first.commands.filter((c) => c.kind === "AskDecision").length, 1);
+  const unchangedAfter = run(first, { kind: "DecisionGiven", text: "" }, unchanged);
+  assert.equal(last(unchangedAfter).kind, "CallCorrective");
+  const reply = advance(unchangedAfter.state, { kind: "CorrectionDecoded", response: respond([], { dispositions: [{ id: "A", action: "accepted", rationale: "now done", duplicate_of: "", reverses: "" }, { id: "B", action: "rejected", rationale: "r", duplicate_of: "C", reverses: "" }] }), resultText: "", costUsd: null });
+  assert.equal(reply.commands.filter((c) => c.kind === "AskDecision").length, 0);
+  assert.deepEqual(last(reply), { kind: "ObserveFile", stage: "response" });
+});
+
+test("(j) a self-correction with an empty id kept through the corrective turn keeps its generated id and is logged once", () => {
+  const self = { self_corrections: [{ id: "", new_action: "plan_error" as const, explanation: "a slip" }] };
+  const t = run(correctiveStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]], self), unchanged, corrected([["A", "accepted"]], self), amended);
+  assert.notEqual(last(t).kind, "Halt", describe((last(t) as { error?: RunError }).error ?? ({ _tag: "UserStopped", where: "" } as never)));
+  assert.deepEqual(loggedBy(t).filter((e) => e.source === "self_correction").map((e) => e.id), ["P1-S1-1"]);
+});
+
+// Issue #30 (plan step S12): the condition that persists is a pause, Retry, Proceed or Stop; never a halt by itself.
+const stillUnchanged = (): Transition => run(correctiveStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]), unchanged, corrected([["A", "accepted"]]), unchanged);
+
+test("(c) a second unchanged file after the corrective turn is the pause", () => {
+  const t = stillUnchanged();
+  assert.deepEqual(last(t), { kind: "AskUnchanged", accepted: ["A"], retry: "corrective" });
+  assert.match(says(t), /plan\.md is unchanged/);
+});
+
+test("the pause: Retry takes another corrective turn, Proceed continues with the next cycle, Stop halts", () => {
+  const retry = advance(stillUnchanged().state, { kind: "UnchangedAnswer", answer: "retry" });
+  assert.deepEqual(last(retry), { kind: "CallCorrective", round: 1, attempt: 2 });
+  const proceed = advance(stillUnchanged().state, { kind: "UnchangedAnswer", answer: "proceed" });
+  assert.deepEqual(last(proceed), { kind: "CallReviewer", round: 2 });
+  assert.ok(proceed.commands.some((c) => c.kind === "Converse" && /proceed with plan\.md unchanged after cycle 1/.test(c.markdown)));
+  const stop = advance(stillUnchanged().state, { kind: "UnchangedAnswer", answer: "stop" });
+  assert.equal(halt(stop)._tag, "AcceptedWithoutChange");
+});
+
+test("the requirements (pause) go straight to the pause, whose Retry is another interview; the work review (null) never gets there", () => {
+  const requirements = advance(initialState({ ...measured, onUnchanged: "pause", hasAmend: true }, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", text: "a\n", log: [] });
+  const t = run(requirements, { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]), { kind: "Amended" }, unchanged);
+  assert.deepEqual(last(t), { kind: "AskUnchanged", accepted: ["A"], retry: "interview" });
+  const retry = advance(t.state, { kind: "UnchangedAnswer", answer: "retry" });
+  assert.deepEqual(last(retry), { kind: "Amend", round: 1 });
+  const again = run(retry, { kind: "Amended" }, amended);
+  assert.deepEqual(last(again), { kind: "CallReviewer", round: 2 });
 });

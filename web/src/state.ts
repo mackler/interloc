@@ -27,7 +27,8 @@ export type BandGroup = Readonly<{ band: Band | null; messages: readonly Message
  * One cycle of a review loop (issue #14): the issues its review raised and the counted ones, null until the review
  * arrives; the ids of that review, against which a self-correction of the response is judged.
  */
-export type Cycle = Readonly<{ round: number; raised: number | null; counted: number | null; reviewIds: readonly string[] }>;
+/** `corrections`: those of the round's latest response; a corrective turn's reply replaces them (issue #30). */
+export type Cycle = Readonly<{ round: number; raised: number | null; counted: number | null; reviewIds: readonly string[]; corrections?: number }>;
 /**
  * The rounds of one review loop within a phase: its cycles, the corrections of its responses (accepted and partially
  * accepted dispositions, effective self-corrections), and how it ended (null while it runs; `done` with it).
@@ -321,7 +322,9 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       const response = event.response;
       const corrected = (g: RoundGroup): RoundGroup => {
         const cycle = g.rounds.find((c) => c.round === event.round);
-        return cycle === undefined ? g : { ...g, corrections: g.corrections + correctionCount(cycle.reviewIds, response) };
+        if (cycle === undefined) return g;
+        const rounds = g.rounds.map((c) => (c.round === event.round ? { ...c, corrections: correctionCount(cycle.reviewIds, response) } : c));
+        return { ...g, rounds, corrections: rounds.reduce((sum, c) => sum + (c.corrections ?? 0), 0) };
       };
       return withRight({ ...run, timeline: openGroups(run.timeline, event.subject, corrected) }, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
     }

@@ -10,11 +10,11 @@ import { issue, respond } from "./helpers.ts";
 
 const RUNS = { numRuns: 150, seed: 20260925 };
 const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, idNumber: 1, proceed: "proceed", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, onUnchanged: null, maxRounds: 3, maxIdleRounds: 2, countMinor: true };
-const PRODUCING = new Set(["AskLimit", "AskDecision", "CallReviewer", "CallPlanner", "ApplyDecisions", "Amend", "ObserveFile", "Halt", "Finish"]);
+const PRODUCING = new Set(["AskLimit", "AskUnchanged", "CallCorrective", "AskDecision", "CallReviewer", "CallPlanner", "ApplyDecisions", "Amend", "ObserveFile", "Halt", "Finish"]);
 const ACTIONS: readonly Action[] = ["accepted", "partially_accepted", "rejected", "no_change_needed", "clarification_requested"];
 
 /** One generated round: its review, the actions of the response, whether a self-correction is included, and the world's answers. */
-type Script = { issueCount: number; actions: readonly Action[]; selfCorrection: boolean; hash: string; decide: boolean; limitAnswer: "p" | "0" | "2" };
+type Script = { issueCount: number; actions: readonly Action[]; selfCorrection: boolean; hash: string; decide: boolean; limitAnswer: "p" | "0" | "2"; unchangedAnswer: "proceed" | "stop" };
 const arbScript: fc.Arbitrary<Script> = fc.record(
   {
     issueCount: fc.integer({ min: 0, max: 3 }),
@@ -24,6 +24,8 @@ const arbScript: fc.Arbitrary<Script> = fc.record(
     hash: fc.constantFrom("h0", "h1", "h2", "h3"),
     decide: fc.boolean(),
     limitAnswer: fc.constantFrom("p", "0", "2"),
+    // Issue #30: the pause of an accepted issue with the file unchanged (Retry would repeat the same observation here).
+    unchangedAnswer: fc.constantFrom("proceed", "stop"),
   },
   { noNullPrototype: true },
 );
@@ -69,6 +71,9 @@ const drive = (scripts: readonly Script[], use: ReviewSetup = setup) => {
       }
       case "AskDecision":
         event = { kind: "DecisionGiven", text: script.decide ? "do it" : "" };
+        break;
+      case "AskUnchanged":
+        event = { kind: "UnchangedAnswer", answer: script.unchangedAnswer };
         break;
       case "AskLimit":
         event = { kind: "LimitAnswer", answer: currentRound < scripts.length ? scripts[currentRound].limitAnswer : "0" };

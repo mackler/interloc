@@ -93,6 +93,19 @@ test("an accepted issue rewrites analysis.json, the log holds D1 ids with the en
   assert.match(probe.reviewer.prompts[1], /D1-R2-1/);
 });
 
+// Issue #30 (S11, f): a decision's analysis gets the corrective turn too; its reply is validated as an analysis.
+test("an accepted issue with analysis.json unchanged gets a corrective turn in the decision's session", async () => {
+  const { layer, probe } = await setUp({
+    steps: [{ output: analysis() }, { output: decisionResponse([["D1-R1-1", "accepted"]], analysis()) }, { output: decisionResponse([["D1-R1-1", "accepted"]], analysis("second")) }],
+    reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
+  });
+  const end = await Effect.runPromise(loop(layer));
+  assert.equal(end.result, "converged");
+  assert.match(probe.planner.prompts[2] ?? "", /analysis\.json did not change during your response/);
+  assert.equal(argued(json(probe.dir, "decision-1/analysis.json").analysis.columns[0]).advantages[0].title, "second");
+  assert.ok(fs.existsSync(path.join(probe.dir, "decision-1", "cc-1-corrective-1.json")));
+});
+
 test("a disputed issue pauses as in behavior 7", async () => {
   const { layer, probe } = await setUp({
     // The decision on the raised-again issue, then no decision at the idle pause of two cycles without an amendment.

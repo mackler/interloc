@@ -4,7 +4,7 @@
 
 import { Effect } from "effect";
 import type { RunError } from "./errors.ts";
-import { chooseOption, isDecide, parseExtraRounds } from "./input.ts";
+import { chooseOption, isDecide, parseExtraRounds, parseUnchangedAnswer } from "./input.ts";
 import * as prompts from "./prompts.ts";
 import { renderChoice } from "./render.ts";
 import { Decider, Store, Ui } from "./services.ts";
@@ -23,6 +23,15 @@ export const permissionOptions: readonly OfferedOption[] = [
   { label: prompts.PERMISSION_ALLOW, description: prompts.PERMISSION_ALLOW_DESCRIPTION, matches: (answer) => answer.trim().toLowerCase() === "y" },
   { label: prompts.PERMISSION_DENY, description: prompts.PERMISSION_DENY_DESCRIPTION, matches: (answer) => answer.trim().toLowerCase() !== "y" },
 ];
+/** The pause of issue #30: Retry, Proceed and Stop, each chosen by the answers parseUnchangedAnswer reads as it. */
+export const unchangedOptions = (interview: boolean): readonly OfferedOption[] => {
+  const d = prompts.unchangedOptionDescriptions(interview);
+  return [
+    { label: prompts.UNCHANGED_RETRY, description: d.retry, matches: (answer: string) => parseUnchangedAnswer(answer) === "retry" },
+    { label: prompts.UNCHANGED_PROCEED, description: d.proceed, matches: (answer: string) => parseUnchangedAnswer(answer) === "proceed" },
+    { label: prompts.UNCHANGED_STOP, description: d.stop, matches: (answer: string) => parseUnchangedAnswer(answer) === "stop" },
+  ];
+};
 /**
  * The cycle limit (decision Q6): p proceeds where offered, a number adds cycles, and every other answer stops the run
  * (the review loop halts on it), so "2" is never read as the second option.

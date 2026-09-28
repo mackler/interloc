@@ -1,5 +1,7 @@
 // Pure interpretation of what the user types. No I/O; used by the terminal Ui and the agent adapters.
 
+import { UNCHANGED_ANSWERS } from "./prompts.ts";
+
 /**
  * The option a reply chooses, as a zero-based index, or null when the reply is not a whole number in
  * 1..count. Only the entire (trimmed) reply counts: "1 please explain" and "1.5" are free text
@@ -26,6 +28,13 @@ export const parseExtraRounds = (reply: string): number | null => {
   if (!/^[1-9][0-9]*$/.test(trimmed) || trimmed.length > 10) return null;
   const value = Number(trimmed);
   return value <= 2 ** 31 - 1 ? value : null;
+};
+
+/** The answer at the pause of issue #30 (prompts.unchangedPrompt): its letter or its word; anything else is no answer. */
+export const parseUnchangedAnswer = (reply: string): "retry" | "proceed" | "stop" | null => {
+  const t = reply.trim().toLowerCase();
+  const answers = ["retry", "proceed", "stop"] as const;
+  return answers.find((a) => t === UNCHANGED_ANSWERS[a] || t === a) ?? null;
 };
 
 export const chooseOption = (reply: string, count: number): number | null => {

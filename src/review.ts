@@ -6,9 +6,10 @@ import { Effect, Ref, Result, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
-import { decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
-import { askOffering, limitOptions, numberedOptions } from "./offer.ts";
-import { answerOf } from "./input.ts";
+import { correctivePrompt, unchangedPrompt, unchangedQuestion, decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
+import { correctiveValidation } from "./round.ts";
+import { askOffering, limitOptions, numberedOptions, unchangedOptions } from "./offer.ts";
+import { answerOf, parseUnchangedAnswer } from "./input.ts";
 import { optionLines } from "./render.ts";
 import { advance, initialState, type Option, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
@@ -101,6 +102,14 @@ export const serializeReply = (value: unknown): string => {
 };
 
 /**
+ * A second turn spent on a defective reply, in the same session or thread (decision S2 of issues #26, #30 and #31):
+ * `schema` (behaviour 10), `validation` (issue #37) or `corrective` (issue #30, an accepted issue left the reviewed file
+ * unchanged). Each kind has its own budget, and its prompt comes from src/prompts.ts. A dropped connection is not a
+ * Repair: it repeats a call that produced no reply (src/retry.ts).
+ */
+export type Repair = Readonly<{ kind: "schema" | "validation" | "corrective"; prompt: string }>;
+
+/**
  * Decodes an agent's reply with its schema. A reply that does not match is kept on disk and the agent
  * gets one repair turn in the same session or thread; a second mismatch fails with AgentReplyInvalid.
  * Excess properties are ignored: they break no assumption of the program.
@@ -109,7 +118,7 @@ export const decodeWithRepair = <Out extends Schema.Decoder<unknown>, E, R>(
   agent: keyof typeof AGENT_LABEL,
   schema: Out,
   reply: unknown,
-  repair: (prompt: string) => Effect.Effect<unknown, E, R>,
+  repair: (repair: Repair) => Effect.Effect<unknown, E, R>,
 ): Effect.Effect<Out["Type"], E | RunError, R | Store> => decodeValidating(agent, schema, reply, repair, null).pipe(Effect.map((r) => r.value));
 
 /**
@@ -123,7 +132,7 @@ export const decodeValidating = <Out extends Schema.Decoder<unknown>, E, R>(
   agent: keyof typeof AGENT_LABEL,
   schema: Out,
   reply: unknown,
-  repair: (prompt: string) => Effect.Effect<unknown, E, R>,
+  repair: (repair: Repair) => Effect.Effect<unknown, E, R>,
   validate: Validation<Out["Type"]> | null,
 ): Effect.Effect<Readonly<{ value: Out["Type"]; notes: readonly string[] }>, E | RunError, R | Store> =>
   Effect.gen(function* () {
@@ -144,14 +153,14 @@ export const decodeValidating = <Out extends Schema.Decoder<unknown>, E, R>(
         if (!decoded.ok) {
           const file = yield* keep(value);
           if (schemaFile !== null) return yield* Effect.fail(new AgentReplyInvalid({ agent: AGENT_LABEL[agent], issue: decoded.issue, files: [schemaFile, file] }));
-          return yield* step(yield* repair(repairReplyPrompt(decoded.issue)), file, validationUsed);
+          return yield* step(yield* repair({ kind: "schema", prompt: repairReplyPrompt(decoded.issue) }), file, validationUsed);
         }
         if (validate === null) return { value: decoded.value, notes: [] };
         const validated = validate(decoded.value);
         if (Result.isSuccess(validated)) return validated.success;
         yield* keep(value);
         if (validationUsed) return yield* Effect.fail(validated.failure.error);
-        return yield* step(yield* repair(validated.failure.repair), schemaFile, true);
+        return yield* step(yield* repair({ kind: "validation", prompt: validated.failure.repair }), schemaFile, true);
       });
     return yield* step(reply, null, false);
   });
@@ -189,13 +198,29 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
       });
     const first = yield* call(prompt);
     const repairCall = yield* Ref.make<PlanningResult | null>(null);
-    const repair = (text: string) => call(text).pipe(Effect.tap((result) => Ref.set(repairCall, result)), Effect.map((result) => result.output));
+    const repair = (r: Repair) => call(r.prompt).pipe(Effect.tap((result) => Ref.set(repairCall, result)), Effect.map((result) => result.output));
     const { value: output, notes } = yield* decodeValidating("claude", schema, first.output, repair, validate);
     for (const note of notes) yield* store.converse(note);
     const second = yield* Ref.get(repairCall);
     const used = second ?? first;
     return { output, reply: used.output, resultText: used.resultText, costUsd: used.costUsd, repaired: second !== null };
   });
+
+/**
+ * The corrective turn (issue #30) as a Repair of its own: a planning call in the current session whose reply has fresh
+ * schema and validation budgets, so it takes neither's turn and neither takes its.
+ */
+export const repairTurn = <Out extends Schema.Decoder<unknown>>(repair: Repair, schema: Out, capability: PlanningCapability, validate: Validation<Out["Type"]> | null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider> =>
+  planningCall(repair.prompt, schema, "planning", capability, validate);
+
+/** Two validations in turn: the second sees the first's value, and the notes of both are kept. */
+export const bothValidations =
+  <T>(first: Validation<T>, second: Validation<T> | null): Validation<T> =>
+  (output) => {
+    const a = first(output);
+    if (Result.isFailure(a) || second === null) return a;
+    return Result.map(second(a.success.value), (b) => ({ value: b.value, notes: [...a.success.notes, ...b.notes] }));
+  };
 
 export const applyDecisions = <R extends PlannerResponse, D>(subject: Subject<R, D>): Effect.Effect<void, RunError, Services> =>
   Effect.gen(function* () {
@@ -290,12 +315,18 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             const question = { question: limitQuestion(heading, command.limit), options: limitOptions(proceed) };
             return { kind: "LimitAnswer", answer: yield* askOffering((p) => ui.ask(p), prompt, question, Effect.void) };
           }
+          case "AskUnchanged": {
+            // Issue #30: Retry, Proceed or Stop, with the offer of decision support; an answer that is none of them is asked again.
+            const question = { question: unchangedQuestion(heading, fileLabel), options: unchangedOptions(command.retry === "interview") };
+            const answer = yield* askOffering((p) => ui.ask(p), unchangedPrompt, question, Effect.void, (a) => parseUnchangedAnswer(a) !== null);
+            return { kind: "UnchangedAnswer", answer: parseUnchangedAnswer(answer)! };
+          }
           case "AskDecision":
             return { kind: "DecisionGiven", text: yield* askWithOptions(command.subject, command.options) };
           case "CallReviewer": {
             // Before the turn's guard takes its snapshot, so that it is not counted as a change during the turn.
             if (subject.prepare !== null) yield* subject.prepare;
-            const review: Review = yield* decodeWithRepair("codex", ReviewText, yield* reviewCall(subject.reviewPrompt(command.round)), reviewCall);
+            const review: Review = yield* decodeWithRepair("codex", ReviewText, yield* reviewCall(subject.reviewPrompt(command.round)), (r) => reviewCall(r.prompt));
             return { kind: "ReviewDecoded", review };
           }
           case "CallPlanner": {
@@ -304,6 +335,18 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             const context: RespondContext = { review: state.current.review!, log: state.log, changes };
             const call = yield* planningCall(subject.respond.prompt(command.round, context), subject.respond.schema, "planning", subject.respond.capability, subject.respond.validate);
             return { kind: "ResponseDecoded", response: call.output, resultText: call.resultText, costUsd: call.costUsd };
+          }
+          case "CallCorrective": {
+            // Issue #30: the corrective turn, a Repair of its own in the same session, validated against the reply it
+            // corrects and then by the subject's own validation; its raw reply is kept, and its output written.
+            const previous = state.current.response!;
+            const acceptedIds = state.current.round!.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
+            const validate = bothValidations(correctiveValidation<R>(previous, acceptedIds), subject.respond.validate);
+            const repair: Repair = { kind: "corrective", prompt: correctivePrompt(fileLabel, command.round, acceptedIds) };
+            const call = yield* repairTurn(repair, subject.respond.schema, subject.respond.capability, validate);
+            yield* store.saveCorrection(id, command.round, command.attempt, call.reply);
+            if (subject.respond.after !== null) yield* subject.respond.after(call.output);
+            return { kind: "CorrectionDecoded", response: call.output, resultText: call.resultText, costUsd: call.costUsd };
           }
           case "ApplyDecisions":
             yield* applyDecisions(subject as Subject<PlannerResponse, D>);

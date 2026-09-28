@@ -111,12 +111,59 @@ test("a change to an ignored path does not halt the run", async () => {
   assert.equal(await runTask(layer), 1);
 });
 
-test("an accepted issue without a plan change halts the run", async () => {
-  const { layer } = testLayer(tempRepo(), {
-    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]) }],
+// Behavior 7 as amended (issue #30): a corrective turn, then the pause; Stop halts, and the log holds the round.
+test("an accepted issue without a plan change: a corrective turn, then the pause, whose Stop halts the run", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["s"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]) }, { output: respond([["A", "accepted"]]) }],
     reviews: [{ issues: [issue("A")] }],
   });
   await runFails(layer, "AcceptedWithoutChange", /plan\.json is unchanged/);
+  assert.equal(probe.ui.asked.length, 1);
+  assert.match(probe.ui.asked[0] ?? "", /r = retry; p = proceed/);
+  assert.deepEqual((await probe.loadLog()).map((e) => [e.id, e.action]), [["A", "accepted"]]);
+});
+
+test("the pause's Retry takes another corrective turn, which applies the amendment", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["r"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]) }, { output: respond([["A", "accepted"]]) }, { output: respond([["A", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(layer), 1);
+  assert.ok(fs.existsSync(path.join(probe.dir, "planning-1", "cc-1-corrective-2.json")));
+  assert.match(fs.readFileSync(path.join(probe.dir, "plan.md"), "utf8"), /v2/);
+});
+
+test("the pause's Proceed continues with the next cycle, and the log shows the file unchanged", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["p"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]) }, { output: respond([["A", "accepted"]]) }],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(layer), 1);
+  const [entry] = await probe.loadLog();
+  assert.equal(entry !== undefined && "file_change" in entry ? entry.file_change?.changed : undefined, false);
+  assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /\*\*User decision:\*\* proceed with plan\.json unchanged after cycle 1/);
+});
+
+test("Help me decide at the pause runs a decision and asks again", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["/decide", "p"],
+    steps: [
+      { output: noQuestions, plan: "v1" },
+      { output: respond([["A", "accepted"]]) },
+      { output: respond([["A", "accepted"]]) },
+      { output: { decision: "d", columns: [["Retry"], ["Proceed"], ["Stop the run"]].map(([option]) => ({ kind: "argued", option, advantages: [], disadvantages: [] })), recommendation: { option: "", reason: "" } } },
+    ],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(layer), 1);
+  assert.equal(probe.ui.asked.length, 2);
+  assert.ok(probe.ui.notified.some((e) => e._tag === "DecisionAnalyzed"));
 });
 
 test("the round limit offers to proceed to implementation", async () => {

@@ -6,7 +6,7 @@ import { DECIDE } from "./input.ts";
 import * as prompts from "./prompts.ts";
 
 export type Choice = Readonly<{ label: string; sends: string }>;
-export type PromptKind = "decision" | "limit" | "limitNoProceed" | "execInput" | "optionOrText" | "permission" | "interviewMessage" | "confirmSummary" | "startOrTalk" | "unknown";
+export type PromptKind = "decision" | "limit" | "limitNoProceed" | "unchanged" | "execInput" | "optionOrText" | "permission" | "interviewMessage" | "confirmSummary" | "startOrTalk" | "unknown";
 /** Choices that come from the preceding event rather than from the text: a relayed question's options, or the interview's numbered answers. */
 export type Extra = "none" | "questionOptions" | "numberedAnswers";
 export type UserPrompt = Readonly<{
@@ -48,6 +48,21 @@ const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
   [prompts.interviewMessagePrompt, (t: string) => entry("interviewMessage", t, "message", [{ label: prompts.END_CLARIFICATION, sends: "/done" }], "message", "numberedAnswers")],
   [prompts.confirmSummaryPrompt, (t: string) => entry("confirmSummary", t, "message", [{ label: "Confirm", sends: "" }], "message")],
   [prompts.startOrTalkPrompt, (t: string) => entry("startOrTalk", t, "message", [{ label: "Start planning", sends: "" }], "message")],
+  [
+    prompts.unchangedPrompt,
+    (t: string) =>
+      entry(
+        "unchanged",
+        t,
+        "ask",
+        [
+          { label: prompts.UNCHANGED_RETRY, sends: prompts.UNCHANGED_ANSWERS.retry },
+          { label: prompts.UNCHANGED_PROCEED, sends: prompts.UNCHANGED_ANSWERS.proceed },
+          { label: prompts.UNCHANGED_STOP, sends: prompts.UNCHANGED_ANSWERS.stop },
+        ],
+        "none",
+      ),
+  ],
 ]);
 
 /**

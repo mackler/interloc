@@ -258,6 +258,38 @@ ${issue}
 Return the complete output again, corrected. Do not modify any file.`;
 }
 
+/** The heading in conversation.md of a corrective turn's reply (issue #30). */
+export function correctiveTurnHeading(attempt: number, round: number): string {
+  return `Corrective turn ${attempt}, cycle ${round}`;
+}
+/** The ids a corrective turn may change, as its prompt and its repair name them. */
+const correctableIds = (ids: readonly string[]): string => ids.join(", ");
+/**
+ * The corrective turn (issue #30): a response accepted issues in full or in part, and the reviewed file did not change.
+ * correctiveValidation in src/round.ts accepts exactly the changes this prompt allows.
+ */
+export function correctivePrompt(fileLabel: string, round: number, acceptedIds: readonly string[]): string {
+  return `plan-review/${fileLabel} did not change during your response to the review of cycle ${round}, although you accepted ${correctableIds(acceptedIds)} in full or in part.
+Either apply the amendments you described, or change the action of those dispositions and give the reason in the rationale.
+Return the complete response again in the same form as before; where your response carries the plan, the question list or the analysis, return it whole, with the amendments applied.
+Only the action and the rationale of ${correctableIds(acceptedIds)} may differ from your previous response. Return every other disposition, every duplicate_of and reverses, the self_corrections, the reviewer_feedback and the questions_for_user exactly as before.
+Do not modify any file.`;
+}
+/** What a corrective reply changed that it may not (CorrectionInvalid), as the halt describes it. */
+export function correctionInvalidText(changedIds: readonly string[], other: readonly string[]): string {
+  const parts = [
+    ...(changedIds.length === 0 ? [] : [`the corrective reply changed the dispositions of ${changedIds.join(", ")}, which it was not allowed to change`]),
+    ...(other.length === 0 ? [] : [`the corrective reply changed ${other.join(", ")}`]),
+  ];
+  return parts.join("; ");
+}
+/** The repair turn of a corrective reply that changed what it may not. */
+export function correctionRepairPrompt(error: Readonly<{ changedIds: readonly string[]; other: readonly string[] }>, acceptedIds: readonly string[]): string {
+  return `Your structured output matched the schema, but the program cannot accept it: ${correctionInvalidText(error.changedIds, error.other)}.
+Only the action and the rationale of ${correctableIds(acceptedIds)} may differ from your previous response; everything else must be returned exactly as before.
+Return the complete output again, corrected. Do not modify any file.`;
+}
+
 // ---- prompts to the user ------------------------------------------------------------------------
 // The texts the program shows when it waits for the user. src/userPrompts.ts maps each to its widget.
 
@@ -827,6 +859,34 @@ export const withOffer = (prompt: string): string => `${OFFER_LINE}\n${prompt}`;
 export const withoutOffer = (text: string): Readonly<{ offered: boolean; text: string }> =>
   text.startsWith(`${OFFER_LINE}\n`) ? { offered: true, text: text.slice(OFFER_LINE.length + 1) } : { offered: false, text };
 /** The options of the cycle limit as a decision analyzes them (decision Q6): the count of more cycles is entered after choosing. */
+/**
+ * The pause of issue #30: a response accepted issues and the reviewed file is still unchanged (after the corrective
+ * turn; for the requirements, after the second interview). Its answers are parsed by parseUnchangedAnswer in
+ * src/input.ts, and its widget and options derive from these constants.
+ */
+export const UNCHANGED_RETRY = "Retry";
+export const UNCHANGED_PROCEED = "Proceed";
+export const UNCHANGED_STOP = "Stop the run";
+export const UNCHANGED_ANSWERS = { retry: "r", proceed: "p", stop: "s" } as const;
+export const unchangedPrompt = `${UNCHANGED_ANSWERS.retry} = retry; ${UNCHANGED_ANSWERS.proceed} = proceed with the file unchanged; ${UNCHANGED_ANSWERS.stop} = stop the run > `;
+export function unchangedOptionDescriptions(interview: boolean): Readonly<{ retry: string; proceed: string; stop: string }> {
+  return {
+    retry: interview ? "Hold another interview on the accepted issues, so that the summary can be amended." : "Give Claude Code one more corrective turn to apply the amendments it described or to change its dispositions.",
+    proceed: "Let the dispositions stand with the file unchanged; the issue log shows that nothing changed, and the next cycle's review goes ahead.",
+    stop: "End the run here; its records are kept.",
+  };
+}
+export function unchangedLine(fileLabel: string, round: number, acceptedIds: readonly string[], corrected: boolean): string {
+  return `\nCycle ${round}: Claude Code accepted ${acceptedIds.join(", ")} in full or in part, but ${fileLabel} is unchanged${corrected ? " after a corrective turn" : ""}.`;
+}
+export function unchangedQuestion(heading: string, fileLabel: string): string {
+  return `${heading}: Claude Code accepted issues, but ${fileLabel} is unchanged. How should the run continue?`;
+}
+export function unchangedDecisionLine(answer: "retry" | "proceed" | "stop", fileLabel: string, round: number, heading: string): string {
+  const what = answer === "retry" ? "retry" : answer === "proceed" ? `proceed with ${fileLabel} unchanged` : "stop the run";
+  return `**User decision:** ${what} after cycle ${round} of ${heading}.\n\n`;
+}
+
 export const LIMIT_PROCEED = "Proceed without convergence";
 export const LIMIT_STOP = "Stop the run";
 export const LIMIT_MORE = "Continue with more cycles";

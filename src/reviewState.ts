@@ -34,10 +34,14 @@ export type ReviewCommand =
   | Readonly<{ kind: "SaveRound"; record: RoundRecord }>
   | Readonly<{ kind: "Checkpoint"; point: CheckpointPoint }>
   | Readonly<{ kind: "AskLimit"; limit: number }>
+  /** Issue #30: the pause of an accepted issue with the file unchanged; Retry is a corrective turn or another interview. */
+  | Readonly<{ kind: "AskUnchanged"; accepted: readonly string[]; retry: "corrective" | "interview" }>
   /** `options`: the options the decision offers (decision Q1 of decision support); none at the other pauses. */
   | Readonly<{ kind: "AskDecision"; subject: string; id: IssueId | null; options: readonly Option[] }>
   | Readonly<{ kind: "CallReviewer"; round: number }>
   | Readonly<{ kind: "CallPlanner"; round: number }>
+  /** Issue #30: corrective turn `attempt` of the round, in the same session; its reply comes back as CorrectionDecoded. */
+  | Readonly<{ kind: "CallCorrective"; round: number; attempt: number }>
   | Readonly<{ kind: "ApplyDecisions" }>
   | Readonly<{ kind: "Amend"; round: number }>
   | Readonly<{ kind: "ObserveFile"; stage: Stage }>
@@ -49,8 +53,10 @@ export type ReviewEvent =
   /** `text`: the reviewed file's text, from which the change during a response is measured (issue #31); "" when absent. */
   | Readonly<{ kind: "Begin"; hash: string; text: string; log: readonly LogEntry[] }>
   | Readonly<{ kind: "LimitAnswer"; answer: string }>
+  | Readonly<{ kind: "UnchangedAnswer"; answer: "retry" | "proceed" | "stop" }>
   | Readonly<{ kind: "ReviewDecoded"; review: Review }>
   | Readonly<{ kind: "ResponseDecoded"; response: PlannerResponse; resultText: string; costUsd: number | null }>
+  | Readonly<{ kind: "CorrectionDecoded"; response: PlannerResponse; resultText: string; costUsd: number | null }>
   | Readonly<{ kind: "DecisionGiven"; text: string }>
   | Readonly<{ kind: "DecisionsApplied" }>
   | Readonly<{ kind: "Amended" }>
@@ -87,7 +93,8 @@ export type ReviewSetup = Readonly<{
 
 /** An option of a pause's decision: a label and its description. */
 export type Option = Readonly<{ label: string; description: string }>;
-type Ask = Readonly<{ say: readonly string[]; subject: string; id: IssueId | null; options?: readonly Option[] }>;
+/** `key`: the condition and the id of a pause that depends on the dispositions, so that it is asked once per round (P1-R1-3). */
+type Ask = Readonly<{ say: readonly string[]; subject: string; id: IssueId | null; options?: readonly Option[]; key?: string }>;
 /** The reviewer's position and the planner's position at a disputed pause (decision Q1). */
 const positions = (reviewer: string, planner: string): readonly Option[] => [
   { label: prompts.REVIEWER_POSITION, description: reviewer },
@@ -109,6 +116,10 @@ export type Step =
   | Readonly<{ name: "amending" }>
   /** A measured subject: the observation after the response, before the round is logged (issue #31). */
   | Readonly<{ name: "measuring" }>
+  /** Issue #30: awaiting the reply of a corrective turn. */
+  | Readonly<{ name: "correcting" }>
+  /** Issue #30: the pause; `hash` is the observation the round continues from on Proceed. */
+  | Readonly<{ name: "askingUnchanged"; hash: string }>
   | Readonly<{ name: "observingResponse" }>
   | Readonly<{ name: "askingUnexplained"; asking: Ask; hash: string }>
   | Readonly<{ name: "applyingUnexplained" }>
@@ -129,7 +140,13 @@ export type RoundInProgress = Readonly<{
   response: PlannerResponse | null;
   resultText: string;
   decided: boolean;
+  /** A decision at the pauses after the latest reply that is not yet applied. */
+  toApply: boolean;
   decisions: readonly DecisionEvent[];
+  /** The keys of the disposition-dependent pauses asked this round. */
+  asked: readonly string[];
+  /** The corrective turns taken this round (issue #30). */
+  corrections: number;
   /** The reviewed file's text when the round began, from which the response's change is measured (issue #31). */
   startText: string;
   /** The issue log when the round began: the round's log is built from it (P2-R1-1). */
@@ -153,7 +170,7 @@ export type ReviewState = Readonly<{
 
 export type Transition = Readonly<{ state: ReviewState; commands: readonly ReviewCommand[] }>;
 
-const freshRound: RoundInProgress = { review: null, validatedReview: null, round: null, response: null, resultText: "", decided: false, decisions: [], startText: "", startLog: [] };
+const freshRound: RoundInProgress = { review: null, validatedReview: null, round: null, response: null, resultText: "", decided: false, toApply: false, decisions: [], asked: [], corrections: 0, startText: "", startLog: [] };
 
 export const initialState = (setup: ReviewSetup, config: Pick<Config, "maxRounds" | "maxIdleRounds" | "countMinor">): ReviewState => ({
   setup: { ...setup, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor },
@@ -259,17 +276,63 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
   return askEach(state, reraised, (asking, queue) => ({ name: "askingReraised", asking, queue }), toResponse, [...before, checkpoint(state, "reviewed")]);
 };
 
-const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText: string, costUsd: number | null): Transition => {
+/**
+ * The pauses of behaviour 7 that depend on a response's dispositions, in their order, each with its key; `history` is
+ * the log as the round began. The questions for the user are the last.
+ */
+const disposedPauses = (history: readonly LogEntry[], review: Review, round: ValidatedRound, response: PlannerResponse): readonly Ask[] => {
+  const entries = (id: string) => showEntries(history, id);
+  return [
+    ...log.secondClarifications(history, round).map((id): Ask => ({
+      say: [`\nClaude Code requests clarification of issue ${id} a second time:`, entries(id), show(response.dispositions.find((d) => d.id === id))],
+      subject: `issue ${id}, for which one clarification exchange did not produce a disposition`,
+      id: id as IssueId,
+      options: positions(reviewerSays(review.issues.find((i) => i.id === id)), response.dispositions.find((d) => d.id === id)?.rationale ?? ""),
+      key: `clarification ${id}`,
+    })),
+    ...response.self_corrections.filter((sc) => sc.new_action === "rejected").map((sc): Ask => ({
+      say: [`\nClaude Code now considers wrong the correction that it made for issue ${sc.id}: ${sc.explanation}`, entries(sc.id)],
+      subject: `the accepted correction for ${sc.id}, which Claude Code now considers wrong`,
+      id: sc.id as IssueId,
+      options: positions(currentEntry(history, sc.id)?.problem ?? "", sc.explanation),
+      key: `disputed ${sc.id}`,
+    })),
+    ...log.reversals(round).map(([idNew, idOld]): Ask => ({
+      say: [`\nIssue ${idNew} requests the reversal of the correction made for issue ${idOld}:`, entries(idOld), show(review.issues.find((i) => i.id === idNew)), show(response.dispositions.find((d) => d.id === idNew))],
+      subject: `issue ${idNew} against the accepted correction for ${idOld}`,
+      id: idNew as IssueId,
+      options: positions(reviewerSays(review.issues.find((i) => i.id === idNew)), response.dispositions.find((d) => d.id === idNew)?.rationale ?? ""),
+      key: `reversal ${idNew} ${idOld}`,
+    })),
+    ...log.repeatedUnderNewId(history, round).map(([idNew, idOld]): Ask => ({
+      say: [`\nIssue ${idNew} repeats issue ${idOld}, which Claude Code did not accept in full, under a new id:`, entries(idOld), show(review.issues.find((i) => i.id === idNew))],
+      subject: `issue ${idNew}, a repetition of issue ${idOld}`,
+      id: idNew as IssueId,
+      options: positions(reviewerSays(review.issues.find((i) => i.id === idNew)), currentEntry(history, idOld)?.rationale ?? ""),
+      key: `repeat ${idNew} ${idOld}`,
+    })),
+    ...response.questions_for_user.map((question, i): Ask => ({ say: [""], subject: `question from Claude Code: ${question.question.replace(/\s+/g, " ")}`, id: null, options: question.options, key: `question ${i}` })),
+  ];
+};
+
+/**
+ * A response, or a corrective turn's reply (issue #30), validated against the round's review and the log as the round
+ * began (P2-R1-1), recorded, and followed by the pauses it raises that were not asked for this round before.
+ */
+const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText: string, costUsd: number | null, corrective = false): Transition => {
   const { heading, phase } = s.setup;
   const n = s.round;
   const review = s.current.review!;
-  const checked = validateRound(s.current.validatedReview!, response, s.log, phase, n, idPrefixOf(s.setup.subject), s.setup.idNumber);
-  const withCost: ReviewState = { ...s, costs: [...s.costs, costUsd] };
+  const history = s.current.startLog;
+  const checked = validateRound(s.current.validatedReview!, response, history, phase, n, idPrefixOf(s.setup.subject), s.setup.idNumber);
+  // The costs are the session's running totals: a corrective turn's replaces the round's.
+  const withCost: ReviewState = { ...s, costs: corrective ? [...s.costs.slice(0, -1), costUsd] : [...s.costs, costUsd] };
   if (Result.isFailure(checked)) return halt(withCost, checked.failure);
   const round = checked.success;
-  const state: ReviewState = { ...withCost, current: { ...s.current, round, response, resultText } };
+  const pauses = disposedPauses(history, review, round, response).filter((a) => !s.current.asked.includes(a.key ?? ""));
+  const state: ReviewState = { ...withCost, current: { ...s.current, round, response, resultText, asked: [...s.current.asked, ...pauses.map((a) => a.key ?? "")] } };
   const before: ReviewCommand[] = [
-    { kind: "SaveResponse", round: n, response },
+    ...(corrective ? [] : [{ kind: "SaveResponse", round: n, response } as ReviewCommand]),
     {
       kind: "SaveRound",
       record: {
@@ -284,49 +347,20 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
       },
     },
     notify({ _tag: "ResponseReceived", subject: s.setup.subject, round: n, response, resultText }),
+    ...(corrective ? [{ kind: "Converse", markdown: `**${prompts.correctiveTurnHeading(s.current.corrections, n)}**\n\n` } as ReviewCommand] : []),
     { kind: "Converse", markdown: renderRound(heading, n, review, response) },
     ...round.notes.map((note): ReviewCommand => {
       const why = note.reason === "unknown" ? "names no current entry of the issue log" : "names an issue whose current disposition is not an accepted correction";
       return { kind: "Converse", markdown: `**Reference dropped:** ${note.field} = ${note.named} of issue ${note.id} ${why}; treated as no reference.\n\n` };
     }),
-    ...(response.reviewer_feedback !== "" ? [{ kind: "RecordFeedback", round: n, text: response.reviewer_feedback } as ReviewCommand] : []),
+    ...(response.reviewer_feedback !== "" && !corrective ? [{ kind: "RecordFeedback", round: n, text: response.reviewer_feedback } as ReviewCommand] : []),
     checkpoint(state, "responded"),
-  ];
-  const history = s.log;
-  const entries = (id: string) => showEntries(history, id);
-  // The pause order of decided behaviour 7.
-  const pauses: Ask[] = [
-    ...log.secondClarifications(history, round).map((id): Ask => ({
-      say: [`\nClaude Code requests clarification of issue ${id} a second time:`, entries(id), show(response.dispositions.find((d) => d.id === id))],
-      subject: `issue ${id}, for which one clarification exchange did not produce a disposition`,
-      id: id as IssueId,
-      options: positions(reviewerSays(review.issues.find((i) => i.id === id)), response.dispositions.find((d) => d.id === id)?.rationale ?? ""),
-    })),
-    ...response.self_corrections.filter((sc) => sc.new_action === "rejected").map((sc): Ask => ({
-      say: [`\nClaude Code now considers wrong the correction that it made for issue ${sc.id}: ${sc.explanation}`, entries(sc.id)],
-      subject: `the accepted correction for ${sc.id}, which Claude Code now considers wrong`,
-      id: sc.id as IssueId,
-      options: positions(currentEntry(history, sc.id)?.problem ?? "", sc.explanation),
-    })),
-    ...log.reversals(round).map(([idNew, idOld]): Ask => ({
-      say: [`\nIssue ${idNew} requests the reversal of the correction made for issue ${idOld}:`, entries(idOld), show(review.issues.find((i) => i.id === idNew)), show(response.dispositions.find((d) => d.id === idNew))],
-      subject: `issue ${idNew} against the accepted correction for ${idOld}`,
-      id: idNew as IssueId,
-      options: positions(reviewerSays(review.issues.find((i) => i.id === idNew)), response.dispositions.find((d) => d.id === idNew)?.rationale ?? ""),
-    })),
-    ...log.repeatedUnderNewId(history, round).map(([idNew, idOld]): Ask => ({
-      say: [`\nIssue ${idNew} repeats issue ${idOld}, which Claude Code did not accept in full, under a new id:`, entries(idOld), show(review.issues.find((i) => i.id === idNew))],
-      subject: `issue ${idNew}, a repetition of issue ${idOld}`,
-      id: idNew as IssueId,
-      options: positions(reviewerSays(review.issues.find((i) => i.id === idNew)), currentEntry(history, idOld)?.rationale ?? ""),
-    })),
-    ...response.questions_for_user.map((question): Ask => ({ say: [""], subject: `question from Claude Code: ${question.question.replace(/\s+/g, " ")}`, id: null, options: question.options })),
   ];
   return askEach(state, pauses, (asking, queue) => ({ name: "askingPauses", asking, queue }), afterPauses, before);
 };
 
 const afterPauses = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition =>
-  s.current.decided ? { state: { ...s, step: { name: "applyingPauseDecisions" } }, commands: [...before, { kind: "ApplyDecisions" }] } : amendStep(s, before);
+  s.current.toApply ? { state: { ...s, step: { name: "applyingPauseDecisions" } }, commands: [...before, { kind: "ApplyDecisions" }] } : amendStep(s, before);
 
 const amendStep = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition =>
   s.setup.hasAmend ? { state: { ...s, step: { name: "amending" } }, commands: [...before, { kind: "Amend", round: s.round }] } : logStep(s, before);
@@ -395,7 +429,16 @@ const checkResponse = (s: ReviewState, hash: string, before: readonly ReviewComm
   const { fileLabel, heading } = s.setup;
   const { accepted, selfCount } = roundCounts(s);
   const last = lastHash(s);
-  if (accepted > 0 && hash === last) return done(s, { kind: "Halt", error: new AcceptedWithoutChange({ fileLabel, accepted }) }, before);
+  if (accepted > 0 && hash === last) {
+    // Issue #30: one corrective turn in the same session before the condition is put to the user.
+    if (s.setup.onUnchanged === "corrective" && s.current.corrections === 0) return correct(s, before);
+    const ids = s.current.round!.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
+    const retry = s.setup.onUnchanged === "pause" ? "interview" : "corrective";
+    return {
+      state: { ...s, step: { name: "askingUnchanged", hash } },
+      commands: [...before, say(prompts.unchangedLine(fileLabel, s.round, ids, s.current.corrections > 0)), { kind: "AskUnchanged", accepted: ids, retry }],
+    };
+  }
   if (accepted === 0 && selfCount === 0 && !s.current.decided && hash !== last) {
     const asking: Ask = {
       say: [prompts.unexplainedChangeLine(fileLabel, s.round), `The free-text response of Claude Code: ${s.current.resultText || "none"}`],
@@ -405,6 +448,28 @@ const checkResponse = (s: ReviewState, hash: string, before: readonly ReviewComm
     return ask(s, { name: "askingUnexplained", hash, asking }, asking, before);
   }
   return identicalCheck(s, hash, "response", before);
+};
+
+/** The next corrective turn of the round (issue #30). */
+const correct = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition => {
+  const attempt = s.current.corrections + 1;
+  return { state: { ...s, step: { name: "correcting" }, current: { ...s.current, corrections: attempt } }, commands: [...before, { kind: "CallCorrective", round: s.round, attempt }] };
+};
+
+/** The user's answer at the pause of issue #30. */
+const onUnchangedAnswer = (s: ReviewState, hash: string, answer: "retry" | "proceed" | "stop"): Transition => {
+  const { fileLabel, heading } = s.setup;
+  const recorded: ReviewCommand = { kind: "Converse", markdown: prompts.unchangedDecisionLine(answer, fileLabel, s.round, heading) };
+  switch (answer) {
+    case "retry":
+      return s.setup.onUnchanged === "pause" ? { state: { ...s, step: { name: "amending" } }, commands: [recorded, { kind: "Amend", round: s.round }] } : correct(s, [recorded]);
+    case "proceed":
+      return identicalCheck(s, hash, "response", [recorded]);
+    case "stop": {
+      const accepted = log.acceptedCount(s.current.round!);
+      return done(s, { kind: "Halt", error: new AcceptedWithoutChange({ fileLabel, accepted }) }, [recorded]);
+    }
+  }
 };
 
 /** Every observation leaves its text as the last seen (issue #31). */
@@ -468,7 +533,7 @@ const onDecisionGiven = (s: ReviewState, text: string): Transition => {
     }
     case "askingPauses": {
       const decision = decisionOf(s, step.asking, text);
-      const state: ReviewState = given ? { ...s, current: { ...s.current, decided: true, decisions: step.asking.id === null ? s.current.decisions : [...s.current.decisions, decision] } } : s;
+      const state: ReviewState = given ? { ...s, current: { ...s.current, decided: true, toApply: true, decisions: step.asking.id === null ? s.current.decisions : [...s.current.decisions, decision] } } : s;
       return askEach(state, step.queue, (asking, queue) => ({ name: "askingPauses", asking, queue }), afterPauses, given ? record(s, decision) : []);
     }
     case "askingUnexplained":
@@ -491,7 +556,7 @@ const onDecisionGiven = (s: ReviewState, text: string): Transition => {
 const onDecisionsApplied = (s: ReviewState): Transition => {
   switch (s.step.name) {
     case "applyingPauseDecisions":
-      return amendStep(s);
+      return amendStep({ ...s, current: { ...s.current, toApply: false } });
     case "applyingUnexplained":
       return { state: { ...s, step: { name: "observingUnexplained" } }, commands: [{ kind: "ObserveFile", stage: "decision" }] };
     case "applyingIdentical":
@@ -510,10 +575,14 @@ export const advance = (state: ReviewState, event: ReviewEvent): Transition => {
       return startRound({ ...state, log: event.log, lastText: event.text, observations: [{ round: 0, stage: "start", hash: event.hash }] });
     case "LimitAnswer":
       return state.step.name === "awaitingLimit" ? onLimitAnswer(state, event.answer) : noop(state);
+    case "UnchangedAnswer":
+      return state.step.name === "askingUnchanged" ? onUnchangedAnswer(state, state.step.hash, event.answer) : noop(state);
     case "ReviewDecoded":
       return state.step.name === "awaitingReview" ? onReviewDecoded(state, event.review) : noop(state);
     case "ResponseDecoded":
       return state.step.name === "awaitingResponse" ? onResponseDecoded(state, event.response, event.resultText, event.costUsd) : noop(state);
+    case "CorrectionDecoded":
+      return state.step.name === "correcting" ? onResponseDecoded(state, event.response, event.resultText, event.costUsd, true) : noop(state);
     case "DecisionGiven":
       return onDecisionGiven(state, event.text);
     case "DecisionsApplied":

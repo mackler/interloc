@@ -2,7 +2,7 @@
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
 import { Data, Result, Schema } from "effect";
 import { type Change, renderChange } from "./snapshot.ts";
-import { analysisInvalidText, cycleInvalidText, cycleLimitStopText, decisionFormatUnreadableText, planInvalidText } from "./prompts.ts";
+import { analysisInvalidText, correctionInvalidText, cycleInvalidText, cycleLimitStopText, decisionFormatUnreadableText, planInvalidText } from "./prompts.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
 export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: readonly Change[] }> {}
@@ -45,6 +45,11 @@ export class AnalysisInvalid extends Data.TaggedError("AnalysisInvalid")<{
  * A plan whose structure is invalid beyond its schema (issue #6, G-R1-1): empty or repeated step ids, or a revision that
  * removes a done step or changes its label or text. The plan gets the validation repair turn of behaviour 10.
  */
+/**
+ * A corrective reply (issue #30) that changed what it may not: a disposition other than those it was allowed to change,
+ * a reference of one it was, or another part of the response. A halt after its own repair turn, like AnalysisInvalid.
+ */
+export class CorrectionInvalid extends Data.TaggedError("CorrectionInvalid")<{ readonly changedIds: readonly string[]; readonly other: readonly string[] }> {}
 export class PlanInvalid extends Data.TaggedError("PlanInvalid")<{
   readonly duplicateIds: readonly string[];
   readonly emptyIds: number;
@@ -78,6 +83,7 @@ export type RunError =
   | DecisionFormatUnreadable
   | AnalysisInvalid
   | PlanInvalid
+  | CorrectionInvalid
   | Interrupted;
 
 const indent = (changes: readonly Change[]): string => changes.map((change) => `\n  ${renderChange(change)}`).join("");
@@ -145,6 +151,8 @@ export const describe = (error: RunErrorFields): string => {
       if (error.blankUnclear.length > 0) parts.push(`the unclear column of ${error.blankUnclear.join(", ")} states nothing`);
       return analysisInvalidText(parts);
     }
+    case "CorrectionInvalid":
+      return correctionInvalidText(error.changedIds, error.other);
     case "PlanInvalid":
       return planInvalidText(error);
     case "Interrupted":
@@ -196,6 +204,7 @@ const RunErrorData = Schema.Union([
     recommendation: Schema.NullOr(Schema.Struct({ given: Schema.String, matches: Strings })),
     blankUnclear: Strings,
   }),
+  Schema.Struct({ _tag: Schema.Literal("CorrectionInvalid"), changedIds: Strings, other: Strings }),
   Schema.Struct({ _tag: Schema.Literal("PlanInvalid"), duplicateIds: Strings, emptyIds: Schema.Number, removedDone: Strings, changedDone: Strings }),
   Schema.Struct({ _tag: Schema.Literal("Interrupted"), where: Schema.String }),
 ]);

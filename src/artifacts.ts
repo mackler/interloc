@@ -13,6 +13,8 @@ export type Artifact =
   | Readonly<{ kind: "conversation" | "decisions" | "feedback" | "usage" | "questions" | "requirements" | "plan" | "planFile" | "checkpoint" | "config" }>
   | Readonly<{ kind: "log"; subject: SubjectId }>
   | Readonly<{ kind: "review" | "response" | "round"; subject: SubjectId; round: number }>
+  /** The raw reply of corrective turn `attempt` of a round (issue #30), beside the round's response. */
+  | Readonly<{ kind: "correction"; subject: SubjectId; round: number; attempt: number }>
   | Readonly<{ kind: "planWrite" | "execution"; phase: number }>
   /** The tree of the project at the start of the run (Q7), and the change record a work review reads. */
   | Readonly<{ kind: "baseline" }>
@@ -92,6 +94,8 @@ export const pathOf = (artifact: Artifact): string => {
     case "response":
     case "round":
       return `${subjectDir(artifact.subject)}/${ROUND_FILE[artifact.kind]}-${artifact.round}.json`;
+    case "correction":
+      return `${subjectDir(artifact.subject)}/${ROUND_FILE.response}-${artifact.round}-corrective-${artifact.attempt}.json`;
     case "planWrite":
       return `planning-${artifact.phase}/cc-0.json`;
     case "execution":
