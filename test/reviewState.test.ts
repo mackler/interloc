@@ -10,7 +10,7 @@ import { issue, respond } from "./helpers.ts";
 // state machine. The scenario tests of test/run.test.ts remain the behavioural specification; these
 // examples pin each transition.
 
-const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, proceed: "proceed to execution with the plan as it is", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, idNumber: 1, proceed: "proceed to execution with the plan as it is", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
 const start = (config: Partial<{ maxRounds: number; maxIdleRounds: number; countMinor: boolean }> = {}, log: LogEntry[] = []): Transition =>
   advance(initialState(setup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", log });
 // Notify commands are pinned by their own tests below; the sequences of the other commands ignore them.
@@ -348,4 +348,19 @@ test("work review exit (iii): a decision on a reraised issue appends only the de
 test("work review: an empty answer continues the loop as for the plan", () => {
   const idleAsk = run(workStart({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
   assert.deepEqual(last(advance(idleAsk.state, { kind: "DecisionGiven", text: "" })), { kind: "CallReviewer", round: 2 });
+});
+
+// Decision support, plan step 1.3 (P1-R1-1): decision 2 inside phase 1 generates D2-… ids, and its log entries carry phase 1.
+test("a decision subject generates ids with its decision number and records the enclosing phase in its log", () => {
+  const decision: ReviewSetup = { ...setup, subject: { decision: 2 }, heading: "Decision 2", fileLabel: "analysis.json", dirName: "decision-2", phase: 1, idNumber: 2 };
+  const first = advance(initialState(decision, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", log: [] });
+  const t = run(first, { kind: "ReviewDecoded", review: { issues: [issue("D2-R1-1")] } }, { kind: "ResponseDecoded", response: respond([["D2-R1-1", "accepted"]], { self_corrections: [{ id: "", new_action: "plan_error", explanation: "x" }] }), resultText: "", costUsd: null });
+  const saved = t.commands.find((c) => c.kind === "SaveLog");
+  assert.ok(saved !== undefined && saved.kind === "SaveLog");
+  assert.deepEqual(saved.log.map((e) => [e.id, e.phase]), [["D2-R1-1", 1], ["D2-S1-1", 1]]);
+  // The plan subject is unchanged: its id number is its phase.
+  const plan = run(start(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, { kind: "ResponseDecoded", response: respond([["A", "accepted"]], { self_corrections: [{ id: "", new_action: "plan_error", explanation: "x" }] }), resultText: "", costUsd: null });
+  const planLog = plan.commands.find((c) => c.kind === "SaveLog");
+  assert.ok(planLog !== undefined && planLog.kind === "SaveLog");
+  assert.deepEqual(planLog.log.map((e) => e.id), ["A", "P1-S1-1"]);
 });

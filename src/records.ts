@@ -48,6 +48,19 @@ export type RoundRecord = typeof RoundRecord.Type;
 export const Baseline = Schema.Struct({ version: V2, tree: Schema.NonEmptyString, time: Schema.String });
 export type Baseline = typeof Baseline.Type;
 
+// ---- decision support ------------------------------------------------------------------------------
+
+/** Where a decision took place: the phase of the run as src/uiEvents.ts names it. */
+const PhaseRecord = Schema.Union([Schema.Struct({ kind: Schema.Literal("questions") }), Schema.Struct({ kind: Schema.Literals(["planning", "execution", "work"]), n: S.NonNegativeInt })]);
+/** decision-<k>/question.json: the question the user was asked, with its options, and the phase in which it was asked. */
+export const DecisionQuestionFile = Schema.Struct({ version: V2, decision: S.PositiveInt, phase: PhaseRecord, question: Schema.String, options: S.UserQuestion.fields.options });
+export type DecisionQuestionFile = typeof DecisionQuestionFile.Type;
+/** decision-<k>/analysis.json: the reviewed file of decision k, the validated analysis. */
+export const AnalysisFile = Schema.Struct({ version: V2, analysis: S.DecisionAnalysis });
+/** decision-<k>/chosen.json (decision Q4): the user's answer after the analysis, and the option it chose (null for free text). */
+export const ChoiceFile = Schema.Struct({ version: V2, decision: S.PositiveInt, answer: Schema.String, option: Schema.NullOr(Schema.String) });
+export type ChoiceFile = typeof ChoiceFile.Type;
+
 // ---- readers ------------------------------------------------------------------------------------
 
 const all = <A, E>(results: readonly Result.Result<A, E>[]): Result.Result<readonly A[], E> => {
@@ -107,7 +120,7 @@ const files = Effect.gen(function* () {
 
 /**
  * The checkpoint of a run directory, verified: the records the named transition implies exist and decode
- * (the four logs and baseline.json for `started`, review and round record from `reviewed` on, the response from
+ * (the five logs and baseline.json for `started`, question.json and analysis.json of a decision, review and round record from `reviewed` on, the response from
  * `responded` on, the log for `logged` and `decided`, the execution result for `executed`); null when there is no checkpoint file.
  */
 export const readCheckpoint = (runDir: string): Effect.Effect<Checkpoint | null, RecordsError, Fs> =>
@@ -139,6 +152,10 @@ export const readCheckpoint = (runDir: string): Effect.Effect<Checkpoint | null,
         const subject = subjectOf(checkpoint.subject);
         if (subject === null) return yield* invalid(`an unknown subject directory: ${checkpoint.subject}`);
         const { round, stage } = checkpoint;
+        if (typeof subject === "object" && "decision" in subject) {
+          yield* required({ kind: "decisionQuestion", decision: subject.decision }, DecisionQuestionFile);
+          yield* required({ kind: "analysis", decision: subject.decision }, AnalysisFile);
+        }
         yield* required({ kind: "review", subject, round }, S.Review, lenient);
         const record = yield* required({ kind: "round", subject, round }, RoundFile);
         if (stage === "responded" || stage === "logged") {
@@ -150,3 +167,4 @@ export const readCheckpoint = (runDir: string): Effect.Effect<Checkpoint | null,
     }
     return checkpoint;
   });
+

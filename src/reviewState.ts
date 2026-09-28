@@ -62,6 +62,8 @@ export type ReviewSetup = Readonly<{
   /** The subject directory under plan-review/, recorded in the round records. */
   dirName: string;
   phase: number;
+  /** The number in the subject's generated ids: the decision number of a decision, the phase otherwise (P1-R1-1). */
+  idNumber: number;
   /** The label of the choice to proceed at the round limit; null: no such choice, "p" is a stop (Q13). */
   proceed: string | null;
   hasAmend: boolean;
@@ -142,7 +144,7 @@ export const initialState = (setup: ReviewSetup, config: Pick<Config, "maxRounds
 
 const say = (text: string): ReviewCommand => ({ kind: "Say", text });
 /** The prefix of a subject's issue ids, as its review prompt names them (plan 2.5). */
-const idPrefixOf = (subject: SubjectId): string => (subject === "questions" ? "Q" : subject === "requirements" ? "G" : "plan" in subject ? "P" : "W");
+const idPrefixOf = (subject: SubjectId): string => (subject === "questions" ? "Q" : subject === "requirements" ? "G" : "plan" in subject ? "P" : "work" in subject ? "W" : "D");
 const notify = (event: UiEvent): ReviewCommand => ({ kind: "Notify", event });
 const show = (value: unknown): string => JSON.stringify(value, null, 2);
 const describeObservation = (o: Observation): string => prompts.observedAfter(o.round, o.stage === "decision");
@@ -229,7 +231,7 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
   const { heading, phase } = s.setup;
   const n = s.round;
   const review = s.current.review!;
-  const checked = validateRound(s.current.validatedReview!, response, s.log, phase, n, idPrefixOf(s.setup.subject));
+  const checked = validateRound(s.current.validatedReview!, response, s.log, phase, n, idPrefixOf(s.setup.subject), s.setup.idNumber);
   const withCost: ReviewState = { ...s, costs: [...s.costs, costUsd] };
   if (Result.isFailure(checked)) return halt(withCost, checked.failure);
   const round = checked.success;

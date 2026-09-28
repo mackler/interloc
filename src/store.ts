@@ -9,7 +9,7 @@ import { type Artifact, guardedRecord, LOG_SUBJECTS, pathOf, recordPath, reviewe
 import { FileSystemError, GitError } from "./errors.ts";
 import type { LogEntry, UsageRecord } from "./schema.ts";
 import type { Platform } from "./platform.ts";
-import { Baseline, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
+import { AnalysisFile, Baseline, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
 import { renderDecision, renderFeedback, subjectHeading } from "./render.ts";
 import { type ProjectPath, type RecordPath, Store, type StoreError, type StoreShape } from "./services.ts";
 import { decodeStatusV2, excluded, excludedIndexPaths, type RecordsSnapshot, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
@@ -68,7 +68,21 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
     const checkpoint = (point: CheckpointPoint) => now.pipe(Effect.flatMap((time) => writeJson(at({ kind: "checkpoint" }), { version: VERSION, ...point, time })));
     /** One record of the catalog, as JSON. */
     const saveRecord = (artifact: Artifact, value: unknown) => writeJson(at(artifact), value);
-    const saveLog = (subject: SubjectId, log: readonly LogEntry[]) => saveRecord({ kind: "log", subject }, { version: VERSION, entries: log });
+    /** The entries of a log file; none when it does not exist. */
+    const readLogFile = (subject: SubjectId): Effect.Effect<readonly LogEntry[], StoreError> => {
+      const file = at({ kind: "log", subject });
+      return exists(file).pipe(Effect.flatMap((present) => (present ? readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(readLog(file, text)))) : Effect.succeed([]))));
+    };
+    /** Decision k's entries in decision-log.json are those whose id carries its number (D6 of the decision-support plan). */
+    const ofDecision = (k: number) => (entry: LogEntry): boolean => entry.id.startsWith(`D${k}-`);
+    const decisionOf = (subject: SubjectId): number | null => (typeof subject === "object" && "decision" in subject ? subject.decision : null);
+    /** A decision's save keeps the other decisions' entries as they are on disk, so that nested decisions lose none. */
+    const saveLog = (subject: SubjectId, log: readonly LogEntry[]) =>
+      Effect.gen(function* () {
+        const k = decisionOf(subject);
+        const others = k === null ? [] : (yield* readLogFile(subject)).filter((e) => !ofDecision(k)(e));
+        yield* saveRecord({ kind: "log", subject }, { version: VERSION, entries: [...others, ...log] });
+      });
     const converse = (markdown: string) => append(conversationFile, markdown);
     /** The hash of the bytes of a subject's reviewed artifact; "" when it does not exist. */
     const recordHash = (subject: SubjectId): Effect.Effect<string, FileSystemError> =>
@@ -193,6 +207,8 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           return (yield* io("read", plan, fs.stat(plan))).size > 0n;
         }),
       loadLog: (subject) => {
+        const k = decisionOf(subject);
+        if (k !== null) return readLogFile(subject).pipe(Effect.map((entries) => entries.filter(ofDecision(k))));
         const file = at({ kind: "log", subject });
         return readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(readLog(file, text))));
       },
@@ -275,6 +291,33 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
        * Gitignored files are unobserved; the excluded paths (plan-review/, ignorePaths) are dropped.
        */
       checkpoint,
+      /** The creation of decision-<k>/ is the allocation: the lowest k whose directory does not exist yet, created exclusively. */
+      openDecision: (question) =>
+        Effect.gen(function* () {
+          yield* mkdir(dir);
+          for (let k = 1; ; k++) {
+            const d = path.dirname(at({ kind: "decisionQuestion", decision: k }));
+            const created = yield* fs.makeDirectory(d).pipe(
+              Effect.map(() => true),
+              Effect.catch((e) => (alreadyExists(e) ? Effect.succeed(false) : Effect.fail(new FileSystemError({ operation: "create directory", path: d, message: e.message })))),
+            );
+            if (!created) continue;
+            yield* saveRecord({ kind: "decisionQuestion", decision: k }, { version: VERSION, decision: k, phase: question.phase, question: question.question, options: question.options });
+            return k;
+          }
+        }),
+      saveAnalysisWrite: (decision, output) => saveRecord({ kind: "analysisWrite", decision }, output),
+      saveAnalysis: (decision, analysis) => saveRecord({ kind: "analysis", decision }, { version: VERSION, analysis }),
+      loadAnalysis: (decision) => {
+        const file = at({ kind: "analysis", decision });
+        return readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(decodeText(file, AnalysisFile, text))), Effect.map((f) => f.analysis));
+      },
+      saveChoice: (decision, choice) => saveRecord({ kind: "chosen", decision }, { version: VERSION, decision, answer: choice.answer, option: choice.option }),
+      readContext: () =>
+        Effect.gen(function* () {
+          const read = (file: string) => exists(file).pipe(Effect.flatMap((present) => (present ? readText(file) : Effect.succeed(null))));
+          return { requirements: yield* read(requirements), plan: yield* read(plan) };
+        }),
       projectSnapshot: (): Effect.Effect<Snapshot, StoreError> =>
         Effect.gen(function* () {
           const records = decodeStatusV2(yield* git(["status", "--porcelain=v2", "-z", "--untracked-files=all"])).filter((r) => !excluded(r.path, ignorePaths));

@@ -47,7 +47,7 @@ export const validateReview = (review: Review): Result.Result<ValidatedReview, R
  * current entry is not an accepted correction, becomes null with a note), self-corrections with their generated
  * ids (`<prefix><phase>-S<round>-<k>`, the prefix of the subject: P, W, Q or G; a generated id that already exists in the log is invalid).
  */
-export const validateRound = (review: ValidatedReview, response: PlannerResponse, log: readonly LogEntry[], phase: number, round: number, idPrefix: string): Result.Result<ValidatedRound, RoundInvalid> => {
+export const validateRound = (review: ValidatedReview, response: PlannerResponse, log: readonly LogEntry[], phase: number, round: number, idPrefix: string, idNumber: number = phase): Result.Result<ValidatedRound, RoundInvalid> => {
   const issueIds = new Set<string>(review.issues.map((i) => i.id));
   const dispositionIds = response.dispositions.map((d) => d.id);
   const problems = {
@@ -81,7 +81,7 @@ export const validateRound = (review: ValidatedReview, response: PlannerResponse
 
   const known = new Set(log.map((e) => e.id));
   const selfCorrections: ValidatedSelfCorrection[] = response.self_corrections.map((sc, k) => ({
-    id: (sc.id === "" ? `${idPrefix}${phase}-S${round}-${k + 1}` : sc.id) as IssueId,
+    id: (sc.id === "" ? `${idPrefix}${idNumber}-S${round}-${k + 1}` : sc.id) as IssueId,
     newAction: sc.new_action,
     explanation: sc.explanation,
     generated: sc.id === "",

@@ -98,3 +98,32 @@ test("a missing $ref is a dangling_ref rejection naming the path, and a cyclic d
   assert.ok(Result.isFailure(siblings));
   assert.equal(siblings.failure.reason, "ref_with_siblings");
 });
+
+// Decision support, plan step 1.2: the recursive representation, as prototypes/proto-recursive-schema.ts proved it.
+test("the decision analysis generates an object root, a $defs cycle, and closed objects with complete required lists", () => {
+  for (const schema of [S.DecisionAnalysis, S.DecisionResponse, S.DecisionApplied]) {
+    const json = agentJsonSchema(schema);
+    assert.equal(json.type, "object", "the root is an object, never a bare $ref (the Agent SDK rejects one)");
+    assert.equal(json.$ref, undefined);
+    const defs = json.$defs as Record<string, Json>;
+    assert.ok(defs !== undefined && Object.keys(defs).length > 0, "the recursion is a $defs definition");
+    assert.ok(Object.values(defs).some((d) => JSON.stringify(d).includes("#/$defs/")), "a definition refers to a definition: a cycle");
+    const objects: Json[] = [];
+    const walk = (node: unknown): void => {
+      if (Array.isArray(node)) return node.forEach(walk);
+      if (node === null || typeof node !== "object") return;
+      const n = node as Json;
+      if (n.type === "object") objects.push(n);
+      Object.values(n).forEach(walk);
+    };
+    walk(json);
+    for (const o of objects) {
+      assert.equal(o.additionalProperties, false);
+      assert.deepEqual([...(o.required as string[])].sort(), Object.keys(o.properties as Json).sort());
+    }
+    // Recorded, not worked around: the strict transform inlines every $ref and cannot inline a cycle.
+    const strictResult = strictJsonSchema(json);
+    assert.ok(Result.isFailure(strictResult));
+    assert.equal(strictResult.failure.reason, "cyclic_ref");
+  }
+});

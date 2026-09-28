@@ -1,7 +1,7 @@
 // The three subjects of the review procedure.
 
 import { Effect } from "effect";
-import { recordPath, type SubjectId } from "./artifacts.ts";
+import { phaseOf, recordPath, type SubjectId } from "./artifacts.ts";
 import { interview } from "./conversation.ts";
 import type { RunError } from "./errors.ts";
 import * as prompts from "./prompts.ts";
@@ -23,9 +23,10 @@ export const writeQuestions = (task: string, list: QuestionList): Effect.Effect<
 
 /** The question list. Claude Code returns the amended list, and the program writes it to questions.json. */
 export function questionSubject(task: string): Subject<QuestionListResponse, QuestionList> {
-  const id: SubjectId = "questions";
+  const id = "questions" as const;
   return {
     id,
+    phase: phaseOf(id),
     heading: subjectHeading(id),
     fileLabel: "questions.json",
     reviewPrompt: prompts.questionReviewPrompt,
@@ -41,9 +42,10 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
 
 /** The confirmed interview result. An accepted issue is put to the user in a second interview. */
 export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult> {
-  const id: SubjectId = "requirements";
+  const id = "requirements" as const;
   return {
     id,
+    phase: phaseOf(id),
     heading: subjectHeading(id),
     fileLabel: "requirements.md",
     reviewPrompt: prompts.requirementsReviewPrompt,
@@ -62,9 +64,10 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
 }
 
 export function planSubject(phase: number, withRequirements: boolean): Subject<PlannerResponse, PlanWriteResult> {
-  const id: SubjectId = { plan: phase };
+  const id = { plan: phase };
   return {
     id,
+    phase: phaseOf(id),
     heading: subjectHeading(id),
     fileLabel: "plan.md",
     reviewPrompt: (round) => prompts.planReviewPrompt(phase, round, withRequirements),
@@ -84,9 +87,10 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
  * every round's review.
  */
 export function workSubject(phase: number, withRequirements: boolean): Subject<PlannerResponse, PlanWriteResult> {
-  const id: SubjectId = { work: phase };
+  const id = { work: phase };
   return {
     id,
+    phase: phaseOf(id),
     heading: subjectHeading(id),
     fileLabel: "changes.diff",
     reviewPrompt: (round) => prompts.workReviewPrompt(phase, round, withRequirements),

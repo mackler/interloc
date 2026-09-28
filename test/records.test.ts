@@ -5,7 +5,8 @@ import { test } from "node:test";
 import { Effect, Result } from "effect";
 import { describe, type StateFileInvalid } from "../src/errors.ts";
 import { platformLayer } from "../src/platform.ts";
-import { readCheckpoint, readLog, readQuestions, readUsage } from "../src/records.ts";
+import { AnalysisFile, ChoiceFile, DecisionQuestionFile, readCheckpoint, readLog, readQuestions, readUsage } from "../src/records.ts";
+import { Schema } from "effect";
 import { finished, issue, respond, runTask, tempRepo, testLayer } from "./helpers.ts";
 
 // Decision Q5: tagged version-2 records. Only the current shape is read (the developer removed the old-shape
@@ -97,7 +98,7 @@ test("readCheckpoint requires baseline.json and the four logs for started, and r
     assert.ok(exit._tag === "Failure", "the checkpoint was accepted");
     return String(exit.cause);
   };
-  for (const log of ["issue-log.json", "questions-log.json", "requirements-log.json", "work-review-log.json"]) put(log, { version: 2, entries: [] });
+  for (const log of ["issue-log.json", "questions-log.json", "requirements-log.json", "work-review-log.json", "decision-log.json"]) put(log, { version: 2, entries: [] });
   put("checkpoint.json", { version: 2, subject: "init", phase: 0, round: 0, stage: "started", time: "t" });
   assert.match(await failure(), /baseline\.json/);
   put("baseline.json", { version: 2, tree: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", time: "t" });
@@ -114,4 +115,39 @@ test("readCheckpoint requires baseline.json and the four logs for started, and r
   put("checkpoint.json", { version: 2, subject: "work-review-1", phase: 1, round: 1, stage: "reviewed", time: "t" });
   const exit = await read();
   assert.ok(exit._tag === "Success", `the work-review checkpoint was rejected: ${exit._tag === "Failure" ? String(exit.cause) : ""}`);
+});
+
+// Decision support, plan step 1.4: the records of decision k and its checkpoint.
+const emptyAnalysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
+test("the decision record files decode their version-2 shape", () => {
+  const decode = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown) => Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(value);
+  const question = { version: 2, decision: 1, phase: { kind: "planning", n: 2 }, question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
+  assert.deepEqual(decode(DecisionQuestionFile, question), question);
+  assert.deepEqual(decode(DecisionQuestionFile, { ...question, phase: { kind: "questions" } }).phase, { kind: "questions" });
+  assert.deepEqual(decode(AnalysisFile, { version: 2, analysis: emptyAnalysis }).analysis, emptyAnalysis);
+  const choice = { version: 2, decision: 1, answer: "2", option: "B" };
+  assert.deepEqual(decode(ChoiceFile, choice), choice);
+  assert.equal(decode(ChoiceFile, { ...choice, option: null }).option, null);
+  assert.throws(() => decode(ChoiceFile, { decision: 1, answer: "2", option: "B" }), "a choice without the version marker was accepted");
+});
+
+test("readCheckpoint reads a decision checkpoint and requires its question and analysis", async () => {
+  const dir = fs.mkdtempSync(path.join(tempRepo(), "records-"));
+  const put = (name: string, value: unknown) => {
+    fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
+    fs.writeFileSync(path.join(dir, name), JSON.stringify(value));
+  };
+  const read = () => Effect.runPromiseExit(readCheckpoint(dir).pipe(Effect.provide(platformLayer)));
+  const reviewRecord = { issues: [] };
+  put("decision-2/review-1.json", reviewRecord);
+  put("decision-2/round-1.json", { version: 2, kind: "no_response", subject: "decision-2", phase: 1, round: 1, reconstructed: false, review: reviewRecord });
+  put("checkpoint.json", { version: 2, subject: "decision-2", phase: 1, round: 1, stage: "reviewed", time: "t" });
+  const missing = await read();
+  assert.ok(missing._tag === "Failure" && /decision-2\/question\.json/.test(String(missing.cause)), "a decision checkpoint without question.json was accepted");
+  put("decision-2/question.json", { version: 2, decision: 2, phase: { kind: "planning", n: 1 }, question: "Which?", options: [] });
+  const noAnalysis = await read();
+  assert.ok(noAnalysis._tag === "Failure" && /decision-2\/analysis\.json/.test(String(noAnalysis.cause)), "a decision checkpoint without analysis.json was accepted");
+  put("decision-2/analysis.json", { version: 2, analysis: emptyAnalysis });
+  const exit = await read();
+  assert.ok(exit._tag === "Success", `the decision checkpoint was rejected: ${exit._tag === "Failure" ? String(exit.cause) : ""}`);
 });

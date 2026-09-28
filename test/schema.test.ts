@@ -133,3 +133,43 @@ test("the program's record schemas constrain counts, costs and ids", () => {
   rejects(S.UsageRecord, { ...codex, output_tokens: -1 }, "negative output tokens");
   rejects(S.QuestionsFile, { version: 2, task: "t", questions: [{ ...questionEntry, id: "" }] }, "an empty question id in questions.json");
 });
+
+// Decision support, plan step 1.2: the representation of docs/decision-making.md as structured data.
+const el = (text: string, counterarguments: unknown[] = []) => ({ text, counterarguments });
+const entry = (id: string, title: string, counter: unknown[] = []) => ({
+  id,
+  title,
+  comparative_condition: el("c", counter),
+  starting_cause: el("s"),
+  intermediate_steps: el("i"),
+  threshold: el("t"),
+  effect_on_persons: el("e"),
+  reason_the_effect_matters: el("r"),
+  extent: { per_person: el("p"), persons_affected: el("a"), likelihood: el("l"), timing: el("w") },
+});
+// A counterargument, its defense, and the counterargument to that defense: three levels.
+const nested = [{ id: "a1", text: "But x.", equivalent_to: "", replies: [{ id: "a2", text: "On the other hand y.", equivalent_to: "", replies: [{ id: "a3", text: "Then again z.", equivalent_to: "E2", replies: [] }] }] }];
+const analysis = {
+  decision: "d",
+  columns: [
+    { option: "A", advantages: [entry("E1", "T1", nested)], disadvantages: [] },
+    { option: "B", advantages: [], disadvantages: [entry("E2", "T2")] },
+  ],
+  recommendation: { option: "", reason: "" },
+};
+
+test("the decision analysis decodes three levels of nested arguments; the response and the applied output carry it", () => {
+  assert.deepEqual(decode(S.DecisionAnalysis, analysis), analysis);
+  const response = { dispositions: [], self_corrections: [], reviewer_feedback: "", questions_for_user: [], analysis };
+  assert.deepEqual(decode(S.DecisionResponse, response), response);
+  assert.deepEqual(decode(S.DecisionApplied, { analysis }), { analysis });
+});
+
+test("the decision analysis rejects a missing element, a missing part of the extent and an argument without replies", () => {
+  const { threshold: _t, ...withoutThreshold } = entry("E1", "T1");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ option: "A", advantages: [withoutThreshold], disadvantages: [] }] }, "an entry without a threshold");
+  const e = entry("E1", "T1");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ option: "A", advantages: [{ ...e, extent: { per_person: el("p") } }], disadvantages: [] }] }, "an extent with one part");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ option: "A", advantages: [entry("E1", "T1", [{ id: "a", text: "t", equivalent_to: "" }])], disadvantages: [] }] }, "an argument without replies");
+  rejects(S.DecisionAnalysis, { decision: "d", columns: [] }, "an analysis without a recommendation");
+});

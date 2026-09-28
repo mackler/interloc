@@ -116,3 +116,58 @@ test("recordsSnapshot changes with every guarded record and not with usage.jsonl
   assert.equal(await moved(() => fs.appendFileSync(path.join(dir, "usage.jsonl"), "{}\n")), 0, "usage.jsonl");
   assert.equal(await moved(() => write(dir, "invalid-replies/claude-1.json", "{}")), 0, "invalid-replies/");
 });
+
+// Decision support, plan step 1.5: the records of decision k.
+const logEntry = (id: string, phase = 1) => ({ id, phase, round: 1, source: "self_correction" as const, problem: "p", action: "plan_error" as const, rationale: "r", superseded: false }) as never;
+const analysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
+const question = { phase: { kind: "planning" as const, n: 1 }, question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
+const json = (repo: string, name: string) => JSON.parse(fs.readFileSync(path.join(repo, "plan-review", name), "utf8"));
+
+test("decisions are numbered across the run, each with its question, analysis, raw output and choice", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  assert.deepEqual(json(repo, "decision-log.json"), { version: 2, entries: [] });
+  assert.equal(await run(store.openDecision(question)), 1);
+  // A nested decision, opened while decision 1 runs, is decision 2.
+  assert.equal(await run(store.openDecision({ ...question, question: "Inner?" })), 2);
+  assert.deepEqual(json(repo, "decision-1/question.json"), { version: 2, decision: 1, ...question });
+  assert.equal(json(repo, "decision-2/question.json").question, "Inner?");
+  await run(store.saveAnalysisWrite(1, { raw: true }));
+  assert.deepEqual(json(repo, "decision-1/cc-0.json"), { raw: true });
+  await run(store.saveAnalysis(1, analysis));
+  assert.deepEqual(json(repo, "decision-1/analysis.json"), { version: 2, analysis });
+  assert.deepEqual(await run(store.loadAnalysis(1)), analysis);
+  await run(store.saveChoice(1, { answer: "2", option: "B" }));
+  assert.deepEqual(json(repo, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "2", option: "B" });
+  // The reviewed file's hash is the analysis's.
+  assert.notEqual(await run(store.recordHash({ decision: 1 })), "");
+  assert.equal(await run(store.fileHash({ decision: 1 })), await run(store.recordHash({ decision: 1 })));
+  assert.equal(await run(store.fileHash({ decision: 2 })), "");
+});
+
+test("decision-log.json holds every decision; each decision reads and replaces only its own entries (D6, P1-R1-1)", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  // Decisions 1 and 2, both in phase 1, each with a generated self-correction id.
+  await run(store.saveLog({ decision: 1 }, [logEntry("D1-S1-1")]));
+  await run(store.saveLog({ decision: 2 }, [logEntry("D2-S1-1")]));
+  await run(store.saveLog({ decision: 1 }, [logEntry("D1-S1-1"), logEntry("D1-R2-1")]));
+  assert.deepEqual((await run(store.loadLog({ decision: 1 }))).map((e) => e.id), ["D1-S1-1", "D1-R2-1"]);
+  assert.deepEqual((await run(store.loadLog({ decision: 2 }))).map((e) => e.id), ["D2-S1-1"]);
+  assert.deepEqual((await run(store.loadLog({ decision: 3 }))).map((e) => e.id), []);
+  assert.deepEqual(json(repo, "decision-log.json").entries.map((e: { id: string; phase: number }) => [e.id, e.phase]), [["D2-S1-1", 1], ["D1-S1-1", 1], ["D1-R2-1", 1]]);
+  // Decision 1 is not decision 10.
+  await run(store.saveLog({ decision: 10 }, [logEntry("D10-S1-1")]));
+  assert.deepEqual((await run(store.loadLog({ decision: 1 }))).map((e) => e.id), ["D1-S1-1", "D1-R2-1"]);
+});
+
+test("readContext gives requirements.md and plan.md where they exist", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  assert.deepEqual(await run(store.readContext()), { requirements: null, plan: null });
+  write(repo, "plan-review/plan.md", "1. [ ] step\n");
+  assert.deepEqual(await run(store.readContext()), { requirements: null, plan: "1. [ ] step\n" });
+});

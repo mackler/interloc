@@ -15,6 +15,7 @@ import { tempRepo } from "./helpers.ts";
 test("the type of a subject's handler follows the type of its schema (compile-time)", () => {
   const wrong: Subject<S.PlannerResponse, S.QuestionList> = {
     id: "questions",
+    phase: 0,
     heading: "h",
     fileLabel: "f",
     respond: { prompt: () => "p", schema: S.PlannerResponse, after: null, capability: "records" },
@@ -65,4 +66,9 @@ test("the proceed choices name the clarification and implementation", () => {
   assert.equal(questionSubject("t").proceed, "proceed to the clarification with the question list as it is");
   assert.equal(requirementsSubject().proceed, "proceed to planning with the requirements as they are");
   assert.equal(planSubject(1, false).proceed, "proceed to implementation with the plan as it is");
+});
+
+// Decision support, plan step 1.3: a subject carries the phase its loop records (a decision's is where it took place).
+test("every subject carries its phase", () => {
+  assert.deepEqual([questionSubject("t").phase, requirementsSubject().phase, planSubject(3, false).phase, workSubject(2, false).phase], [0, 0, 3, 2]);
 });

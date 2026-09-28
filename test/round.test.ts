@@ -106,3 +106,12 @@ test("validateRound generates self-correction ids with the given prefix", () => 
     assert.equal(round.selfCorrections[0].id, `${prefix}2-S3-1`);
   }
 });
+
+// Decision support, plan step 1.3 (P1-R1-1): the id number of generated ids is separate from the phase of the entries.
+test("validateRound: a generated self-correction id uses the id number, while the round keeps the phase", () => {
+  const r = validated(review(issue("A")));
+  const response = respond([["A", "accepted"]], { self_corrections: [{ id: "", new_action: "plan_error", explanation: "x" }] });
+  const round = ok(validateRound(r, response, [], 1, 1, "D", 2));
+  assert.deepEqual(round.selfCorrections.map((s) => s.id), ["D2-S1-1"]);
+  assert.equal(round.phase, 1);
+});

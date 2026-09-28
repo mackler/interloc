@@ -7,13 +7,17 @@ import type { ClaudeCallFailed, CodexCallFailed, FileSystemError, GitError, RunE
 import type { SubjectId } from "./artifacts.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
-import type { Config, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, Review } from "./schema.ts";
-import type { UiEvent } from "./uiEvents.ts";
+import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, Review, UserQuestion } from "./schema.ts";
+import type { Phase, UiEvent } from "./uiEvents.ts";
 import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
 import type { RecordsSnapshot, Snapshot } from "./snapshot.ts";
 
 export type StoreError = FileSystemError | StateFileInvalid | GitError;
+/** The question a decision analyzes (decision support): its text and options, and the phase in which it was asked. */
+export type DecisionQuestion = Readonly<{ phase: Phase; question: string; options: UserQuestion["options"] }>;
+/** The user's answer after an analysis, and the option it chose (null for free text; decision Q4). */
+export type Choice = Readonly<{ answer: string; option: string | null }>;
 export type PlannerError = ClaudeCallFailed | UserStopped | StoreError;
 export type ReviewerError = CodexCallFailed | StoreError;
 
@@ -113,6 +117,17 @@ export interface StoreShape {
   projectSnapshot(): Effect.Effect<Snapshot, StoreError>;
   /** The guarded records under plan-review/ (src/artifacts.ts guardedRecord): the second check of a read-only call. */
   recordsSnapshot(): Effect.Effect<RecordsSnapshot, StoreError>;
+  /** Allocates the next decision number k by creating decision-<k>/, and writes decision-<k>/question.json. */
+  openDecision(question: DecisionQuestion): Effect.Effect<number, StoreError>;
+  /** The raw output of decision k's analysis call (`decision-<k>/cc-0.json`). */
+  saveAnalysisWrite(decision: number, output: unknown): Effect.Effect<void, StoreError>;
+  /** The validated analysis of decision k, its reviewed file (`decision-<k>/analysis.json`). */
+  saveAnalysis(decision: number, analysis: DecisionAnalysis): Effect.Effect<void, StoreError>;
+  loadAnalysis(decision: number): Effect.Effect<DecisionAnalysis, StoreError>;
+  /** The user's choice after decision k (`decision-<k>/chosen.json`, decision Q4). */
+  saveChoice(decision: number, choice: Choice): Effect.Effect<void, StoreError>;
+  /** The texts of requirements.md and plan.md, null where one does not exist: the context of a decision (decision Q3). */
+  readContext(): Effect.Effect<Readonly<{ requirements: string | null; plan: string | null }>, StoreError>;
   /** Replaces plan-review/checkpoint.json atomically with the last committed transition (Q6). */
   checkpoint(point: CheckpointPoint): Effect.Effect<void, StoreError>;
 }

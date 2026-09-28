@@ -70,3 +70,19 @@ test("guardedRecord exempts only the program's own writes during a call and the 
   assert.equal(guardedRecord("usage.jsonl.bak"), true);
   assert.equal(guardedRecord("invalid-repliesx/a.json"), true);
 });
+
+// Decision support, plan step 1.3: a decision is a fifth kind of subject, numbered across the run.
+test("the decision subject: directory, log, its own files, reviewed file and the inverse of the directory name", () => {
+  assert.equal(subjectDir({ decision: 2 }), "decision-2");
+  assert.deepEqual(subjectOf("decision-3"), { decision: 3 });
+  assert.equal(subjectOf("decision-0"), null);
+  assert.equal(pathOf({ kind: "log", subject: { decision: 2 } }), "decision-log.json");
+  assert.equal(pathOf({ kind: "review", subject: { decision: 1 }, round: 2 }), "decision-1/review-2.json");
+  assert.equal(pathOf({ kind: "decisionQuestion", decision: 2 }), "decision-2/question.json");
+  assert.equal(pathOf({ kind: "analysis", decision: 2 }), "decision-2/analysis.json");
+  assert.equal(pathOf({ kind: "analysisWrite", decision: 2 }), "decision-2/cc-0.json");
+  assert.equal(pathOf({ kind: "chosen", decision: 2 }), "decision-2/chosen.json");
+  assert.deepEqual(reviewedFile({ decision: 4 }), { kind: "analysis", decision: 4 });
+  assert.ok(LOG_SUBJECTS.some((s) => typeof s === "object" && "decision" in s), "LOG_SUBJECTS lacks the decision log");
+  for (const a of [{ kind: "decisionQuestion", decision: 1 }, { kind: "analysis", decision: 1 }, { kind: "analysisWrite", decision: 1 }, { kind: "chosen", decision: 1 }] as const) assert.equal(guardedRecord(pathOf(a)), true, pathOf(a));
+});

@@ -3,7 +3,7 @@
 // The procedure is applied to three subjects: the question list, the requirements, and the plan.
 
 import { Effect, Ref, Schema } from "effect";
-import { phaseOf, type SubjectId, subjectDir } from "./artifacts.ts";
+import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
 import { decisionPrompt, limitNoProceedPrompt, limitPrompt, repairReplyPrompt, type RespondContext } from "./prompts.ts";
@@ -30,6 +30,8 @@ export type Operation<T> = Readonly<{
 export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = Readonly<{
   /** The subject's identity: its files, phase and directory come from src/artifacts.ts. */
   id: SubjectId;
+  /** The phase its loop records in log entries, round records and checkpoints: a decision's is the phase in which it took place. */
+  phase: number;
   /** Heading in conversation.md and in terminal output, for example "Planning phase 2". */
   heading: string;
   /** Name of the reviewed file as used in messages, for example "plan.md". */
@@ -161,7 +163,7 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
     const config = yield* RunConfig;
     const reviewer = yield* Reviewer;
     const { id, heading, fileLabel } = subject;
-    const phase = phaseOf(id);
+    const phase = subject.phase;
     // One thread per review loop (behaviour 5): the session is held by this loop, not by the adapter.
     const session = yield* reviewer.startPhase;
 
@@ -265,6 +267,6 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
         return yield* Effect.die(new Error("the review loop ended a batch without an event"));
       });
 
-    const setup: ReviewSetup = { subject: id, heading, fileLabel, dirName: subjectDir(id), phase, proceed: subject.proceed, hasAmend: subject.amend !== null, leaveOnAcceptance: subject.leaveOnAcceptance, leaveOnDecision: subject.leaveOnDecision, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
+    const setup: ReviewSetup = { subject: id, heading, fileLabel, dirName: subjectDir(id), phase, idNumber: typeof id === "object" && "decision" in id ? id.decision : phase, proceed: subject.proceed, hasAmend: subject.amend !== null, leaveOnAcceptance: subject.leaveOnAcceptance, leaveOnDecision: subject.leaveOnDecision, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
     return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: yield* store.fileHash(id), log: yield* store.loadLog(id) }));
   });

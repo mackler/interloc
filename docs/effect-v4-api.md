@@ -152,6 +152,8 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Schema.String` / `Number` / `Boolean` / `Unknown` | 2454 / 2477 / 2498 / 2407 | constants |
 | `Schema.Finite` / `Int` | 5555 / 5812 | Use `Finite` for numbers in agent schemas: `Number` generates `anyOf [number, "Infinity"/"-Infinity"/"NaN"]` (observed in a probe). |
 | `Schema.Literal` / `Literals` | 2140 / 3960 | `Literals(["a", "b"])` generates `{type: "string", enum: [...]}` (observed) |
+| `Schema.suspend` (read 28 Sep 2026, decision support step 1.2) | 4061 | `suspend(() => schema)`: a recursive schema; `toJsonSchemaDocument` generates a `$defs` definition that refers to itself (observed; `prototypes/proto-recursive-schema.ts`). The recursive `Argument` of `src/schema.ts` annotates the thunk's result as `Schema.Codec<Argument>` |
+| `Schema.Codec` (read 28 Sep 2026) | 816 | `interface Codec<T, E = T, RD = never, RE = never>`: the type of a recursive schema's declaration (`const Argument: Schema.Codec<Argument> = …`) |
 | `Schema.Array` | 3679 (`ArraySchema as Array`) | `Array(item)` |
 | `Schema.NullOr` / `Union` | — / 3921 | `Union(members, options?)` |
 | `Schema.Int` / `Schema.NonEmptyString` (verified 25 Sep, review stage 1) | 5812 / 6335 | integers (no NaN/Infinity); non-empty strings. Used for the program's own records only |

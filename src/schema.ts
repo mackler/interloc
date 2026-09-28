@@ -60,6 +60,43 @@ export const PlannerResponse = Schema.Struct(plannerResponseFields);
 
 export const PlanWriteResult = Schema.Struct({ questions_for_user: Schema.Array(UserQuestion) });
 
+// ---- decision support: the representation of docs/decision-making.md ------------------------------
+
+/**
+ * An argument against one element of an entry (a counterargument), whose replies are its defenses, whose replies are
+ * further counterarguments, without limit ("Counterarguments"). `equivalent_to` is the id of an entry that the argument
+ * is equivalent to or reverses ("Reversals", "Equivalence symbols"), or "". The program assigns the symbols.
+ */
+export type Argument = { readonly id: string; readonly text: string; readonly equivalent_to: string; readonly replies: readonly Argument[] };
+export const Argument: Schema.Codec<Argument> = Schema.Struct({
+  id: Schema.String,
+  text: Schema.String,
+  equivalent_to: Schema.String,
+  replies: Schema.Array(Schema.suspend((): Schema.Codec<Argument> => Argument)),
+});
+/** One element of an entry: its sentences, and the counterarguments that dispute it, placed right after it. */
+export const Element = Schema.Struct({ text: Schema.String, counterarguments: Schema.Array(Argument) });
+/** An advantage or a disadvantage: its title and the seven elements; the extent has four parts ("Elements of an advantage or disadvantage"). */
+export const Entry = Schema.Struct({
+  id: Schema.String,
+  title: Schema.String,
+  comparative_condition: Element,
+  starting_cause: Element,
+  intermediate_steps: Element,
+  threshold: Element,
+  effect_on_persons: Element,
+  reason_the_effect_matters: Element,
+  extent: Schema.Struct({ per_person: Element, persons_affected: Element, likelihood: Element, timing: Element }),
+});
+/** One column per option: its advantages, then its disadvantages. */
+export const Column = Schema.Struct({ option: Schema.String, advantages: Schema.Array(Entry), disadvantages: Schema.Array(Entry) });
+/** The representation. The root is an object (a bare $ref root is rejected by the Agent SDK); an empty `recommendation.option` is none. */
+export const DecisionAnalysis = Schema.Struct({
+  decision: Schema.String,
+  columns: Schema.Array(Column),
+  recommendation: Schema.Struct({ option: Schema.String, reason: Schema.String }),
+});
+
 /** One entry of the question list that Claude Code and Codex agree on before the interview. */
 export const QuestionEntry = Schema.Struct({
   id: Schema.String,
@@ -76,6 +113,11 @@ export const QuestionListResponse = Schema.Struct({
   ...plannerResponseFields,
   questions: Schema.Array(QuestionEntry),
 });
+
+/** A response to a review of a decision analysis: the dispositions and the complete amended analysis. */
+export const DecisionResponse = Schema.Struct({ ...plannerResponseFields, analysis: DecisionAnalysis });
+/** The output of applying the user's decisions to an analysis. */
+export const DecisionApplied = Schema.Struct({ analysis: DecisionAnalysis });
 
 /**
  * Claude Code's output for one turn of the interview. `asked_ids`: every question asked so far, the agreed ids and the
@@ -195,6 +237,12 @@ export type QuestionEntry = typeof QuestionEntry.Type;
 export type QuestionList = typeof QuestionList.Type;
 export type QuestionListResponse = typeof QuestionListResponse.Type;
 export type InterviewTurn = typeof InterviewTurn.Type;
+export type Element = typeof Element.Type;
+export type Entry = typeof Entry.Type;
+export type Column = typeof Column.Type;
+export type DecisionAnalysis = typeof DecisionAnalysis.Type;
+export type DecisionResponse = typeof DecisionResponse.Type;
+export type DecisionApplied = typeof DecisionApplied.Type;
 export type ExecReport = typeof ExecReport.Type;
 export type ExecOutcome = typeof ExecOutcome.Type;
 export type LogEntry = typeof LogEntry.Type;
