@@ -150,3 +150,14 @@ test("an unclear column is valid with its statement and has no entries; a blank 
   assert.ok(Result.isSuccess(r));
   assert.deepEqual(failure(validateAnalysis(options, { ...unclear(""), columns: [{ kind: "argued", option: "A", advantages: [entry("E1")], disadvantages: [] }, { kind: "unclear", option: "B", unclear: "  \n" }] })).blankUnclear, ["B"]);
 });
+
+// W1-R1-1: an option whose own label begins with an ordinal, given with the agent's ordinal in front of it.
+test("every leading ordinal is dropped: \"1. 1. Retry\" is rewritten to the option \"1. Retry\", with a note", () => {
+  assert.equal(normalizeLabel("1. 1. Retry"), "Retry");
+  const retry = [{ label: "1. Retry" }, { label: "Skip" }];
+  const r = validateAnalysis(retry, withLabels(["1. 1. Retry", "Skip"], "1. 1. Retry"));
+  assert.ok(Result.isSuccess(r), JSON.stringify(Result.isFailure(r) ? r.failure : null));
+  assert.equal(r.success.analysis.columns[0].option, "1. Retry");
+  assert.equal(r.success.analysis.recommendation.option, "1. Retry");
+  assert.deepEqual(r.success.notes, [{ kind: "label", given: "1. 1. Retry", exact: "1. Retry" }, { kind: "label", given: "1. 1. Retry", exact: "1. Retry" }]);
+});

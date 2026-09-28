@@ -14,10 +14,10 @@ import type { Argument, DecisionAnalysis, Element, Entry } from "./schema.ts";
 export type AnalysisNote = Readonly<{ kind: "reference"; argument: string; named: string }> | Readonly<{ kind: "label"; given: string; exact: string }>;
 export type ValidatedAnalysis = Readonly<{ analysis: DecisionAnalysis; notes: readonly AnalysisNote[] }>;
 
-/** A label as the tolerant comparison sees it: one leading `<n>.` or `<n>)` dropped, whitespace collapsed (issue #37). */
+/** A label as the tolerant comparison sees it: every leading `<n>.` or `<n>)` dropped, whitespace collapsed (issue #37, W1-R1-1). */
 export const normalizeLabel = (label: string): string =>
   label
-    .replace(/^\s*\d+[.)]/, "")
+    .replace(/^(\s*\d+[.)])+/, "")
     .split(/\s+/)
     .filter((w) => w !== "")
     .join(" ");

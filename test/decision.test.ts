@@ -377,3 +377,16 @@ test("a numbered label that matches its option after normalization is accepted w
   assert.match(conversation, /\*\*Option label corrected:\*\* the analysis named "1\. SQLite", which the program read as the option "SQLite"/);
   assert.match(conversation, /named "2\) PostgreSQL"/);
 });
+
+// W1-R1-1: a label with the agent's ordinal in front of an option's own ordinal is corrected, not repaired.
+test("an analysis naming \"1. 1. Retry\" for the option \"1. Retry\" converges without a repair turn, with a note", async () => {
+  const retryQuestion: DecisionQuestion = { ...question, options: [{ label: "1. Retry", description: "" }, { label: "Skip", description: "" }] };
+  const given: DecisionAnalysis = { ...analysis(), columns: [{ ...argued(analysis().columns[0]), option: "1. 1. Retry" }, { ...argued(analysis().columns[1]), option: "Skip" }], recommendation: { option: "1. 1. Retry", reason: "r" } };
+  const { layer, probe } = await setUp({ steps: [{ output: given }], reviews: [{ issues: [] }] });
+  const end = await Effect.runPromise(decisionLoop(FORMAT, "the task", retryQuestion).pipe(Effect.provide(layer)));
+  assert.equal(end.result, "converged");
+  assert.equal(probe.planner.prompts.length, 1);
+  const saved = json(probe.dir, "decision-1/analysis.json").analysis;
+  assert.deepEqual([saved.columns[0].option, saved.recommendation.option], ["1. Retry", "1. Retry"]);
+  assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /\*\*Option label corrected:\*\* the analysis named "1\. 1\. Retry", which the program read as the option "1\. Retry"/);
+});

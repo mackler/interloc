@@ -108,16 +108,14 @@ test("property: partial configs merge right-biased per key, and any unknown key 
   );
 });
 
-// Row 5, domain validation (issue #37): the tolerant comparison of an analysis's option labels.
+// Row 5, domain validation (issue #37, W1-R1-1): the tolerant comparison of an analysis's option labels.
 const collapse = (s: string): string => s.split(/\s+/).filter((w) => w !== "").join(" ");
-const ORDINAL = /^\s*\d+[.)]/;
-test("normalizeLabel: one leading ordinal is dropped, whitespace collapsed; a result without an ordinal is a fixed point", () => {
+test("normalizeLabel: leading ordinals are dropped, whitespace collapsed; it is idempotent and ignores an added ordinal", () => {
   fc.assert(
-    fc.property(fc.nat(999), fc.constantFrom(".", ")"), fc.string(), (n, mark, label) => {
-      fc.pre(!ORDINAL.test(label));
-      assert.equal(normalizeLabel(`${n}${mark} ${label}`), collapse(label));
-      assert.equal(normalizeLabel(label), collapse(label));
+    fc.property(fc.nat(999), fc.constantFrom(".", ")"), fc.oneof(fc.string(), fc.tuple(fc.nat(99), fc.string()).map(([k, t]) => `${k}. ${t}`)), (n, mark, label) => {
+      assert.equal(normalizeLabel(`${n}${mark} ${label}`), normalizeLabel(label));
       assert.equal(normalizeLabel(normalizeLabel(label)), normalizeLabel(label));
+      assert.equal(normalizeLabel(label), collapse(normalizeLabel(label)));
     }),
     RUNS,
   );
