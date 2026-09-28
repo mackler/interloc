@@ -11,7 +11,8 @@ const labels = (p: UserPrompt): string[] => p.choices.map((c) => `${c.label}=${c
 
 // Every text of the catalog, with the entry it must map to.
 const catalog: [string, Partial<UserPrompt> & { kind: UserPrompt["kind"] }, string[]][] = [
-  [prompts.decisionPrompt("issue P1-R1-1, raised again"), { kind: "decision", mode: "ask", free: "line" }, ["No decision=", "Quit=q"]],
+  // P1-R1-2: options presented before a pause or a plan writer's question are shown as cards.
+  [prompts.decisionPrompt("issue P1-R1-1, raised again"), { kind: "decision", mode: "ask", free: "line", extra: "questionOptions" }, ["No decision=", "Quit=q"]],
   [prompts.limitPrompt(10, "proceed to execution"), { kind: "limit", mode: "ask", free: "line" }, ["Proceed=p", "Stop=0", "Quit=q"]],
   [prompts.limitNoProceedPrompt(10), { kind: "limitNoProceed", mode: "ask", free: "line" }, ["Stop=0", "Quit=q"]],
   [prompts.execInputPrompt, { kind: "execInput", mode: "ask", free: "line" }, ["Quit=q"]],
@@ -84,4 +85,17 @@ test("every choice of numberedChoices sends the decimal number of its line", () 
       return choices.length === lines.length && choices.every((c, i) => c.sends === String(lines[i][0]) && c.label.startsWith(`${lines[i][0]}. `));
     }),
   );
+});
+
+// Decision support, plan step 3.2: the offer is a property of the prompt text (D1).
+test("a prompt with the offer line has the entry of its text plus Help me Decide before Quit; without the line nothing changes", () => {
+  for (const [text, expected, choices] of catalog) {
+    const offered = promptOf(prompts.withOffer(text));
+    assert.equal(offered.kind, expected.kind);
+    assert.equal(offered.text, prompts.withOffer(text));
+    assert.deepEqual(labels(offered), [...choices.slice(0, -1), `${prompts.HELP_ME_DECIDE}=/decide`, choices[choices.length - 1]]);
+    assert.ok(!labels(promptOf(text)).some((l) => l.startsWith(prompts.HELP_ME_DECIDE)), `${expected.kind} carries the offer without the line`);
+  }
+  assert.equal(prompts.pagePromptText("decision", prompts.withOffer(prompts.decisionPrompt("x"))), "Decision on: x");
+  assert.equal(prompts.pagePromptText("unknown", prompts.withOffer("Something > ")), "Something");
 });

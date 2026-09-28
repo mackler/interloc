@@ -32,6 +32,8 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Effect.acquireRelease` | 12124 | `(acquire: Effect<A, E, R>, release: (a: A, exit: Exit) => Effect<unknown, never, R2>, options?)` → requires `Scope` |
 | `Effect.scoped` | 12017 | `(self) => Effect<A, E, Exclude<R, Scope>>` |
 | `Effect.provide` | 10641 | `(layer \| [layers] \| context)`, data-first and data-last |
+| `Effect.provideService` (read 28 Sep 2026, decision support) | 11537 | `provideService(key, implementation)(self)` or `provideService(self, key, implementation)`: one service. A decision loop provides its fresh `Planner` (D4), and the Decider provides itself to the loop it runs |
+| `Effect.provideContext` (read 28 Sep 2026, decision support) | 10898 | `provideContext(context)(self)`: the context captured with `Effect.context` when the Decider was built, so that `decide` requires nothing and an SDK callback can run it |
 | `Effect.context` | 10549 | `<R>() => Effect<Context.Context<R>, never, R>` (v3 `Effect.context`/`runtime`) |
 | `Effect.contextWith` | 10607 | `(f: (context: Context<R>) => Effect)` |
 | `Effect.forkChild` | 16245 | `(self) => Effect<Fiber<A, E>, never, R>` (v3 `fork`; there is no `Effect.fork` in v4) |

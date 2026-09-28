@@ -10,7 +10,7 @@ import { decisionPrompt, limitNoProceedPrompt, limitPrompt, repairReplyPrompt, t
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
-import { Planner, type PlanningCapability, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
+import { type Decider, Planner, type PlanningCapability, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
 import { compareRecords, compareSnapshots } from "./snapshot.ts";
 
 /** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
@@ -116,7 +116,7 @@ export type PlanningCall<Out> = Readonly<{ output: Out; resultText: string; cost
  * response). Halts if the project changed; a read-only call, its repair turn included, also halts if a guarded record
  * under plan-review/ changed (RecordsChanged; the program's own writes are not guarded, src/artifacts.ts).
  */
-export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records"): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner> =>
+export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records"): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const planner = yield* Planner;

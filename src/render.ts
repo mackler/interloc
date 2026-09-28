@@ -96,3 +96,9 @@ export const renderDecisionOpened = (k: number, question: string, options: reado
 /** A reference of a decision analysis that named no entry and was dropped (D9). */
 export const renderReferenceDropped = (argument: string, named: string): string =>
   `**Reference dropped:** argument ${argument} names ${named}, which is no entry of the analysis; treated as no reference.\n\n`;
+/** The user's answer after decision k (decision Q4), in conversation.md. */
+export const renderChoice = (k: number, answer: string, option: string | null): string =>
+  `**User choice** after decision ${k}: ${answer === "" ? "(none)" : answer}${option === null ? "" : ` (${option})`}\n\n`;
+/** The terminal lines of options presented with a question: one per option, numbered from 1. */
+export const optionLines = (options: readonly Readonly<{ label: string; description: string }>[]): readonly string[] =>
+  options.map((o, i) => `  ${i + 1}. ${o.label}${o.description === "" ? "" : ` - ${o.description}`}`);

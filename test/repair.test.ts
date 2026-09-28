@@ -10,7 +10,7 @@ import { Planner, Reviewer, RunConfig, Sdk, type Services, Store, Ui } from "../
 import { platformLayer } from "../src/platform.ts";
 import { storeLayer } from "../src/store.ts";
 import { FakeSdk, init, messages, success, turn, type Script } from "./fakeSdk.ts";
-import { finished, pathsOf, runFails, runTask, ScriptedPlanner, ScriptedReviewer, ScriptedUi, tempRepo, testLayer } from "./helpers.ts";
+import { finished, pathsOf, runFails, runTask, ScriptedPlanner, ScriptedReviewer, ScriptedUi, tempRepo, testLayer, withDecider } from "./helpers.ts";
 
 // Decision Q5: an invalid structured reply in a planning, interview or review call gets one repair
 // turn in the same session or thread; a second invalid reply stops the run, and both replies are kept.
@@ -88,7 +88,7 @@ const dirOf = (repo: string): string => path.join(repo, "plan-review");
 /** The five services with a real Codex adapter over a fake SDK and a scripted planner. */
 const withCodex = (repo: string, sdk: FakeSdk, planner: ScriptedPlanner): Layer.Layer<Services> => {
   const deps = base(repo, sdk);
-  return Layer.mergeAll(deps, Layer.succeed(Planner, planner), Layer.provide(codexReviewerLayer, deps));
+  return withDecider(Layer.mergeAll(deps, Layer.succeed(Planner, planner), Layer.provide(codexReviewerLayer, deps)));
 };
 
 test("a Codex reply without an issues array gets one repair turn in the same thread and the corrected review is used", async () => {
@@ -122,7 +122,7 @@ const report = { status: "finished", summary: "done", question: "", remaining_wo
 /** The five services with a real Claude Code adapter over a fake SDK and a scripted reviewer. */
 const withClaude = (repo: string, sdk: FakeSdk, reviewer: ScriptedReviewer): Layer.Layer<Services> => {
   const deps = base(repo, sdk);
-  return Layer.mergeAll(deps, Layer.provide(claudePlannerLayer, deps), Layer.succeed(Reviewer, reviewer));
+  return withDecider(Layer.mergeAll(deps, Layer.provide(claudePlannerLayer, deps), Layer.succeed(Reviewer, reviewer)));
 };
 
 test("a Claude Code planning call without structured output gets one repair turn in the same session", async () => {

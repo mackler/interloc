@@ -367,7 +367,8 @@ ${QUESTION_OPTIONS_RULE}`;
  * A prompt to the user in the web page's words: the same question without the terminal's key conventions, which
  * the page's buttons replace (plan step 4.7). `kind` is the prompt's kind in src/userPrompts.ts.
  */
-export function pagePromptText(kind: string, text: string): string {
+export function pagePromptText(kind: string, offeredText: string): string {
+  const text = withoutOffer(offeredText).text;
   const decision = decisionPrompt("\u0000").split("\u0000");
   switch (kind) {
     case "decision":
@@ -649,4 +650,37 @@ Return in 'analysis' the complete analysis of plan-review/${pathOf({ kind: "anal
 /** The terminal line when a decision loop begins. */
 export function decisionBeganLine(k: number): string {
   return `\nDecision ${k}: Claude Code works out the arguments for and against each option ...`;
+}
+/** The offer's label (docs/decision-support-design.md, section 1): one per question, never one per option. */
+export const HELP_ME_DECIDE = "Help me Decide";
+/** The line that carries the offer in a prompt text (D1): the terminal shows it, and the page turns it into a button. */
+export const OFFER_LINE = "/decide = Help me Decide: work out the arguments for and against each option before you choose";
+/** A prompt with the offer: the offer line, then the prompt. */
+export const withOffer = (prompt: string): string => `${OFFER_LINE}\n${prompt}`;
+/** The prompt without the offer line, and whether it carried one. */
+export const withoutOffer = (text: string): Readonly<{ offered: boolean; text: string }> =>
+  text.startsWith(`${OFFER_LINE}\n`) ? { offered: true, text: text.slice(OFFER_LINE.length + 1) } : { offered: false, text };
+/** The options of the cycle limit as a decision analyzes them (decision Q6): the count of more cycles is entered after choosing. */
+export const LIMIT_PROCEED = "Proceed without convergence";
+export const LIMIT_STOP = "Stop the run";
+export const LIMIT_MORE = "Continue with more cycles";
+export function limitOptionDescriptions(proceed: string | null): Readonly<{ proceed: string; stop: string; more: string }> {
+  return {
+    proceed: proceed === null ? "" : `${proceed[0].toUpperCase()}${proceed.slice(1)}.`,
+    stop: "End the run here; its records are kept.",
+    more: "Let Codex and Claude Code continue for more cycles; you enter the number of cycles after choosing this option.",
+  };
+}
+/** The question of the cycle limit for a decision. */
+export function limitQuestion(heading: string, limit: number): string {
+  return `${heading} has completed ${limit} cycles without convergence. How should the run continue?`;
+}
+/** The options of a permission request. */
+export const PERMISSION_ALLOW = "Allow";
+export const PERMISSION_DENY = "Deny";
+export const PERMISSION_ALLOW_DESCRIPTION = "Claude Code performs the action and continues.";
+export const PERMISSION_DENY_DESCRIPTION = "Claude Code is told that the user denied the action and continues without it.";
+/** The question of a permission request for a decision. */
+export function permissionQuestion(tool: string, input: string): string {
+  return `Claude Code requests permission to use ${tool} with the input ${input}. Should it be allowed?`;
 }

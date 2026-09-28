@@ -51,3 +51,17 @@ export const foldLine = (fold: LineFold, line: string): LineFold => {
   if (line.trim() === '"""') return fold.block ? { ...fold, complete: true } : { ...fold, block: true };
   return { ...fold, lines: [...fold.lines, line], complete: !fold.block };
 };
+
+// ---- decision support ---------------------------------------------------------------------------
+
+/** The offer's command (D1 of the decision-support plan): "Help me Decide" sends it, and the terminal user types it. */
+export const DECIDE = "/decide";
+export const isDecide = (text: string): boolean => text.trim() === DECIDE;
+
+/** The text a reply stands for when it chooses one of the options by number ("label: description"); any other reply is itself. */
+export const answerOf = (reply: string, options: readonly Readonly<{ label: string; description: string }>[]): string => {
+  const chosen = chooseOption(reply, options.length);
+  if (chosen === null) return reply;
+  const option = options[chosen];
+  return option.description === "" ? option.label : `${option.label}: ${option.description}`;
+};

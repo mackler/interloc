@@ -10,13 +10,14 @@ import { relayedQuestionSays } from "../src/render.ts";
 import { FileSystemError, type RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as S from "../src/schema.ts";
-import { type PlannerShape, RunConfig, Sdk, Store, type StoreShape, Ui } from "../src/services.ts";
+import { Decider, type DeciderShape, type PlannerShape, RunConfig, Sdk, Store, type StoreShape, Ui } from "../src/services.ts";
 import { platformLayer } from "../src/platform.ts";
 import { makeStore } from "../src/store.ts";
 import { assistantText, assistantTool, failure, FakeSdk, init, messages, success, type Script } from "./fakeSdk.ts";
-import { ScriptedUi, tempRepo } from "./helpers.ts";
+import { noDecider, ScriptedUi, tempRepo } from "./helpers.ts";
 
-const run = Effect.runPromise;
+/** Runs an effect with a Decider that no test here expects to be used, unless a test gives its own. */
+const run = <A, E>(effect: Effect.Effect<A, E, Decider>, decider: DeciderShape = noDecider): Promise<A> => Effect.runPromise(effect.pipe(Effect.provideService(Decider, decider)));
 
 /** A Claude Code planner over a fake SDK, a scripted Ui and a store on a temporary repository. */
 const planner = async (scripts: Script[], answers: string[] = [], config: Partial<typeof S.Config.Type> = {}, storeOverride: Partial<StoreShape> = {}): Promise<{ planner: PlannerShape; sdk: FakeSdk; ui: ScriptedUi; dir: string; project: string }> => {
@@ -321,7 +322,7 @@ test("interrupting a planning call aborts the Agent SDK call", async () => {
   })();
   const fake = await planner([script]);
   const reached = fake.sdk.nextCall();
-  const fiber = Effect.runFork(fake.planner.planning("write the plan", schema));
+  const fiber = Effect.runFork(fake.planner.planning("write the plan", schema).pipe(Effect.provideService(Decider, noDecider)));
   await reached;
   await sleep(10);
   await run(Fiber.interrupt(fiber));
@@ -468,7 +469,7 @@ test("an interrupted call ends with AgentCallEnded ok false", async () => {
   })();
   const fake = await planner([script]);
   const reached = fake.sdk.nextCall();
-  const fiber = Effect.runFork(fake.planner.planning("write the plan", schema, "planning"));
+  const fiber = Effect.runFork(fake.planner.planning("write the plan", schema, "planning").pipe(Effect.provideService(Decider, noDecider)));
   await reached;
   await sleep(10);
   await run(Fiber.interrupt(fiber));

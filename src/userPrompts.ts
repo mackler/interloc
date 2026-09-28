@@ -2,6 +2,7 @@
 // choices with the exact text each sends, whether free text is meaningful, and the quit of its input mode.
 // The web page renders a prompt from this entry; the terminal is unaffected. Pure.
 
+import { DECIDE } from "./input.ts";
 import * as prompts from "./prompts.ts";
 
 export type Choice = Readonly<{ label: string; sends: string }>;
@@ -49,11 +50,22 @@ const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
   [prompts.startOrTalkPrompt, (t: string) => entry("startOrTalk", t, "message", [{ label: "Start planning", sends: "" }], "message")],
 ]);
 
-/** The widget of a prompt text. Total: a text that is not in the catalog is free text plus Quit. */
+/**
+ * The widget of a prompt text. Total: a text that is not in the catalog is free text plus Quit. A text with the offer
+ * line (decision support, D1) is the entry of the rest with "Help me Decide" before Quit.
+ */
 export const promptOf = (text: string): UserPrompt => {
+  const offer = prompts.withoutOffer(text);
+  if (!offer.offered) return promptOfText(text);
+  const entry = promptOfText(offer.text);
+  const quit = entry.choices[entry.choices.length - 1];
+  return { ...entry, text, choices: [...entry.choices.slice(0, -1), { label: prompts.HELP_ME_DECIDE, sends: DECIDE }, quit] };
+};
+
+const promptOfText = (text: string): UserPrompt => {
   const fixed = FIXED.get(text);
   if (fixed !== undefined) return fixed(text);
-  if (text.startsWith(DECISION[0]) && text.endsWith(DECISION[1]) && text.length >= DECISION[0].length + DECISION[1].length) return entry("decision", text, "ask", [{ label: "No decision", sends: "" }], "line");
+  if (text.startsWith(DECISION[0]) && text.endsWith(DECISION[1]) && text.length >= DECISION[0].length + DECISION[1].length) return entry("decision", text, "ask", [{ label: "No decision", sends: "" }], "line", "questionOptions");
   const rest = afterNumber(text);
   if (rest !== null && rest === NO_PROCEED) return entry("limitNoProceed", text, "ask", [{ label: "Stop", sends: "0" }], "line");
   if (rest !== null && rest.startsWith(LIMIT_PREFIX) && rest.endsWith(LIMIT[1]) && rest.length >= LIMIT_PREFIX.length + LIMIT[1].length)

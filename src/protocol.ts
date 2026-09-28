@@ -69,6 +69,8 @@ export const UiEventSchema = Schema.Union([
   tagged("InterviewTurn", { heading: Str, message: Str, summary: Schema.NullOr(Str), answered: Int, total: Int }),
   tagged("InterviewOpened", { heading: Str, stage: Schema.Literals(["clarification", "followUp", "conversation"]), total: Int }),
   tagged("ClaudeSaid", { text: Str }),
+  tagged("OptionsPresented", { question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) }),
+  tagged("DecisionAnalyzed", { decision: Int, question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })), analysis: S.DecisionAnalysis }),
 ]);
 
 const ChoiceSchema = Schema.Struct({ label: Str, sends: Str });

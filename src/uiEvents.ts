@@ -3,7 +3,7 @@
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { cycleHeading, phaseLabel } from "./prompts.ts";
-import type { ExecOutcome, PlannerResponse, QuestionListResponse, Review, UserQuestion } from "./schema.ts";
+import type { DecisionAnalysis, ExecOutcome, PlannerResponse, QuestionListResponse, Review, UserQuestion } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
 export type Phase = Readonly<{ kind: "questions" }> | Readonly<{ kind: "planning" | "execution" | "work"; n: number }>;
@@ -31,7 +31,11 @@ export type UiEvent =
   /** The interview begins; each interface renders its own help (finding 8 of docs/gui-review.md). */
   | Readonly<{ _tag: "InterviewOpened"; heading: string; stage: InterviewStage; total: number }>
   /** Claude Code's prose during an execution call, attributed as data (issue #5); the terminal prefixes it with "[claude] ". */
-  | Readonly<{ _tag: "ClaudeSaid"; text: string }>;
+  | Readonly<{ _tag: "ClaudeSaid"; text: string }>
+  /** The options of the next prompt (a pause, a plan writer's question): the page shows them as cards (decision support). */
+  | Readonly<{ _tag: "OptionsPresented"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
+  /** A decision loop has ended: its analysis, shown before the question is asked again (decision support). */
+  | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>;
 
 const AGENT_LABEL: Record<Agent, string> = { claude: "Claude Code", codex: "Codex" };
 /** The name of a phase as the progress display shows it. */
@@ -71,5 +75,9 @@ export const describeEvent = (event: UiEvent): string => {
       return `${event.heading} opened, ${plural(event.total, "question")}`;
     case "ClaudeSaid":
       return `Claude Code said: ${event.text}`;
+    case "OptionsPresented":
+      return `options: ${event.question} (${plural(event.options.length, "option")})`;
+    case "DecisionAnalyzed":
+      return `decision ${event.decision} analyzed: ${event.question} (${plural(event.analysis.columns.length, "column")})`;
   }
 };

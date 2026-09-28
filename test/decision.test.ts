@@ -3,10 +3,12 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
-import { decisionLoop } from "../src/decision.ts";
+import { askOffering, decisionLoop, limitOptions, numberedOptions, type OfferedQuestion, permissionOptions } from "../src/decision.ts";
+import * as prompts from "../src/prompts.ts";
+import { withOffer } from "../src/prompts.ts";
 import type { RunError } from "../src/errors.ts";
 import type { DecisionAnalysis, Entry } from "../src/schema.ts";
-import { type DecisionQuestion, type Services, Store } from "../src/services.ts";
+import { Decider, type DecisionQuestion, type Services, Store, Ui } from "../src/services.ts";
 import { issue, respond, tempRepo, testLayer, type TestOptions } from "./helpers.ts";
 
 // Decision support, plan step 2.5: the decision loop over the scripted agents.
@@ -128,4 +130,81 @@ test("the initial analysis is validated (P1-R2-1): a missing column halts before
   assert.equal(end.result, "converged");
   assert.equal(json(noted.probe.dir, "decision-1/analysis.json").analysis.columns[0].advantages[0].comparative_condition.counterarguments[0].equivalent_to, "");
   assert.match(fs.readFileSync(path.join(noted.probe.dir, "conversation.md"), "utf8"), /\*\*Reference dropped:\*\* argument A1 names E9, which is no entry of the analysis/);
+});
+
+// Decision support, plan step 3.3 (D3): the Decider runs a loop over the run's services, bound to a phase.
+test("the Decider of a phase runs a decision loop recorded in that phase", async () => {
+  const { layer, probe } = await setUp({ steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  const outcome = await Effect.runPromise(Effect.gen(function* () {
+    const decider = (yield* Decider).at({ kind: "work", n: 2 });
+    return yield* decider.decide({ question: question.question, options: question.options });
+  }).pipe(Effect.provide(layer)));
+  assert.deepEqual([outcome.decision, outcome.result], [1, "converged"]);
+  assert.deepEqual(json(probe.dir, "decision-1/question.json").phase, { kind: "work", n: 2 });
+  assert.equal(json(probe.dir, "checkpoint.json").phase, 2);
+});
+
+// Decision support, plan step 3.4 (D2, P1-R1-3, P1-R1-4): the ask that carries the offer.
+const offered = numberedOptions(question.options);
+const offering = (layer: Layer.Layer<Services>, q: OfferedQuestion, presented: string[] = [], prompt = "Pick > ") =>
+  Effect.runPromise(Effect.gen(function* () {
+    const ui = yield* Ui;
+    return yield* askOffering((p) => ui.ask(p), prompt, q, Effect.sync(() => void presented.push("present")));
+  }).pipe(Effect.provide(layer)));
+const analyzed = (probe: { ui: { notified: { _tag: string }[] } }) => probe.ui.notified.filter((e) => e._tag === "DecisionAnalyzed");
+
+test("/decide runs a decision, shows it, restores the presentation and asks again; the answer is recorded as the chosen option", async () => {
+  const { layer, probe } = await setUp({ answers: ["/decide", "2"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  const presented: string[] = [];
+  assert.equal(await offering(layer, { question: question.question, options: offered }, presented), "2");
+  assert.deepEqual(probe.ui.asked, [withOffer("Pick > "), withOffer("Pick > ")]);
+  assert.deepEqual(presented, ["present"], "the presentation is restored before the reask, once");
+  const shown = analyzed(probe);
+  assert.equal(shown.length, 1);
+  assert.deepEqual(shown[0], { _tag: "DecisionAnalyzed", decision: 1, question: question.question, options: question.options, analysis: analysis() });
+  assert.deepEqual(json(probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "2", option: "PostgreSQL" });
+  assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /\*\*User choice\*\* after decision 1: 2 \(PostgreSQL\)/);
+});
+
+test("free text after an analysis is recorded without an option; q stops and records no choice", async () => {
+  const free = await setUp({ answers: ["/decide", "neither, use files"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  assert.equal(await offering(free.layer, { question: question.question, options: offered }), "neither, use files");
+  assert.deepEqual(json(free.probe.dir, "decision-1/chosen.json").option, null);
+  const quit = await setUp({ answers: ["/decide", "q"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  const exit = await Effect.runPromiseExit(Effect.gen(function* () {
+    const ui = yield* Ui;
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: question.question, options: offered }, Effect.void);
+  }).pipe(Effect.provide(quit.layer)));
+  assert.ok(Exit.isFailure(exit));
+  assert.ok(!fs.existsSync(path.join(quit.probe.dir, "decision-1/chosen.json")));
+});
+
+test("a question with fewer than two options carries no offer and records nothing", async () => {
+  const { layer, probe } = await setUp({ answers: ["/decide"] });
+  assert.equal(await offering(layer, { question: "q", options: offered.slice(0, 1) }), "/decide");
+  assert.deepEqual(probe.ui.asked, ["Pick > "]);
+  assert.equal(probe.planner.prompts.length, 0);
+});
+
+test("a permission request maps y to Allow and anything else to Deny", async () => {
+  const q = { question: "Claude Code requests permission: Bash rm -rf build", options: permissionOptions };
+  const permissionAnalysis = { ...analysis(), columns: [{ ...analysis().columns[0], option: "Allow" }, { ...analysis().columns[1], option: "Deny" }] };
+  const allow = await setUp({ answers: ["/decide", "y"], steps: [{ output: permissionAnalysis }], reviews: [{ issues: [] }] });
+  assert.equal(await offering(allow.layer, q), "y");
+  assert.equal(json(allow.probe.dir, "decision-1/chosen.json").option, "Allow");
+  const deny = await setUp({ answers: ["/decide", "n"], steps: [{ output: permissionAnalysis }], reviews: [{ issues: [] }] });
+  assert.equal(await offering(deny.layer, q), "n");
+  assert.equal(json(deny.probe.dir, "decision-1/chosen.json").option, "Deny");
+});
+
+test("the cycle limit maps a number to more cycles, p to Proceed where offered, and 0 to Stop", async () => {
+  const options = limitOptions("proceed to planning");
+  assert.deepEqual(options.map((o) => o.label), [prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_MORE]);
+  const chosen = (answer: string) => options.find((o) => o.matches(answer))?.label;
+  assert.deepEqual(["2", "p", "0", "x"].map(chosen), [prompts.LIMIT_MORE, prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_STOP]);
+  const noProceed = limitOptions(null);
+  assert.deepEqual(noProceed.map((o) => o.label), [prompts.LIMIT_STOP, prompts.LIMIT_MORE]);
+  assert.equal(noProceed.find((o) => o.matches("p"))?.label, prompts.LIMIT_STOP);
+  // Numbered options match their number or their label.
+  assert.deepEqual(["1", "PostgreSQL", "3", "sqlite"].map((a) => offered.find((o) => o.matches(a))?.label), ["SQLite", "PostgreSQL", undefined, undefined]);
 });

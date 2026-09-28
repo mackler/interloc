@@ -17,9 +17,10 @@ import type { Wiring } from "../src/program.ts";
 import type { SubjectId } from "../src/artifacts.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
-import { Planner, type PlannerShape, type PlanningCapability, type PlanningPurpose, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Store, type StoreShape, Ui, type UiShape } from "../src/services.ts";
+import { type DeciderShape, Planner, type PlannerShape, type PlanningCapability, type PlanningPurpose, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, Store, type StoreShape, Ui, type UiShape } from "../src/services.ts";
 import { type Platform, platformLayer } from "../src/platform.ts";
 import { makeStore, storeLayer } from "../src/store.ts";
+import { type DeciderDeps, deciderLayer } from "../src/decision.ts";
 import { FakeSdk } from "./fakeSdk.ts";
 
 type Config = typeof S.Config.Type;
@@ -274,7 +275,14 @@ export type Probe = {
   config: Config;
 };
 
-/** The layer of the five services with scripted agents and Ui over a temporary repository. */
+/** The developer's format of the representation (docs/decision-making.md), as the program reads it. */
+export const DECISION_FORMAT_TEXT = fs.readFileSync(new URL("../docs/decision-making.md", import.meta.url), "utf8");
+/** A Decider for tests that expect no decision: a call is a defect. */
+export const noDecider: DeciderShape = { at: () => noDecider, decide: () => Effect.die(new Error("no decision was expected")) };
+/** The services with the Decider built over them (decision support, D3), as src/program.ts builds it. */
+export const withDecider = (layer: Layer.Layer<DeciderDeps>, task = "task"): Layer.Layer<Services> => Layer.provideMerge(deciderLayer(task, DECISION_FORMAT_TEXT), layer);
+
+/** The layer of the six services with scripted agents and Ui over a temporary repository. */
 export function testLayer(repo: string, options: TestOptions = {}): { layer: Layer.Layer<Services>; probe: Probe } {
   const paths = pathsOf(repo);
   const config: Config = { ...defaultConfig, questionPhase: false, ...options.config };
@@ -283,7 +291,7 @@ export function testLayer(repo: string, options: TestOptions = {}): { layer: Lay
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
   const wrap = options.store ?? ((s: StoreShape) => s);
   const store = Layer.effect(Store, makeStore(repo, config.ignorePaths).pipe(Effect.map(wrap))).pipe(Layer.provide(options.platform ?? platformLayer));
-  const layer = Layer.mergeAll(store, Layer.succeed(Ui, ui), Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer), Layer.succeed(RunConfig, config));
+  const layer = withDecider(Layer.mergeAll(store, Layer.succeed(Ui, ui), Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer), Layer.succeed(RunConfig, config)));
   const dir = path.join(paths.project, "plan-review");
   const loadLog = (subject: SubjectId = { plan: 1 }): Promise<readonly LogEntry[]> =>
     Effect.runPromise(makeStore(repo, config.ignorePaths).pipe(Effect.flatMap((s) => s.loadLog(subject)), Effect.provide(platformLayer)));

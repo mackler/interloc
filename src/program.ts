@@ -12,6 +12,7 @@ import { Planner, type Reviewer, RunConfig, Sdk, Store, type StoreShape, Ui, typ
 import { loadConfig } from "./config.ts";
 import type { Platform } from "./platform.ts";
 import { makeStore } from "./store.ts";
+import { deciderLayer } from "./decision.ts";
 import { renderUsage, summarizeUsage } from "./usage.ts";
 
 /** What the program is wired to: the terminal, the platform, the SDKs and the agents. */
@@ -94,12 +95,12 @@ export const program = (args: readonly string[], wiring: Wiring): Effect.Effect<
       return yield* halted(describe(new DecisionFormatUnreadable({ file: formatFile, message: error.value.message })), null, yield* store([]));
     }
     const decisionFormat = formatExit.value;
-    void decisionFormat; // Given to decision support in stage 3 (plan step 3.3).
 
     const records = yield* store(config.ignorePaths);
     const base = Layer.mergeAll(Layer.succeed(Store, records), Layer.succeed(Ui, ui), Layer.succeed(RunConfig, config), Layer.succeed(Sdk, wiring.sdk));
     // Built once, so that the planner whose session id is printed is the one the run used.
-    const context = yield* Layer.build(Layer.provideMerge(wiring.agents, base));
+    // Decision support (D3): the Decider runs its loops over the same services as the run.
+    const context = yield* Layer.build(Layer.provideMerge(deciderLayer(task, decisionFormat), Layer.provideMerge(wiring.agents, base)));
     const sessionId = Context.get(context, Planner).sessionId;
 
     const interrupted = Effect.gen(function* () {

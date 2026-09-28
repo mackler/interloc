@@ -3,12 +3,12 @@
 
 import { Context, Effect } from "effect";
 import type { Brand, Schema } from "effect";
-import type { ClaudeCallFailed, CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
+import type { CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
 import type { SubjectId } from "./artifacts.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, Review, UserQuestion } from "./schema.ts";
-import type { Phase, UiEvent } from "./uiEvents.ts";
+import type { LoopResult, Phase, UiEvent } from "./uiEvents.ts";
 import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
 import type { RecordsSnapshot, Snapshot } from "./snapshot.ts";
@@ -18,7 +18,8 @@ export type StoreError = FileSystemError | StateFileInvalid | GitError;
 export type DecisionQuestion = Readonly<{ phase: Phase; question: string; options: UserQuestion["options"] }>;
 /** The user's answer after an analysis, and the option it chose (null for free text; decision Q4). */
 export type Choice = Readonly<{ answer: string; option: string | null }>;
-export type PlannerError = ClaudeCallFailed | UserStopped | StoreError;
+/** A planning or execution call can also end in a decision loop's error: a relayed question or a permission request carries the offer. */
+export type PlannerError = RunError;
 export type ReviewerError = CodexCallFailed | StoreError;
 
 export interface UiShape {
@@ -45,9 +46,9 @@ export interface PlannerShape {
    * A call in which Claude Code may write only under plan-review/ ("records", the default), or call no tool but the
    * structured output ("readOnly"). The output is returned as produced; the caller decodes it.
    */
-  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability?: PlanningCapability): Effect.Effect<PlanningResult, PlannerError>;
+  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability?: PlanningCapability): Effect.Effect<PlanningResult, PlannerError, Decider>;
   /** A call in which Claude Code implements the plan. */
-  executing(prompt: string): Effect.Effect<ExecOutcome, PlannerError>;
+  executing(prompt: string): Effect.Effect<ExecOutcome, PlannerError, Decider>;
   readonly sessionId: Effect.Effect<string | null>;
   /** A planner over a new session, with the same hooks and callbacks (a decision loop, D4 of the decision-support plan). */
   readonly fresh: Effect.Effect<PlannerShape>;
@@ -135,6 +136,21 @@ export interface StoreShape {
 }
 export class Store extends Context.Service<Store, StoreShape>()("plan-review/Store") {}
 
+/** A question a decision analyzes, without its phase: the Decider adds the phase it is bound to. */
+export type DecisionRequest = Readonly<{ question: string; options: UserQuestion["options"] }>;
+/** How a decision loop ended: its number, the analysis as it stands, and the loop's result. */
+export type DecisionOutcome = Readonly<{ decision: number; analysis: DecisionAnalysis; result: LoopResult }>;
+/**
+ * Decision support (D3 of the decision-support plan): runs a decision loop for a question, over the services of the run,
+ * from any place a prompt is asked, SDK callbacks included (its `decide` requires nothing). An instance is bound to the
+ * phase in which the question is asked; `at` gives the instance of another phase.
+ */
+export interface DeciderShape {
+  at(phase: Phase): DeciderShape;
+  decide(request: DecisionRequest): Effect.Effect<DecisionOutcome, RunError>;
+}
+export class Decider extends Context.Service<Decider, DeciderShape>()("plan-review/Decider") {}
+
 /** The configuration of the run (schema Config). */
 export class RunConfig extends Context.Service<RunConfig, Config>()("plan-review/RunConfig") {}
 
@@ -142,4 +158,4 @@ export class RunConfig extends Context.Service<RunConfig, Config>()("plan-review
 export class Sdk extends Context.Service<Sdk, AgentSdk>()("plan-review/Sdk") {}
 
 /** Everything the procedure needs. */
-export type Services = Ui | Planner | Reviewer | Store | RunConfig;
+export type Services = Ui | Planner | Reviewer | Store | RunConfig | Decider;

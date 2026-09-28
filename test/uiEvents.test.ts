@@ -23,6 +23,8 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   InterviewTurn: [{ _tag: "InterviewTurn", heading: "Clarification", message: "Hello", summary: null, answered: 1, total: 3 }, /Clarification \(1 of 3 answered\): Hello/],
   InterviewOpened: [{ _tag: "InterviewOpened", heading: "Clarification", stage: "clarification", total: 3 }, /Clarification opened, 3 questions/],
   ClaudeSaid: [{ _tag: "ClaudeSaid", text: "done" }, /Claude Code said: done/],
+  OptionsPresented: [{ _tag: "OptionsPresented", question: "Which?", options: [{ label: "A", description: "" }, { label: "B", description: "" }] }, /options: Which\? \(2 options\)/],
+  DecisionAnalyzed: [{ _tag: "DecisionAnalyzed", decision: 2, question: "Which?", options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } }, /decision 2 analyzed: Which\? \(0 columns\)/],
 };
 
 for (const [tag, [event, expected]] of Object.entries(examples)) {
