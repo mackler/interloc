@@ -86,3 +86,16 @@ test("the analysis repair prompt names an unclear column without its statement",
   const text = prompts.analysisRepairPrompt({ columns: null, duplicateIds: [], emptyIds: 0, recommendation: null, blankUnclear: ["SQLite"] }, OPTION_SETS[0]);
   assert.match(text, /"SQLite" is marked unclear but does not state what is unclear/);
 });
+
+// W1-R1-3: a repair for an unrelated defect keeps the choice to recommend no option, as ANALYSIS_FIELDS and the
+// validation allow it.
+test("the analysis repair prompt permits recommending no option, and such an analysis validates", () => {
+  for (const options of OPTION_SETS) {
+    const text = prompts.analysisRepairPrompt({ columns: null, duplicateIds: ["E1"], emptyIds: 0, recommendation: null, blankUnclear: [] }, options);
+    assert.match(text, /To recommend no option, leave the recommendation's option and reason empty\./);
+    assert.doesNotMatch(text, /and the option of a recommendation must be/);
+    const r = validateAnalysis(options, analysisWith(labelsInPrompt(text), ""));
+    assert.ok(Result.isSuccess(r));
+    assert.deepEqual(r.success.notes, []);
+  }
+});

@@ -390,3 +390,13 @@ test("an analysis naming \"1. 1. Retry\" for the option \"1. Retry\" converges w
   assert.deepEqual([saved.columns[0].option, saved.recommendation.option], ["1. Retry", "1. Retry"]);
   assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /\*\*Option label corrected:\*\* the analysis named "1\. 1\. Retry", which the program read as the option "1\. Retry"/);
 });
+
+// W1-R1-3: a validation repair for a duplicate id keeps an analysis that recommends no option.
+test("a repair of a duplicate id permits no recommendation, and the repaired analysis keeps none", async () => {
+  const duplicate: DecisionAnalysis = { ...analysis(), columns: [argued(analysis().columns[0]), { ...argued(analysis().columns[1]), disadvantages: [entry("E1")] }] };
+  const { layer, probe } = await setUp({ steps: [{ output: duplicate }, { output: analysis() }], reviews: [{ issues: [] }] });
+  const end = await Effect.runPromise(loop(layer));
+  assert.equal(end.result, "converged");
+  assert.match(probe.planner.prompts[1], /To recommend no option, leave the recommendation's option and reason empty\./);
+  assert.equal(json(probe.dir, "decision-1/analysis.json").analysis.recommendation.option, "");
+});

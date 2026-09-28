@@ -661,7 +661,7 @@ export function analysisRepairPrompt(problems: AnalysisProblems, options: readon
 ${found.join("\n")}
 The options, in this order, each as its number, a colon and its label in quotation marks:
 ${options.map((o, i) => optionLine(i, o)).join("\n")}
-The option of each column, in this order, and the option of a recommendation must be the text inside the quotation marks, verbatim, without the quotation marks and without the number.
+The option of each column, in this order, must be the text inside the quotation marks, verbatim, without the quotation marks and without the number. If you recommend an option, the recommendation's option must be one of those texts, in the same way. To recommend no option, leave the recommendation's option and reason empty.
 Return the complete output again, corrected. Do not modify any file.`;
 }
 
