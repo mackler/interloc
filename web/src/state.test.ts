@@ -743,3 +743,20 @@ test("a blank answer to a relayed question, then the question presented again: t
   expect(s.run?.pending?.asked.prompt).toBe(2);
   expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["A=1", "B=2"]);
 });
+
+// W2-R1-1: a decision's response (with its amended analysis) folds into one Claude message; the rail is unchanged.
+test("a decision's ResponseReceived is one Claude message in the right panel, live and replayed, and adds nothing to the rail", () => {
+  const analysisOf = { decision: "d", columns: [], recommendation: { option: "", reason: "" } };
+  const response = { dispositions: [{ id: "D1-R1-1", action: "accepted" as const, rationale: "amended", duplicate_of: "", reverses: "" }], self_corrections: [], reviewer_feedback: "", questions_for_user: [], analysis: analysisOf };
+  const phase = notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } });
+  const events: RunEvent[] = [started, phase, notified({ _tag: "ResponseReceived", subject: { decision: 1 }, round: 1, response, resultText: "" })];
+  const before = fold(live([started, phase]));
+  for (const s of [fold(live(events)), replayed(events)]) {
+    expect(s.run?.right.map((m) => m.author)).toEqual(["claude"]);
+    expect(s.run?.right[0].body).toMatch(/D1-R1-1/);
+    expect(s.run?.timeline).toEqual(before.run?.timeline);
+  }
+  // The message decodes from the wire as well.
+  const wire: ServerMessage = { type: "event", run: 1, seq: 2, time: at(2), event: events[2] };
+  expect(decodeServer(JSON.stringify(wire))._tag).toBe("Success");
+});

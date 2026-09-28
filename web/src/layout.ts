@@ -33,3 +33,12 @@ export const observe = (layout: Layout, observed: Observed, compact: boolean): L
 
 /** The user selects a panel; its unseen count is cleared. */
 export const select = (layout: Layout, pane: Pane): Layout => ({ ...layout, selected: pane, unseen: { ...layout.unseen, [pane]: 0 } });
+
+/**
+ * A decision's analysis as the page names it (W2-R1-3): decision numbers restart with each run and each start of the
+ * server, so the conversation shown instead of an analysis is kept for this key alone.
+ */
+export type AnalysisKey = Readonly<{ incarnation: string; run: number; decision: number }>;
+/** Whether the analysis of `key` is shown: always, unless the user chose the conversation for exactly that decision. */
+export const analysisShown = (hidden: AnalysisKey | null, key: AnalysisKey): boolean =>
+  hidden === null || hidden.incarnation !== key.incarnation || hidden.run !== key.run || hidden.decision !== key.decision;

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { initialLayout, observe, select } from "./layout.ts";
+import { analysisShown, initialLayout, observe, select } from "./layout.ts";
 
 // Finding 7 of docs/gui-review.md, decision Q3: selectable panels at compact widths.
 type Key = { incarnation: string; run: number; prompt: number };
@@ -49,4 +49,14 @@ describe("the prompt's identity", () => {
     expect(observe(waiting, seen(1, 1, key(1, 1, "b")), true).selected).toBe("left");
     expect(observe(waiting, seen(1, 1, key(1)), true).selected).toBe("right");
   });
+});
+
+// W2-R1-3: the conversation shown instead of an analysis belongs to one decision of one run of one server start.
+test("analysisShown: hidden only for the decision it was hidden for, not for the same number in another run or incarnation", () => {
+  const k = (decision: number, run = 1, incarnation = "a") => ({ incarnation, run, decision });
+  expect(analysisShown(null, k(1))).toBe(true);
+  expect(analysisShown(k(1), k(1))).toBe(false);
+  expect(analysisShown(k(1), k(2))).toBe(true);
+  expect(analysisShown(k(1), k(1, 2))).toBe(true);
+  expect(analysisShown(k(1), k(1, 1, "b"))).toBe(true);
 });

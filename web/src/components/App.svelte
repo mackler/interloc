@@ -10,7 +10,7 @@
   import { Button, ConnectedButtons } from "m3-svelte";
   import { untrack } from "svelte";
   import { CONNECTION_FAILED_NOTICE, notSentNotice, SHOW_ANALYSIS, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
-  import { EXPANDED_MIN_WIDTH, initialLayout, type Layout, observe, type Pane, select } from "../layout.ts";
+  import { type AnalysisKey, analysisShown, EXPANDED_MIN_WIDTH, initialLayout, type Layout, observe, type Pane, select } from "../layout.ts";
   import type { ClientMessage } from "../../../src/protocol.ts";
   import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "../draft.ts";
   import { connect, type Connection } from "../socket.ts";
@@ -83,9 +83,11 @@
   // Decision support: a decision's analysis covers both chat columns until its question is answered; the user may
   // look at the conversation meanwhile and come back [user control and freedom]. The rail, the prompt and the activity
   // line stay in view [visibility of system status]. Below 390 px the analysis is not laid out (decided 28 Sep 2026).
-  let conversationFor = $state<number | null>(null);
+  // The toggle is kept for one decision of one run of one server start (W2-R1-3).
+  let conversationFor = $state<AnalysisKey | null>(null);
   const analysis = $derived(run?.analysis ?? null);
-  const deciding = $derived(analysis !== null && conversationFor !== analysis.event.decision);
+  const analysisKey = $derived(analysis === null || run === null ? null : { incarnation: view.incarnation ?? "", run: run.id, decision: analysis.event.decision });
+  const deciding = $derived(analysisKey !== null && analysisShown(conversationFor, analysisKey));
   const NARROW_WIDTH = 390;
 </script>
 
@@ -144,7 +146,7 @@
       {/if}
       {#if analysis !== null && deciding}
         <div class="decision-area">
-          <DecisionView event={analysis.event} narrow={width < NARROW_WIDTH} onShowConversation={() => (conversationFor = analysis.event.decision)} />
+          <DecisionView event={analysis.event} narrow={width < NARROW_WIDTH} onShowConversation={() => (conversationFor = analysisKey)} />
         </div>
       {:else if analysis !== null}
         <div class="decision-area back">

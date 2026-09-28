@@ -6,7 +6,8 @@
 // an issue, so that Claude Code's response carries the amended list (defect A of docs/page-question-phase-defects.md);
 // "longChoices", an interview turn whose numbered answers are paragraphs (issue #12); "decide", a plan writer's question
 // with two options on which the user takes "Help me Decide" (decision support); "decideLong", the same with a
-// recommendation of several paragraphs (W1-R1-3).
+// recommendation of several paragraphs (W1-R1-3); "decideRevise", an analysis whose first review raises an issue that
+// Claude accepts with an amended analysis (W2-R1-1).
 // PORT is the port.
 
 import { Effect } from "effect";
@@ -153,6 +154,22 @@ export const SCENARIOS: Record<string, TestOptions> = {
       { output: noQuestions },
     ],
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // W2-R1-1: the analysis's review raises an issue; Claude's response carries the amended analysis to the page.
+  decideRevise: {
+    steps: [
+      { output: { questions_for_user: [{ question: "Which database should the service use?", options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
+      { output: DECIDE_ANALYSIS },
+      {
+        output: {
+          ...respond([["D1-R1-1", "accepted"]]),
+          analysis: { ...DECIDE_ANALYSIS, columns: [{ ...DECIDE_ANALYSIS.columns[0], advantages: [entry("E1", "The amended advantage: developers set up the service sooner.")] }, DECIDE_ANALYSIS.columns[1]] },
+        },
+      },
+      { output: noQuestions },
+    ],
+    reviews: [{ issues: [issue("D1-R1-1", "The advantage of SQLite states no extent.")] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   },
   // A long transcript: 60 accepted rounds, then two rounds without an acceptance and the idle pause, which waits.

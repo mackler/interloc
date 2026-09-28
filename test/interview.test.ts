@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import type * as S from "../src/schema.ts";
 import * as prompts from "../src/prompts.ts";
-import { numberedChoices } from "../src/userPrompts.ts";
+import { numberedOptionLabels } from "../src/userPrompts.ts";
 import { finished, runFails, runTask, tempRepo, testLayer } from "./helpers.ts";
 import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 
@@ -113,7 +113,7 @@ test("the interview's opening is an InterviewOpened event, not a terminal-only s
 // Decision support, plan step 3.5: an interview turn's numbered answers carry the offer; the decision is in the
 // requirements phase, and the chosen answer goes on to Claude Code as typed.
 test("an interview turn with numbered answers offers Help me Decide; after the analysis the number is the answer", async () => {
-  const labels = numberedChoices(NUMBERED_MESSAGE).map((c) => c.label);
+  const labels = numberedOptionLabels(NUMBERED_MESSAGE).map((c) => c.label);
   const el = { text: "t", counterarguments: [] };
   const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
   const analysis = { decision: "d", columns: labels.map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
@@ -141,7 +141,7 @@ test("an interview turn with numbered answers offers Help me Decide; after the a
 
 // W1-R1-1: a blank reply after the analysis is not the choice; the answer that follows is.
 test("an interview turn answered /decide, blank, 2 records option 2", async () => {
-  const labels = numberedChoices(NUMBERED_MESSAGE).map((c) => c.label);
+  const labels = numberedOptionLabels(NUMBERED_MESSAGE).map((c) => c.label);
   const el = { text: "t", counterarguments: [] };
   const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
   const analysis = { decision: "d", columns: labels.map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
@@ -160,4 +160,28 @@ test("an interview turn answered /decide, blank, 2 records option 2", async () =
   });
   await runTask(layer);
   assert.deepEqual(JSON.parse(read(probe.dir, "decision-1/chosen.json")), { version: 2, decision: 1, answer: "2", option: labels[1] });
+});
+
+// W2-R1-2: an interview option chosen by its label is recorded as that option; the columns are the bare labels.
+test("an interview turn answered /decide, then a label, records that option; the question's options are the bare labels", async () => {
+  const labels = ["PostgreSQL", "SQLite", "Both, chosen by configuration"];
+  const el = { text: "t", counterarguments: [] };
+  const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
+  const analysis = { decision: "d", columns: labels.map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["/decide", "SQLite", ""],
+    steps: [
+      { output: { questions: [q("Q1")] } },
+      { output: turn(NUMBERED_MESSAGE, false, "") },
+      { output: analysis },
+      { output: turn("Done.", true, "# Requirements\n\nQ1: SQLite") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: { questionPhase: true },
+  });
+  await runTask(layer);
+  assert.deepEqual(JSON.parse(read(probe.dir, "decision-1/question.json")).options.map((o: { label: string }) => o.label), labels);
+  assert.deepEqual(JSON.parse(read(probe.dir, "decision-1/chosen.json")), { version: 2, decision: 1, answer: "SQLite", option: "SQLite" });
 });

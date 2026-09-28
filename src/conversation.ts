@@ -11,7 +11,7 @@ import * as S from "./schema.ts";
 import { clarificationCount, normalizeTurn } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
 import { askOffering, numberedOptions } from "./offer.ts";
-import { numberedChoices } from "./userPrompts.ts";
+import { numberedOptionLabels } from "./userPrompts.ts";
 import type { InterviewStage } from "./uiEvents.ts";
 
 /**
@@ -49,7 +49,8 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
       }
 
       // The turn's numbered answers are its options (decision support); the page keeps them from the InterviewTurn event.
-      const options = numberedChoices(turn.message).map((c) => ({ label: c.label, description: "" }));
+      // Their labels are the answers without the number, so that an answer by label chooses its option (W2-R1-2).
+      const options = numberedOptionLabels(turn.message);
       const question = { question: turn.message, options: numberedOptions(options) };
       // A blank message is asked again inside the offer, so that it is never recorded as the choice (W1-R1-1).
       const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.interviewMessagePrompt, question, Effect.void, (m) => m !== ""));

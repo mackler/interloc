@@ -544,6 +544,20 @@ describe("App and the draft", () => {
     FakeWebSocket.all = [];
   });
 
+  // W2-R1-3: the conversation shown for run 1's decision 1 does not hide run 2's decision 1.
+  test("the conversation toggle of one run's decision leaves the next run's decision of the same number displayed", async () => {
+    const { root, ws } = await openPage();
+    const analyzed = { _tag: "Notified", event: { _tag: "DecisionAnalyzed", decision: 1, question: "Which?", options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } } };
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, analyzed, asked(1)]) }] });
+    expect(root.querySelector('section[aria-label^="Decision 1"]')).not.toBe(null);
+    one(root, "button[name=conversation]").click();
+    flushSync();
+    expect(root.querySelector('section[aria-label^="Decision 1"]')).toBe(null);
+    ws.receive({ type: "hello", cwd: "/p", current: 2, incarnation: "a" });
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, analyzed, asked(1), { _tag: "Ended", code: 130 }]) }, { id: 2, events: stamp([started, analyzed, asked(1)]) }] });
+    expect(root.querySelector('section[aria-label^="Decision 1"]')).not.toBe(null);
+  });
+
   test("the right panel is titled Claude and Codex (issue #5)", async () => {
     const { root, ws } = await openPage();
     ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started]) }] });

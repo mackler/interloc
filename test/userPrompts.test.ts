@@ -3,7 +3,7 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { parseAskLine, parseMessage } from "../src/input.ts";
 import * as prompts from "../src/prompts.ts";
-import { numberedChoices, promptOf, type UserPrompt } from "../src/userPrompts.ts";
+import { numberedChoices, numberedOptionLabels, promptOf, type UserPrompt } from "../src/userPrompts.ts";
 import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 
 const quits = (p: UserPrompt, sends: string): boolean => (p.mode === "ask" ? parseAskLine(sends).kind === "quit" : parseMessage(sends).kind === "quit");
@@ -98,4 +98,15 @@ test("a prompt with the offer line has the entry of its text plus Help me Decide
   }
   assert.equal(prompts.pagePromptText("decision", prompts.withOffer(prompts.decisionPrompt("x"))), "Decision on: x");
   assert.equal(prompts.pagePromptText("unknown", prompts.withOffer("Something > ")), "Something");
+});
+
+// W2-R1-2: an interview option is its label without the number, its description apart.
+test("numberedOptionLabels gives each numbered answer's label without the number, and its description", () => {
+  assert.deepEqual(numberedOptionLabels(NUMBERED_MESSAGE), [
+    { label: "PostgreSQL", description: "the default, already in the container" },
+    { label: "SQLite", description: "no server needed" },
+    { label: "Both, chosen by configuration", description: "" },
+  ]);
+  assert.deepEqual(numberedOptionLabels("Pick:\n1) SQLite — a file\n2: PostgreSQL"), [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "" }]);
+  assert.deepEqual(numberedOptionLabels("No list here."), []);
 });

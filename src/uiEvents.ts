@@ -3,7 +3,7 @@
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { cycleHeading, phaseLabel } from "./prompts.ts";
-import type { DecisionAnalysis, ExecOutcome, PlannerResponse, QuestionListResponse, Review, UserQuestion } from "./schema.ts";
+import type { DecisionAnalysis, DecisionResponse, ExecOutcome, PlannerResponse, QuestionListResponse, Review, UserQuestion } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
 export type Phase = Readonly<{ kind: "questions" }> | Readonly<{ kind: "planning" | "execution" | "work"; n: number }>;
@@ -17,8 +17,8 @@ export type UiEvent =
   | Readonly<{ _tag: "PhaseEnded"; phase: Phase; result: string }>
   | Readonly<{ _tag: "RoundBegan"; subject: SubjectId; round: number; limit: number }>
   | Readonly<{ _tag: "ReviewReceived"; subject: SubjectId; round: number; review: Review; counted: number }>
-  /** The question subject answers with its amended list besides (defect A of docs/page-question-phase-defects.md). */
-  | Readonly<{ _tag: "ResponseReceived"; subject: SubjectId; round: number; response: PlannerResponse | QuestionListResponse; resultText: string }>
+  /** The question subject answers with its amended list besides (defect A of docs/page-question-phase-defects.md), a decision with its amended analysis (W2-R1-1). */
+  | Readonly<{ _tag: "ResponseReceived"; subject: SubjectId; round: number; response: PlannerResponse | QuestionListResponse | DecisionResponse; resultText: string }>
   | Readonly<{ _tag: "LoopFinished"; subject: SubjectId; result: LoopResult }>
   | Readonly<{ _tag: "PlanWritten"; phase: number; questions: readonly UserQuestion[]; resultText: string }>
   | Readonly<{ _tag: "ExecutionEnded"; phase: number; outcome: ExecOutcome }>

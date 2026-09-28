@@ -6,8 +6,9 @@ import { Schema } from "effect";
 import { type ClientMessage, decodeClient, decodeServer, inSnapshot, type RunEvent, type RunRecord, type ServerMessage, type Stamped } from "../src/protocol.ts";
 import type { SubjectId } from "../src/artifacts.ts";
 import type { Subject } from "../src/review.ts";
-import type { PlannerResponse, QuestionListResponse } from "../src/schema.ts";
-import { planSubject, questionSubject, requirementsSubject, workSubject } from "../src/subjects.ts";
+import type { DecisionResponse, PlannerResponse, QuestionListResponse } from "../src/schema.ts";
+import { decisionSubject, planSubject, questionSubject, requirementsSubject, workSubject } from "../src/subjects.ts";
+import { Effect } from "effect";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { promptOf } from "../src/userPrompts.ts";
 import * as prompts from "../src/prompts.ts";
@@ -155,7 +156,7 @@ const questionListResponse: QuestionListResponse = {
   questions_for_user: [],
   questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }], default_answer: "PostgreSQL" }],
 };
-const responseEvent = (subject: SubjectId, response: QuestionListResponse | Omit<QuestionListResponse, "questions">): RunEvent => ({ _tag: "Notified", event: { _tag: "ResponseReceived", subject, round: 1, response, resultText: "" } });
+const responseEvent = (subject: SubjectId, response: QuestionListResponse | Omit<QuestionListResponse, "questions"> | DecisionResponse): RunEvent => ({ _tag: "Notified", event: { _tag: "ResponseReceived", subject, round: 1, response, resultText: "" } });
 
 test("a question review's ResponseReceived survives the round trip, live and in a replay", () => {
   const event: ServerMessage = { type: "event", run: 1, seq: 5, time: T, event: { _tag: "Notified", event: { _tag: "ResponseReceived", subject: "questions", round: 1, response: questionListResponse, resultText: "" } } };
@@ -164,6 +165,9 @@ test("a question review's ResponseReceived survives the round trip, live and in 
   assert.deepEqual(decoded(decodeServer(JSON.stringify(replay))), replay);
 });
 
+const decisionAnalysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
+const decisionResponseSchema = decisionSubject(1, 1, "format", () => Effect.void).respond.schema;
+
 test("every subject's response, as its own schema decodes it, survives the round trip inside a ResponseReceived", () => {
   const { questions: _questions, ...plannerResponse } = questionListResponse;
   const subjects = [
@@ -171,6 +175,8 @@ test("every subject's response, as its own schema decodes it, survives the round
     { subject: "requirements" as const, schema: requirementsSubject().respond.schema, example: plannerResponse },
     { subject: { plan: 1 }, schema: planSubject(1, true).respond.schema, example: plannerResponse },
     { subject: { work: 1 }, schema: workSubject(1, true).respond.schema, example: plannerResponse },
+    // W2-R1-1: a decision's response carries the amended analysis.
+    { subject: { decision: 1 }, schema: decisionResponseSchema, example: { ...plannerResponse, analysis: decisionAnalysis } },
   ];
   for (const { subject, schema, example } of subjects) {
     const response = Schema.decodeUnknownSync(schema)(example);
@@ -185,10 +191,10 @@ test("every subject's response, as its own schema decodes it, survives the round
 // A subject added to src/subjects.ts is covered once it is added to this list.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type RespondOf<T> = T extends Subject<infer R, infer _D> ? R : never;
-type Carried<R> = Same<R, PlannerResponse> extends true ? true : Same<R, QuestionListResponse>;
+type Carried<R> = Same<R, PlannerResponse> extends true ? true : Same<R, QuestionListResponse> extends true ? true : Same<R, DecisionResponse>;
 const holds = <_T extends true>(): void => undefined;
 const fails = <_T extends false>(): void => undefined;
-type Responses = [RespondOf<ReturnType<typeof questionSubject>>, RespondOf<ReturnType<typeof requirementsSubject>>, RespondOf<ReturnType<typeof planSubject>>, RespondOf<ReturnType<typeof workSubject>>];
+type Responses = [RespondOf<ReturnType<typeof questionSubject>>, RespondOf<ReturnType<typeof requirementsSubject>>, RespondOf<ReturnType<typeof planSubject>>, RespondOf<ReturnType<typeof workSubject>>, RespondOf<ReturnType<typeof decisionSubject>>];
 fails<Same<Responses[0], never>>();
 fails<Same<Responses[1], never>>();
 fails<Same<Responses[2], never>>();
@@ -197,6 +203,8 @@ holds<Carried<Responses[0]>>();
 holds<Carried<Responses[1]>>();
 holds<Carried<Responses[2]>>();
 holds<Carried<Responses[3]>>();
+fails<Same<Responses[4], never>>();
+holds<Carried<Responses[4]>>();
 // The check itself refuses a response with a field the event does not carry.
 fails<Carried<PlannerResponse & { extra: string }>>();
 
