@@ -3,7 +3,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
-import { askOffering, decisionLoop, limitOptions, numberedOptions, type OfferedQuestion, permissionOptions } from "../src/decision.ts";
+import { decisionLoop } from "../src/decision.ts";
+import { askOffering, limitOptions, numberedOptions, type OfferedQuestion, permissionOptions } from "../src/offer.ts";
 import * as prompts from "../src/prompts.ts";
 import { withOffer } from "../src/prompts.ts";
 import type { RunError } from "../src/errors.ts";
@@ -207,4 +208,75 @@ test("the cycle limit maps a number to more cycles, p to Proceed where offered, 
   assert.equal(noProceed.find((o) => o.matches("p"))?.label, prompts.LIMIT_STOP);
   // Numbered options match their number or their label.
   assert.deepEqual(["1", "PostgreSQL", "3", "sqlite"].map((a) => offered.find((o) => o.matches(a))?.label), ["SQLite", "PostgreSQL", undefined, undefined]);
+});
+
+// Decision support, plan step 3.5: the offer at a review pause, at the plan writer's question and at the cycle limit,
+// in a whole run over the scripted agents.
+const noQuestions = { questions_for_user: [] };
+const finishedExec = { status: "finished" as const, summary: "done", question: "", remainingWork: "", userInput: null };
+const twoColumns = (a: string, b: string): DecisionAnalysis => ({ ...analysis(), decision: "d", columns: [{ ...analysis().columns[0], option: a }, { ...analysis().columns[1], option: b }] });
+const runTaskWith = async (options: TestOptions) => {
+  const t = testLayer(tempRepo(), options);
+  const { run } = await import("../src/run.ts");
+  return { ...t, finished: await Effect.runPromise(run("task").pipe(Effect.provide(t.layer))) };
+};
+
+test("a disputed pause offers Help me Decide; the analysis runs in the phase, and the chosen position is the decision", async () => {
+  const { probe } = await runTaskWith({
+    answers: ["/decide", "1"],
+    steps: [
+      { output: noQuestions, plan: "v1" },
+      { output: respond([["P1-R1-1", "rejected"]]) },
+      { output: twoColumns(prompts.REVIEWER_POSITION, prompts.PLANNER_POSITION) },
+      { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" },
+    ],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finishedExec],
+  });
+  const asked = probe.ui.asked.filter((a) => a.includes("raised again"));
+  assert.deepEqual(asked.length, 2);
+  assert.ok(asked.every((a) => a.startsWith(prompts.OFFER_LINE)));
+  assert.ok(probe.ui.said.includes(`  1. ${prompts.REVIEWER_POSITION} - p e`), "the options are listed for the terminal");
+  assert.ok(probe.ui.notified.some((e) => e._tag === "OptionsPresented"));
+  assert.deepEqual(json(probe.dir, "decision-1/question.json").phase, { kind: "planning", n: 1 });
+  assert.equal(json(probe.dir, "decision-1/chosen.json").option, prompts.REVIEWER_POSITION);
+  assert.match(fs.readFileSync(path.join(probe.dir, "user-decisions.md"), "utf8"), new RegExp(`Decision: ${prompts.REVIEWER_POSITION.replace(/[()]/g, "\\$&")}: p e`));
+});
+
+test("a decision inside a decision: a pause of decision 1 opens decision 2 in the same phase and returns to decision 1", async () => {
+  const { probe } = await runTaskWith({
+    // The plan writer's question offers the options; decision 1's review disputes an issue twice; its pause is decided
+    // with decision 2; then the plan writer's question is answered.
+    // "" is no decision at decision 1's idle pause (two cycles without an amendment).
+    answers: ["/decide", "/decide", "2", "", "1"],
+    steps: [
+      { output: { questions_for_user: [{ question: "Which database?", options: question.options }] }, plan: "v1" },
+      { output: analysis() },
+      { output: decisionResponse([["D1-R1-1", "rejected"]], analysis()) },
+      { output: twoColumns(prompts.REVIEWER_POSITION, prompts.PLANNER_POSITION) },
+      { output: decisionResponse([["D1-R1-1", "rejected"]], analysis()) },
+      { output: noQuestions },
+    ],
+    reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [issue("D1-R1-1")] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finishedExec],
+  });
+  assert.deepEqual(json(probe.dir, "decision-2/question.json").phase, { kind: "planning", n: 1 });
+  assert.equal(json(probe.dir, "decision-2/chosen.json").option, prompts.PLANNER_POSITION);
+  assert.equal(json(probe.dir, "decision-1/chosen.json").option, "SQLite");
+  assert.match(fs.readFileSync(path.join(probe.dir, "user-decisions.md"), "utf8"), /Subject: question from Claude Code: Which database\?\nDecision: SQLite: a file/);
+});
+
+test("at the cycle limit Help me Decide is offered, and a number afterwards adds cycles", async () => {
+  const threeColumns: DecisionAnalysis = { ...analysis(), columns: [prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_MORE].map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })) };
+  const { probe, finished } = await runTaskWith({
+    config: { maxRounds: 1 },
+    answers: ["/decide", "1"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" }, { output: threeColumns }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finishedExec],
+  });
+  assert.equal(finished, 1);
+  assert.ok(probe.ui.asked[0].startsWith(prompts.OFFER_LINE));
+  assert.deepEqual(json(probe.dir, "decision-1/question.json").options.map((o: { label: string }) => o.label), [prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_MORE]);
+  assert.deepEqual(json(probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "1", option: prompts.LIMIT_MORE });
 });

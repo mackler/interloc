@@ -9,6 +9,7 @@ import { makeClaudePlanner, toSdkAnswers } from "../src/claude.ts";
 import { relayedQuestionSays } from "../src/render.ts";
 import { FileSystemError, type RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
+import * as prompts from "../src/prompts.ts";
 import * as S from "../src/schema.ts";
 import { Decider, type DeciderShape, type PlannerShape, RunConfig, Sdk, Store, type StoreShape, Ui } from "../src/services.ts";
 import { platformLayer } from "../src/platform.ts";
@@ -540,4 +541,55 @@ test("each call carries its own capability: a read-only call and then a records 
   await run(fake.planner.planning("write the plan", schema));
   assert.equal(decision(await runHook(fake.sdk.calls[0].options, "Write", { file_path: path.join(fake.dir, "plan.md") })), "deny");
   assert.equal(decision(await runHook(fake.sdk.calls[1].options, "Write", { file_path: path.join(fake.dir, "plan.md") })), undefined);
+});
+
+// Decision support, plan step 3.5: a relayed question with options and a permission request carry the offer.
+const recordingDecider = (): { decider: DeciderShape; requests: unknown[] } => {
+  const requests: unknown[] = [];
+  const decider: DeciderShape = {
+    at: () => decider,
+    decide: (request) =>
+      Effect.sync(() => {
+        requests.push(request);
+        return { decision: requests.length, analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } }, result: "converged" as const };
+      }),
+  };
+  return { decider, requests };
+};
+
+test("a relayed question with options offers Help me Decide, presents the question again, and relays the answer", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  const relayed: (PermissionResult | null)[] = [];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    relayed.push(await permission(call.options)("AskUserQuestion", { questions }, callContext()));
+    yield success({});
+  })();
+  const fake = await planner([script], ["/decide", "2"]);
+  const { decider, requests } = recordingDecider();
+  await run(fake.planner.planning("write the plan", schema), decider);
+  assert.deepEqual(requests, [{ question: "A or B?", options: questions[0].options }]);
+  assert.ok(fake.ui.asked.every((a) => a.startsWith(prompts.OFFER_LINE)));
+  assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionAsked").length, 2, "the question is presented again after the analysis");
+  assert.ok(fake.ui.notified.some((e) => e._tag === "DecisionAnalyzed"));
+  assert.deepEqual(relayed[0], { behavior: "allow", updatedInput: { questions, answers: { "A or B?": "B" } } });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")).option, "B");
+});
+
+test("an execution permission request offers Help me Decide over Allow and Deny", async () => {
+  const results: string[] = [];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    results.push((await permission(call.options)("Bash", { command: "rm -rf build" }, callContext()))?.behavior ?? "none");
+    yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
+  })();
+  const fake = await planner([script], ["/decide", "y"]);
+  const { decider, requests } = recordingDecider();
+  await run(fake.planner.executing("implement the plan"), decider);
+  assert.deepEqual(results, ["allow"]);
+  const request = requests[0] as { question: string; options: { label: string }[] };
+  assert.match(request.question, /Bash/);
+  assert.match(request.question, /rm -rf build/);
+  assert.deepEqual(request.options.map((o) => o.label), [prompts.PERMISSION_ALLOW, prompts.PERMISSION_DENY]);
+  assert.equal(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")).option, prompts.PERMISSION_ALLOW);
 });

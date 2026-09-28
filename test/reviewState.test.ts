@@ -5,6 +5,7 @@ import { describe } from "../src/errors.ts";
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "../src/reviewState.ts";
 import type { LogEntry } from "../src/schema.ts";
 import { issue, respond } from "./helpers.ts";
+import * as prompts from "../src/prompts.ts";
 
 // Finding 13 (and 14, 15) of docs/functional-design-review.md; decision Q7: the review loop as a pure
 // state machine. The scenario tests of test/run.test.ts remain the behavioural specification; these
@@ -59,7 +60,12 @@ test("a counted review saves the review, reports the count, and asks about each 
   assert.ok(kinds(t).includes("SaveReview"));
   assert.match(says(t), /Issues: 2 total, 2 counted/);
   assert.match(says(t), /raised again/);
-  assert.deepEqual(last(t), { kind: "AskDecision", subject: "issue A, raised again after Claude Code did not accept it in full", id: "A" });
+  assert.deepEqual(last(t), {
+    kind: "AskDecision",
+    subject: "issue A, raised again after Claude Code did not accept it in full",
+    id: "A",
+    options: [{ label: prompts.REVIEWER_POSITION, description: "p e" }, { label: prompts.PLANNER_POSITION, description: "r" }],
+  });
   const kept = advance(t.state, { kind: "DecisionGiven", text: "keep the rejection" });
   assert.equal(kept.commands[0].kind, "RecordDecision");
   assert.deepEqual(last(kept), { kind: "CallPlanner", round: 1 });
@@ -363,4 +369,42 @@ test("a decision subject generates ids with its decision number and records the 
   const planLog = plan.commands.find((c) => c.kind === "SaveLog");
   assert.ok(planLog !== undefined && planLog.kind === "SaveLog");
   assert.deepEqual(planLog.log.map((e) => e.id), ["A", "P1-S1-1"]);
+});
+
+// Decision support, plan step 3.5 (decision Q1): the disputed pauses offer the reviewer's and the planner's positions,
+// a question of Claude Code offers its own options, and the other pauses offer none.
+const optionsOf = (t: Transition) => {
+  const c = last(t);
+  assert.equal(c.kind, "AskDecision");
+  return (c as { options: readonly { label: string; description: string }[] }).options;
+};
+test("each disputed pause offers the two positions; a question offers its options; the other pauses none", () => {
+  const log = [entry("C", "accepted"), entry("O", "rejected"), entry("A", "clarification_requested")];
+  const issues = [{ ...issue("A"), problem: "A is unclear", evidence: "see s" }, { ...issue("B"), problem: "undo C" }, { ...issue("N"), problem: "O again" }];
+  const dispositions = [
+    { id: "A", action: "clarification_requested" as const, rationale: "what do you mean by A?", duplicate_of: "", reverses: "" },
+    { id: "B", action: "rejected" as const, rationale: "C must stay", duplicate_of: "", reverses: "C" },
+    { id: "N", action: "rejected" as const, rationale: "as before", duplicate_of: "O", reverses: "" },
+  ];
+  const question = { question: "Which?", options: [{ label: "X", description: "x" }, { label: "Y", description: "y" }] };
+  const resp = { ...respond([]), dispositions, self_corrections: [{ id: "C", new_action: "rejected" as const, explanation: "C was wrong" }], questions_for_user: [question] };
+  let step = run(afterReview(log.map((e) => (e.id === "O" ? { ...e, rationale: "O is fine" } : e.id === "C" ? { ...e, problem: "C was missing" } : e)), issues), { kind: "ResponseDecoded", response: resp, resultText: "", costUsd: null });
+  const seen: (readonly { label: string; description: string }[])[] = [];
+  while (last(step).kind === "AskDecision") {
+    seen.push(optionsOf(step));
+    step = advance(step.state, { kind: "DecisionGiven", text: "" });
+  }
+  const positions = (reviewer: string, planner: string) => [{ label: prompts.REVIEWER_POSITION, description: reviewer }, { label: prompts.PLANNER_POSITION, description: planner }];
+  assert.deepEqual(seen, [
+    positions("A is unclear see s", "what do you mean by A?"),
+    positions("C was missing", "C was wrong"),
+    positions("undo C e", "C must stay"),
+    positions("O again e", "O is fine"),
+    question.options,
+  ]);
+  // The unexplained change, identical content and the idle pause.
+  const unexplained = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" });
+  assert.deepEqual(optionsOf(unexplained), []);
+  const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  assert.deepEqual(optionsOf(idle), []);
 });

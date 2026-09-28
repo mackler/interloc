@@ -33,7 +33,8 @@ export type ReviewCommand =
   | Readonly<{ kind: "SaveRound"; record: RoundRecord }>
   | Readonly<{ kind: "Checkpoint"; point: CheckpointPoint }>
   | Readonly<{ kind: "AskLimit"; limit: number }>
-  | Readonly<{ kind: "AskDecision"; subject: string; id: IssueId | null }>
+  /** `options`: the options the decision offers (decision Q1 of decision support); none at the other pauses. */
+  | Readonly<{ kind: "AskDecision"; subject: string; id: IssueId | null; options: readonly Option[] }>
   | Readonly<{ kind: "CallReviewer"; round: number }>
   | Readonly<{ kind: "CallPlanner"; round: number }>
   | Readonly<{ kind: "ApplyDecisions" }>
@@ -76,7 +77,18 @@ export type ReviewSetup = Readonly<{
   countMinor: boolean;
 }>;
 
-type Ask = Readonly<{ say: readonly string[]; subject: string; id: IssueId | null }>;
+/** An option of a pause's decision: a label and its description. */
+export type Option = Readonly<{ label: string; description: string }>;
+type Ask = Readonly<{ say: readonly string[]; subject: string; id: IssueId | null; options?: readonly Option[] }>;
+/** The reviewer's position and the planner's position at a disputed pause (decision Q1). */
+const positions = (reviewer: string, planner: string): readonly Option[] => [
+  { label: prompts.REVIEWER_POSITION, description: reviewer },
+  { label: prompts.PLANNER_POSITION, description: planner },
+];
+/** What Codex states in an issue: its problem and its evidence. */
+const reviewerSays = (i: Review["issues"][number] | undefined): string => (i === undefined ? "" : `${i.problem} ${i.evidence}`.trim());
+/** The current entry of an id in the log (the last one that is not superseded). */
+const currentEntry = (history: readonly LogEntry[], id: string): LogEntry | undefined => history.filter((e) => e.id === id && e.superseded !== true).at(-1);
 /** Where the loop is inside a round: what the next event means. */
 export type Step =
   | Readonly<{ name: "idle" }>
@@ -161,7 +173,7 @@ const checkpoint = (s: ReviewState, stage: CheckpointPoint["stage"]): ReviewComm
 const record = (s: ReviewState, d: DecisionEvent): readonly ReviewCommand[] => [{ kind: "RecordDecision", decision: d }, checkpoint(s, "decided")];
 const ask = (s: ReviewState, step: Step, asking: Ask, before: readonly ReviewCommand[] = []): Transition => ({
   state: { ...s, step },
-  commands: [...before, ...asking.say.map(say), { kind: "AskDecision", subject: asking.subject, id: asking.id }],
+  commands: [...before, ...asking.say.map(say), { kind: "AskDecision", subject: asking.subject, id: asking.id, options: asking.options ?? [] }],
 });
 
 /** Round n + 1 begins: the limit prompt if the limit is reached, otherwise the Codex review. */
@@ -223,6 +235,7 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
     say: [`\nCodex has raised again an issue that Claude Code did not accept in full:`, show(s.log.filter((e) => e.id === id)), show(review.issues.find((i) => i.id === id))],
     subject: `issue ${id}, raised again after Claude Code did not accept it in full`,
     id: id as IssueId,
+    options: positions(reviewerSays(review.issues.find((i) => i.id === id)), currentEntry(s.log, id)?.rationale ?? ""),
   }));
   return askEach(state, reraised, (asking, queue) => ({ name: "askingReraised", asking, queue }), toResponse, [...before, checkpoint(state, "reviewed")]);
 };
@@ -268,23 +281,27 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
       say: [`\nClaude Code requests clarification of issue ${id} a second time:`, entries(id), show(response.dispositions.find((d) => d.id === id))],
       subject: `issue ${id}, for which one clarification exchange did not produce a disposition`,
       id: id as IssueId,
+      options: positions(reviewerSays(review.issues.find((i) => i.id === id)), response.dispositions.find((d) => d.id === id)?.rationale ?? ""),
     })),
     ...response.self_corrections.filter((sc) => sc.new_action === "rejected").map((sc): Ask => ({
       say: [`\nClaude Code now considers wrong the correction that it made for issue ${sc.id}: ${sc.explanation}`, entries(sc.id)],
       subject: `the accepted correction for ${sc.id}, which Claude Code now considers wrong`,
       id: sc.id as IssueId,
+      options: positions(currentEntry(history, sc.id)?.problem ?? "", sc.explanation),
     })),
     ...log.reversals(round).map(([idNew, idOld]): Ask => ({
       say: [`\nIssue ${idNew} requests the reversal of the correction made for issue ${idOld}:`, entries(idOld), show(review.issues.find((i) => i.id === idNew)), show(response.dispositions.find((d) => d.id === idNew))],
       subject: `issue ${idNew} against the accepted correction for ${idOld}`,
       id: idNew as IssueId,
+      options: positions(reviewerSays(review.issues.find((i) => i.id === idNew)), response.dispositions.find((d) => d.id === idNew)?.rationale ?? ""),
     })),
     ...log.repeatedUnderNewId(history, round).map(([idNew, idOld]): Ask => ({
       say: [`\nIssue ${idNew} repeats issue ${idOld}, which Claude Code did not accept in full, under a new id:`, entries(idOld), show(review.issues.find((i) => i.id === idNew))],
       subject: `issue ${idNew}, a repetition of issue ${idOld}`,
       id: idNew as IssueId,
+      options: positions(reviewerSays(review.issues.find((i) => i.id === idNew)), currentEntry(history, idOld)?.rationale ?? ""),
     })),
-    ...response.questions_for_user.map((question): Ask => ({ say: [""], subject: `question from Claude Code: ${question.question.replace(/\s+/g, " ")}`, id: null })),
+    ...response.questions_for_user.map((question): Ask => ({ say: [""], subject: `question from Claude Code: ${question.question.replace(/\s+/g, " ")}`, id: null, options: question.options })),
   ];
   return askEach(state, pauses, (asking, queue) => ({ name: "askingPauses", asking, queue }), afterPauses, before);
 };

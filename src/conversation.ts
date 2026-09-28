@@ -11,6 +11,8 @@ import * as S from "./schema.ts";
 import { clarificationCount, normalizeTurn } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
 import { askNonEmpty } from "./ui.ts";
+import { askOffering, numberedOptions } from "./offer.ts";
+import { numberedChoices } from "./userPrompts.ts";
 import type { InterviewStage } from "./uiEvents.ts";
 
 /**
@@ -47,7 +49,10 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
         continue;
       }
 
-      const reply = parseInterviewMessage(yield* askNonEmpty((p) => ui.askMessage(p), prompts.interviewMessagePrompt));
+      // The turn's numbered answers are its options (decision support); the page keeps them from the InterviewTurn event.
+      const options = numberedChoices(turn.message).map((c) => ({ label: c.label, description: "" }));
+      const question = { question: turn.message, options: numberedOptions(options) };
+      const reply = parseInterviewMessage(yield* askNonEmpty((p) => askOffering((m) => ui.askMessage(m), p, question, Effect.void), prompts.interviewMessagePrompt));
       if (reply.kind === "empty") continue;
       yield* store.converse(`**User:** ${reply.kind === "done" ? "/done" : reply.text}\n\n`);
       prompt = reply.kind === "done" ? prompts.interviewDonePrompt : prompts.interviewUserMessage(reply.text);

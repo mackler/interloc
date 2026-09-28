@@ -101,7 +101,7 @@ export const terminalUiLayer = (input: NodeJS.ReadableStream = process.stdin, ou
   Layer.effect(UiService, terminalUi(input, output));
 
 /** Asks again until the answer is not empty. `ask` is a Ui's `ask` or `askMessage`. */
-export const askNonEmpty = <E>(ask: (prompt: string) => Effect.Effect<string, E>, prompt: string): Effect.Effect<string, E> =>
+export const askNonEmpty = <E, R>(ask: (prompt: string) => Effect.Effect<string, E, R>, prompt: string): Effect.Effect<string, E, R> =>
   Effect.gen(function* () {
     for (;;) {
       const text = yield* ask(prompt);

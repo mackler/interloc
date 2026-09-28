@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { withOffer } from "../src/prompts.ts";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -101,7 +102,8 @@ test("the round limit offers to proceed to implementation", async () => {
     config: { maxRounds: 1 },
   });
   assert.equal(await runTask(layer), 1);
-  assert.equal(probe.ui.asked[0], "1 cycles completed without convergence. Number = additional cycles; p = proceed to implementation with the plan as it is; 0 = stop > ");
+  // Decision support (decision Q6): the limit is a choice between options, so it carries the offer.
+  assert.equal(probe.ui.asked[0], withOffer("1 cycles completed without convergence. Number = additional cycles; p = proceed to implementation with the plan as it is; 0 = stop > "));
 });
 
 test("a reversal and a disputed self-correction each produce a prompt and a decided_by_user entry", async () => {

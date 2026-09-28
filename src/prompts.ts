@@ -684,3 +684,6 @@ export const PERMISSION_DENY_DESCRIPTION = "Claude Code is told that the user de
 export function permissionQuestion(tool: string, input: string): string {
   return `Claude Code requests permission to use ${tool} with the input ${input}. Should it be allowed?`;
 }
+/** The two positions at a disputed pause (decision Q1): what Codex asks for, and what Claude Code holds. */
+export const REVIEWER_POSITION = "Follow Codex (the reviewer)";
+export const PLANNER_POSITION = "Follow Claude Code (the planner)";

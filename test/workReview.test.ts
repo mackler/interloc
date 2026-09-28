@@ -4,7 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { Effect } from "effect";
 import { platformLayer } from "../src/platform.ts";
-import { limitNoProceedPrompt, execInputPrompt, planApplyDecisionsPrompt } from "../src/prompts.ts";
+import { limitNoProceedPrompt, execInputPrompt, planApplyDecisionsPrompt, withOffer } from "../src/prompts.ts";
 import { readCheckpoint } from "../src/records.ts";
 import type { ExecOutcome } from "../src/schema.ts";
 import type { StoreShape } from "../src/services.ts";
@@ -197,7 +197,8 @@ test("(e) the round limit of a work review has no p, and p stops the run", async
     execs: [finished],
   });
   await runFails(layer, "RoundLimitStop", /Work review 1/);
-  assert.equal(probe.ui.asked[0], limitNoProceedPrompt(1));
+  // Decision support (decision Q6): Stop or more cycles is a choice, so it carries the offer.
+  assert.equal(probe.ui.asked[0], withOffer(limitNoProceedPrompt(1)));
 });
 
 test("(f) a Codex turn of the work review that changes the project halts with ProjectChanged", async () => {

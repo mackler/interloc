@@ -6,18 +6,22 @@ import { Deferred, Effect, Exit, Layer, Ref, Result } from "effect";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { type CallOutcome, decodeQuestions, decodeToolTarget, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
-import { ClaudeCallFailed, type UserStopped } from "./errors.ts";
+import { ClaudeCallFailed, type RunError } from "./errors.ts";
+import { askOffering, numberedOptions, permissionOptions } from "./offer.ts";
 import { chooseOption } from "./input.ts";
 import { relayedQuestionSays } from "./render.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as prompts from "./prompts.ts";
 import * as S from "./schema.ts";
-import { Planner, type PlannerShape, type PlanningCapability, RunConfig, Sdk, Store, type StoreError, Ui } from "./services.ts";
+import { Decider, type DeciderShape, Planner, type PlannerShape, type PlanningCapability, RunConfig, Sdk, Store, Ui } from "./services.ts";
 
 const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
-/** What a callback of the SDK can fail with: the user stopping, a record that could not be written, or malformed callback data. */
-type CallbackError = UserStopped | StoreError | ClaudeCallFailed;
+/**
+ * What a callback of the SDK can fail with: the user stopping, a record that could not be written, malformed callback
+ * data, or the error of a decision loop that the user started from a relayed question or a permission request.
+ */
+type CallbackError = RunError;
 /** Runs an Effect inside a callback of the SDK; on failure the call is aborted and `fallback` is answered. */
 type InCallback = <A>(effect: Effect.Effect<A, CallbackError>, fallback: A) => Promise<A>;
 
@@ -91,15 +95,23 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     return (await realLocation(path.resolve(store.project, named))).startsWith(allowed);
   };
 
-  /** Asks the user each question; the answers are keyed by the question's index, so equal texts stay apart. */
-  const relayQuestions = (questions: readonly Question[]): Effect.Effect<ReadonlyMap<number, string>, CallbackError> =>
+  /** An ask with the offer of decision support (D2), run inside a callback: the services it needs are provided here. */
+  const offering = (decider: DeciderShape, prompt: string, question: Parameters<typeof askOffering>[2], present: Effect.Effect<void>): Effect.Effect<string, CallbackError> =>
+    askOffering((p) => ui.ask(p), prompt, question, present).pipe(Effect.provideService(Decider, decider), Effect.provideService(Store, store), Effect.provideService(Ui, ui));
+
+  /**
+   * Asks the user each question; the answers are keyed by the question's index, so equal texts stay apart. A question
+   * with options carries the offer; its presentation is repeated after an analysis (P1-R1-3).
+   */
+  const relayQuestions = (questions: readonly Question[], decider: DeciderShape): Effect.Effect<ReadonlyMap<number, string>, CallbackError> =>
     Effect.gen(function* () {
       const answers = new Map<number, string>();
       for (const [index, q] of questions.entries()) {
-        yield* ui.notify({ _tag: "QuestionAsked", question: q.question, options: q.options });
+        const present = ui.notify({ _tag: "QuestionAsked", question: q.question, options: q.options });
+        yield* present;
         for (const line of relayedQuestionSays(q)) yield* ui.say(line);
         let reply = "";
-        while (reply === "") reply = yield* ui.ask(prompts.optionOrTextPrompt);
+        while (reply === "") reply = yield* offering(decider, prompts.optionOrTextPrompt, { question: q.question, options: numberedOptions(q.options) }, present);
         const chosen = chooseOption(reply, q.options.length);
         const answer = chosen === null ? reply : q.options[chosen].label;
         answers.set(index, answer);
@@ -155,13 +167,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     };
 
   const planningPermission =
+    (decider: DeciderShape) =>
     (inCallback: InCallback): CanUseTool =>
     async (toolName, input): Promise<PermissionResult> => {
       if (toolName === "AskUserQuestion") {
         return inCallback(
           Effect.gen(function* () {
             const questions = yield* questionsOf(input);
-            const answers = yield* sdkAnswers(questions, yield* relayQuestions(questions));
+            const answers = yield* sdkAnswers(questions, yield* relayQuestions(questions, decider));
             return { behavior: "allow", updatedInput: { questions, answers } } as PermissionResult;
           }),
           deny("The question could not be relayed to the user."),
@@ -172,14 +185,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     };
 
   const executionPermission =
-    (stop: Ref.Ref<Stop | null>, inCallback: InCallback): CanUseTool =>
+    (stop: Ref.Ref<Stop | null>, decider: DeciderShape, inCallback: InCallback): CanUseTool =>
     async (toolName, input): Promise<PermissionResult> => {
       if (toolName === "AskUserQuestion") {
         await inCallback(
           Effect.gen(function* () {
             const questions = yield* questionsOf(input);
             yield* ui.say(prompts.IMPLEMENTATION_STOPPED_LINE);
-            const answers = yield* relayQuestions(questions);
+            const answers = yield* relayQuestions(questions, decider);
             yield* Ref.set(stop, {
               question: questions.map((q) => q.question).join(" / "),
               input: [...answers].map(([index, a]) => `${questions[index].question} -> ${a}`).join("; "),
@@ -194,7 +207,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       const allowed = await inCallback(
         Effect.gen(function* () {
           yield* ui.say(`\nClaude Code requests permission: ${toolName} ${JSON.stringify(input)}`);
-          const reply = yield* ui.ask(prompts.permissionPrompt);
+          const reply = yield* offering(decider, prompts.permissionPrompt, { question: prompts.permissionQuestion(toolName, JSON.stringify(input)), options: permissionOptions }, Effect.void);
           return reply.toLowerCase() === "y";
         }),
         false,
@@ -295,6 +308,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   const plannerOver = (session: Ref.Ref<string | null>): PlannerShape => ({
     planning: (prompt, schema, purpose = "planning", capability: PlanningCapability = "records") =>
       Effect.gen(function* () {
+        const decider = yield* Decider;
         const outcome = yield* call(
           session,
           prompt,
@@ -305,13 +319,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
             outputFormat: { type: "json_schema", schema: agentJsonSchema(schema) },
             hooks: { PreToolUse: capability === "readOnly" ? [{ hooks: [denyAllButOutput] }] : [{ matcher: EDIT_TOOLS.join("|"), hooks: [restrictEdits] }] },
           },
-          capability === "readOnly" ? () => readOnlyPermission : planningPermission,
+          capability === "readOnly" ? () => readOnlyPermission : planningPermission(decider),
         );
         if (outcome.error !== null) return yield* Effect.fail(new ClaudeCallFailed({ message: outcome.error }));
         return { output: outcome.structured, resultText: outcome.resultText, costUsd: outcome.costUsd };
       }),
     executing: (prompt) =>
       Effect.gen(function* () {
+        const decider = yield* Decider;
         const stop = yield* Ref.make<Stop | null>(null);
         const outcome = yield* call(
           session,
@@ -323,7 +338,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
             outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
             hooks: { PreToolUse: [{ hooks: [denyAfterStop(stop)] }] },
           },
-          (inCallback) => executionPermission(stop, inCallback),
+          (inCallback) => executionPermission(stop, decider, inCallback),
         );
         return interpretExecution(outcome, yield* Ref.get(stop));
       }),

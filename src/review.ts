@@ -6,8 +6,11 @@ import { Effect, Ref, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
-import { decisionPrompt, limitNoProceedPrompt, limitPrompt, repairReplyPrompt, type RespondContext } from "./prompts.ts";
-import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
+import { decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
+import { askOffering, limitOptions, numberedOptions } from "./offer.ts";
+import { answerOf } from "./input.ts";
+import { optionLines } from "./render.ts";
+import { advance, initialState, type Option, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import { type Decider, Planner, type PlanningCapability, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
@@ -53,12 +56,26 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
   prepare: Effect.Effect<void, RunError, Services> | null;
 }>;
 
-/** Reads one decision outside a review loop (a question of the plan writer). An empty answer records nothing and returns "". */
-export const askDecision = (subject: string, phase: number, round: number): Effect.Effect<string, RunError, Ui | Store> =>
+/**
+ * Asks one decision at a pause or on a question of the plan writer: its options, when it has any, are presented (a
+ * notification for the page, numbered lines for the terminal) and the ask carries the offer of decision support; an
+ * answer that is an option's number stands for that option.
+ */
+export const askWithOptions = (subject: string, options: readonly Option[]): Effect.Effect<string, RunError, Ui | Store | Decider> =>
   Effect.gen(function* () {
     const ui = yield* Ui;
+    const present = options.length > 0 ? ui.notify({ _tag: "OptionsPresented", question: subject, options }) : Effect.void;
+    yield* present;
+    for (const line of optionLines(options)) yield* ui.say(line);
+    const answer = yield* askOffering((p) => ui.ask(p), decisionPrompt(subject), { question: subject, options: numberedOptions(options) }, present);
+    return answerOf(answer, options);
+  });
+
+/** Reads one decision outside a review loop (a question of the plan writer). An empty answer records nothing and returns "". */
+export const askDecision = (subject: string, phase: number, round: number, options: readonly Option[] = []): Effect.Effect<string, RunError, Ui | Store | Decider> =>
+  Effect.gen(function* () {
     const store = yield* Store;
-    const decision = yield* ui.ask(decisionPrompt(subject));
+    const decision = yield* askWithOptions(subject, options);
     if (decision !== "") yield* store.appendDecision({ subject, id: null, decision, phase, round });
     return decision;
   });
@@ -228,10 +245,15 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             return yield* Effect.fail(command.error);
           case "Finish":
             return { finished: command.result };
-          case "AskLimit":
-            return { kind: "LimitAnswer", answer: yield* ui.ask(state.setup.proceed === null ? limitNoProceedPrompt(command.limit) : limitPrompt(command.limit, state.setup.proceed)) };
+          case "AskLimit": {
+            // The limit is a choice between options (decision Q6), so it carries the offer; the answer is passed on as typed.
+            const { proceed } = state.setup;
+            const prompt = proceed === null ? limitNoProceedPrompt(command.limit) : limitPrompt(command.limit, proceed);
+            const question = { question: limitQuestion(heading, command.limit), options: limitOptions(proceed) };
+            return { kind: "LimitAnswer", answer: yield* askOffering((p) => ui.ask(p), prompt, question, Effect.void) };
+          }
           case "AskDecision":
-            return { kind: "DecisionGiven", text: yield* ui.ask(decisionPrompt(command.subject)) };
+            return { kind: "DecisionGiven", text: yield* askWithOptions(command.subject, command.options) };
           case "CallReviewer": {
             // Before the turn's guard takes its snapshot, so that it is not counted as a change during the turn.
             if (subject.prepare !== null) yield* subject.prepare;
