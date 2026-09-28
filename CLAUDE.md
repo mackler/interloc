@@ -166,6 +166,13 @@ The visual design follows Material Design (Google's design system, m3.material.i
 layout, typography, colour roles, elevation, motion and states. A component library that implements it
 is a dependency and needs the developer's instruction like any other; without one, the guidelines are
 followed by hand.
+Where the library has no component for what the guidelines specify, a substitute may be used only if
+it asserts nothing the specified component does not. A substitute that claims more — a determinate
+indicator in place of an indeterminate one, a progress figure in place of a busy state, a count in
+place of an estimate — is not a deviation but a different statement, and the guidelines are followed
+by hand instead. A deviation recorded in `docs/ui-review.md` states what the substitute asserts, not
+only that it was substituted. No test can catch this: a rendered element is asserted to be present,
+never to be truthful (issues #42 and #43).
 
 Command-line behaviour follows the Command Line Interface Guidelines (clig.dev): the terminal
 interface of the program (`src/main.ts`, `src/ui.ts`) and the developer's command `bin/ilcli`. It
