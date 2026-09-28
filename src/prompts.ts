@@ -59,11 +59,22 @@ Do not use the AskUserQuestion tool.`;
 
 // ---- question list ------------------------------------------------------------------------------
 
+/** The prefix of an agreed question's id (Q1, Q2, …) and of a follow-up's id (F1, F2, …), issue #35 (Q6). */
+export const AGREED_QUESTION_PREFIX = "Q";
+export const FOLLOW_UP_PREFIX = "F";
+/** A question as the header of its decision names it (issue #35, Q5 and Q6): the text alone, prefixed by its number. */
+export function questionHeading(id: string, text: string): string {
+  const agreed = new RegExp(`^${AGREED_QUESTION_PREFIX}(\\d+)$`).exec(id);
+  if (agreed !== null) return `Question ${agreed[1]}: ${text}`;
+  const followUp = new RegExp(`^${FOLLOW_UP_PREFIX}(\\d+)$`).exec(id);
+  return followUp === null ? text : `Follow-up question ${followUp[1]}: ${text}`;
+}
+
 export function questionListPrompt(task: string): string {
   return `Do not write a plan yet. Read the task below and inspect the codebase without changing anything.
 Return in 'questions' the questions whose answers you need from the user before you can write an implementation plan for the task.
 Include a question only if its answer affects the plan and neither the task text nor the codebase nor the project documentation determines it.
-Each entry has these fields. id: Q1, Q2, and so on. question: one decision per question. reason: why the plan depends on the answer, and why the codebase does not determine it, with the files you inspected. proposed_answers: two to four answers that are feasible in this codebase, each with a label and a description. default_answer: the label of the proposed answer that you would assume if the user expressed no preference.
+Each entry has these fields. id: ${AGREED_QUESTION_PREFIX}1, ${AGREED_QUESTION_PREFIX}2, and so on. question: one decision per question. reason: why the plan depends on the answer, and why the codebase does not determine it, with the files you inspected. proposed_answers: two to four answers that are feasible in this codebase, each with a label and a description. default_answer: the label of the proposed answer that you would assume if the user expressed no preference.
 Return an empty list if no question is needed. Do not modify any file. Do not use the AskUserQuestion tool.
 Task: ${task}`;
 }
@@ -89,7 +100,7 @@ Return in 'questions' the complete question list of plan-review/questions.json, 
 // ---- interview ----------------------------------------------------------------------------------
 
 const INTERVIEW_RULES = `Rules for the interview.
-Each of your turns produces these output fields. message_to_user: the text that the program shows to the user; plain text without Markdown tables. asked_ids: the ids of every question you have asked so far: the agreed questions you have asked, and an id F1, F2, … that you assign to each follow-up question. answered_ids: the ids of the questions, agreed or follow-up, that the user has answered so far. complete: true only when every agreed question has been answered and you need nothing further from the user. summary: an empty string while complete is false.
+Each of your turns produces these output fields. message_to_user: the text that the program shows to the user; plain text without Markdown tables. current_question: the question this message asks the user to answer now: its id and its text alone, without the record of an earlier answer, without the proposed answers and without the default; the id is the agreed question's id, or the id you assign to a follow-up question; both empty strings when the message asks no question. asked_ids: the ids of every question you have asked so far: the agreed questions you have asked, and an id ${FOLLOW_UP_PREFIX}1, ${FOLLOW_UP_PREFIX}2, … that you assign to each follow-up question. answered_ids: the ids of the questions, agreed or follow-up, that the user has answered so far. complete: true only when every agreed question has been answered and you need nothing further from the user. summary: an empty string while complete is false.
 When complete is true, summary contains the complete requirements document in Markdown: the task; every decision with the id of its question; the further information and constraints that the user gave; and open points, each with the default that will be assumed.
 Ask one question per message. For an agreed question, show each proposed answer on its own line in the form \`<n>. <answer>\`, numbered from 1, name the default, and state the reason in one sentence. The user may answer with a number, a label, or free text.
 You may ask any follow-up question that the conversation makes necessary. The user may raise any subject and may ask you questions; answer them, and inspect the codebase without changing it where that is needed.
@@ -584,10 +595,11 @@ const phaseInWords = (phase: DecisionPromptQuestion["phase"]): string => (phase.
 const ANALYSIS_FIELDS = `The output fields.
 decision: the decision to be made, in one sentence.
 columns: exactly one column per option, in the order of the options above. Each option above is listed as its number, a colon and its label in quotation marks; option is the text inside the quotation marks, verbatim, without the quotation marks and without the number.
+kind: "argued" for an option you argue from, with its advantages and disadvantages; kind: "unclear" for an option whose meaning is unclear, as the instructions define it, with no arguments and the field unclear: what is unclear about the option and which readings are possible.
 advantages and disadvantages: the entries of the option's column. Each entry has an id that is unique in the whole representation (E1, E2, and so on), a title (one complete sentence that states the outcome and its effect on persons), and one field per element: comparative_condition, starting_cause, intermediate_steps, threshold, effect_on_persons, reason_the_effect_matters, and extent with its four parts per_person, persons_affected, likelihood and timing. Each element has text, its sentences, and counterarguments, the arguments that dispute that element, in order.
-Each argument has an id that is unique in the whole representation (A1, A2, and so on), text, equivalent_to and replies. The replies of a counterargument are its defenses, and the replies of a defense are the further counterarguments to it, without limit. Begin the text of a counterargument with "But", of a defense with "On the other hand,", and of a counterargument to a defense with "Then again,".
+Each argument has an id that is unique in the whole representation (A1, A2, and so on), text, equivalent_to and replies. The replies of a counterargument are its defenses, and the replies of a defense are the further counterarguments to it, without limit. The first counterargument at an element begins with "But," and each further one at that element with "Also,"; the first defense of a counterargument begins with "On the other hand," and each further one with "Also,"; the first counterargument to a defense begins with "Then again," and each further one with "Also,".
 equivalent_to: when an argument is equivalent to an entry of any column, or is a reversal that is listed in full as an entry, write in text the one sentence that states the argument and its effect on persons and set equivalent_to to that entry's id; otherwise set it to an empty string.
-Do not write the heading "Disadvantages:" or any equivalence symbol (*, †, ‡, §, ‖, ¶) into any text: the program places the heading above each column's disadvantages and assigns the symbols from equivalent_to.
+Do not write the headings "Advantages:" and "Disadvantages:", the labels "Advantage 1:", "Disadvantage 1:" and so on, or any equivalence symbol (*, †, ‡, §, ‖, ¶) into any text: the program places the headings, the labels of the entries and the symbols (the symbols from equivalent_to).
 recommendation: an option and a reason. To recommend no option, set both to empty strings. To recommend one, set option to the text inside the quotation marks of that option's label, verbatim, without the number, and state in reason the comparison that the instructions require under "Recommendation".`;
 
 /**
@@ -628,6 +640,7 @@ export type AnalysisProblems = Readonly<{
   duplicateIds: readonly string[];
   emptyIds: number;
   recommendation: Readonly<{ given: string; matches: readonly string[] }> | null;
+  blankUnclear: readonly string[];
 }>;
 /** The validation repair turn of an analysis (issue #37, decision Q1): what was wrong, and the exact option labels. */
 export function analysisRepairPrompt(problems: AnalysisProblems, options: readonly Readonly<{ label: string; description: string }>[]): string {
@@ -642,6 +655,7 @@ export function analysisRepairPrompt(problems: AnalysisProblems, options: readon
             ? `The recommendation names ${JSON.stringify(problems.recommendation.given)}, which matches more than one option; name exactly one.`
             : `The recommendation names ${JSON.stringify(problems.recommendation.given)}, which is not an option.`,
         ]),
+    ...problems.blankUnclear.map((option) => `The column of ${JSON.stringify(option)} is marked unclear but does not state what is unclear and which readings are possible.`),
   ];
   return `Your structured output matched the schema, but the program cannot accept it:
 ${found.join("\n")}
@@ -659,7 +673,7 @@ export function decisionReviewPrompt(format: string, k: number, round: number): 
   const own = `plan-review/${log} holds the issues of every decision of the run; the issues of this decision are the entries whose ids begin with ${prefix}-, and only those concern this review.`;
   if (round > 1) return `${own}\n${laterRound(analysis, log, prefix, round)}`;
   return `Review the representation of the arguments for and against the options of a decision in plan-review/${analysis} (its field 'analysis'). The question and its options are in plan-review/${pathOf({ kind: "decisionQuestion", decision: k })}. Do not modify any file.
-The representation must follow the instructions below. The program renders it: it places the heading "Disadvantages:" above each column's disadvantages, offsets each counterargument from the element it disputes, and assigns the equivalence symbols from the field equivalent_to, which names the id of the equivalent entry; do not raise an issue about those.
+The representation must follow the instructions below. The program renders it: it places the headings "Advantages:" and "Disadvantages:" and the labels of the entries ("Advantage 1:", "Disadvantage 1:"), offsets each counterargument from the element it disputes, and assigns the equivalence symbols from the field equivalent_to, which names the id of the equivalent entry; do not raise an issue about those. A column of kind "unclear" is how the representation states, in place of an option's arguments, what is unclear about the option and which readings are possible; review whether the option is in fact unclear in that sense and whether the statement says so. Counterarguments, defenses and counterarguments to a defense that stand together begin with "But,", "On the other hand," or "Then again," for the first and "Also," for each further one.
 
 ${DECISION_FORMAT_AUTHORITY}
 
@@ -729,6 +743,17 @@ export const PLANNER_POSITION = "Follow Claude Code (the planner)";
 
 /** The heading above a column's disadvantages (docs/decision-making.md, "Layout and wording"); the renderer places it. */
 export const DISADVANTAGES_HEADING = "Disadvantages:";
+/** The terminal's mark of a text that argues against the column's option, where the page uses the error color (issue #35, Q9). */
+export const OPPOSES_MARKER = "✗ ";
+/** The heading above a column's advantages (issue #35). */
+export const ADVANTAGES_HEADING = "Advantages:";
+/** The label of the n-th entry under each heading (issue #35), numbered from one within each heading of each column. */
+export function advantageLabel(n: number): string {
+  return `Advantage ${n}:`;
+}
+export function disadvantageLabel(n: number): string {
+  return `Disadvantage ${n}:`;
+}
 /** The page's heading of a decision's analysis. */
 export function decisionViewHeading(k: number, question: string): string {
   return `Decision ${k}: ${question}`;

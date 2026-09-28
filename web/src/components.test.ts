@@ -2,6 +2,7 @@ import { type Component, flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import * as prompts from "../../src/prompts.ts";
 import { promptOf } from "../../src/userPrompts.ts";
+import { viewOf } from "../../src/analysisView.ts";
 import DirectoryDialog from "./components/DirectoryDialog.svelte";
 import PromptWidget from "./components/PromptWidget.svelte";
 import StartForm from "./components/StartForm.svelte";
@@ -671,8 +672,8 @@ describe("DecisionView", () => {
     analysis: {
       decision: "Which database?",
       columns: [
-        { option: "SQLite", advantages: [entry("E1", [arg("A1", "", [arg("A2", "E2")])])], disadvantages: [] },
-        { option: "PostgreSQL", advantages: [], disadvantages: [entry("E2")] },
+        { kind: "argued", option: "SQLite", advantages: [entry("E1", [arg("A1", "", [arg("A2", "E2")])])], disadvantages: [] },
+        { kind: "argued", option: "PostgreSQL", advantages: [], disadvantages: [entry("E2")] },
       ],
       recommendation: { option: "SQLite", reason: "It serves every user sooner." },
     },
@@ -687,12 +688,48 @@ describe("DecisionView", () => {
     expect(columns.map((c) => c.querySelector(".disadvantages-heading")?.textContent?.trim())).toEqual(["Disadvantages:", "Disadvantages:"]);
     const args = [...columns[0].querySelectorAll<HTMLElement>(".argument")];
     expect(args.map((a) => [a.textContent?.trim(), a.dataset.level])).toEqual([["But A1.", "1"], ["But A2. *", "2"]]);
-    expect(columns[1].querySelector(".entry .title")?.textContent?.trim()).toBe("Title E2. *");
-    expect(columns[0].querySelector(".entry .title")?.textContent?.trim()).toBe("Title E1.");
+    expect(columns[1].querySelector(".entry .title")?.textContent?.trim()).toBe("Disadvantage 1: Title E2. *");
+    expect(columns[0].querySelector(".entry .title")?.textContent?.trim()).toBe("Advantage 1: Title E1.");
     expect(root.querySelector(".recommendation")?.textContent).toMatch(/SQLite/);
     expect(root.querySelector(".recommendation")?.textContent).toMatch(/It serves every user sooner\./);
     one(root, "button[name=conversation]").click();
     expect(shown).toEqual(["conversation"]);
+  });
+
+  // Issue #35: both headings, and the entries labeled within each heading.
+  test("each column has the headings Advantages: and Disadvantages:, and each entry its label", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const root = show(DecisionView, { event, narrow: false, onShowConversation: () => undefined });
+    const columns = [...root.querySelectorAll<HTMLElement>(".column")];
+    expect(columns.map((c) => c.querySelector(".advantages-heading")?.textContent?.trim())).toEqual([prompts.ADVANTAGES_HEADING, prompts.ADVANTAGES_HEADING]);
+    expect(columns.map((c) => [...c.querySelectorAll(".entry .label")].map((l) => l.textContent?.trim()))).toEqual([[prompts.advantageLabel(1)], [prompts.disadvantageLabel(1)]]);
+  });
+
+  // Issue #35, decision Q7: exactly the texts the view says oppose the option are marked, and only those are colored.
+  test("the texts marked as opposing the option are exactly those the view model says oppose it", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const root = show(DecisionView, { event, narrow: false, onShowConversation: () => undefined });
+    const view = viewOf((event as { analysis: Parameters<typeof viewOf>[0] }).analysis);
+    const expected = view.columns.flatMap((c) =>
+      c.kind === "unclear" ? [] : [...c.advantages, ...c.disadvantages].flatMap((e) => [e.opposes, ...e.elements.flatMap((el) => [el.opposes, ...el.arguments.map((a) => a.opposes)])]),
+    );
+    const marked = [...root.querySelectorAll<HTMLElement>(".title, .element-text, .argument")].map((n) => n.dataset.opposes === "true");
+    expect(marked).toEqual(expected);
+    expect(marked.filter(Boolean).length).toBeGreaterThan(0);
+    for (const n of root.querySelectorAll<HTMLElement>("[data-opposes=true]")) expect(n.classList.contains("opposes")).toBe(true);
+    for (const n of root.querySelectorAll<HTMLElement>("[data-opposes=false]")) expect(n.classList.contains("opposes")).toBe(false);
+    for (const n of root.querySelectorAll<HTMLElement>("h3, .advantages-heading, .disadvantages-heading")) expect(n.classList.contains("opposes")).toBe(false);
+  });
+
+  // Issue #35, decision Q8: an unclear option's column states what is unclear, in place of its headings.
+  test("an unclear column shows its statement and no headings", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const unclear = { ...(event as object), analysis: { decision: "d", columns: [{ kind: "argued", option: "SQLite", advantages: [entry("E1")], disadvantages: [] }, { kind: "unclear", option: "PostgreSQL", unclear: "It could mean a server or a hosted service." }], recommendation: { option: "", reason: "" } } } as never;
+    const root = show(DecisionView, { event: unclear, narrow: false, onShowConversation: () => undefined });
+    const column = [...root.querySelectorAll<HTMLElement>(".column")][1];
+    expect(column.querySelector("h3")?.textContent?.trim()).toBe("PostgreSQL");
+    expect(column.querySelector(".unclear")?.textContent?.trim()).toBe("It could mean a server or a hosted service.");
+    expect(column.querySelector(".advantages-heading, .disadvantages-heading, .entry")).toBe(null);
   });
 
   // W1-R1-3: the recommendation scrolls with the columns, so that a long one cannot squeeze them.

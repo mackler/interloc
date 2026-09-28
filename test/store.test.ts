@@ -119,7 +119,7 @@ test("recordsSnapshot changes with every guarded record and not with usage.jsonl
 
 // Decision support, plan step 1.5: the records of decision k.
 const logEntry = (id: string, phase = 1) => ({ id, phase, round: 1, source: "self_correction" as const, problem: "p", action: "plan_error" as const, rationale: "r", superseded: false }) as never;
-const analysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
+const analysis = { decision: "d", columns: [{ kind: "argued" as const, option: "A", advantages: [], disadvantages: [] }, { kind: "argued" as const, option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
 const question = { phase: { kind: "planning" as const, n: 1 }, question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
 const json = (repo: string, name: string) => JSON.parse(fs.readFileSync(path.join(repo, "plan-review", name), "utf8"));
 

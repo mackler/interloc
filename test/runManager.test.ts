@@ -145,7 +145,7 @@ test("the replay during a run holds the last run and the current one", async () 
 
 test("an interview's numbered answer sent through the manager reaches Claude Code as the terminal's text", async () => {
   const repo = tempRepo();
-  const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, asked_ids: [], answered_ids: [], complete, summary });
+  const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: [], answered_ids: [], complete, summary });
   const h = await harness(repo, [
     {
       config: { questionPhase: true },

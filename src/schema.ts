@@ -88,8 +88,15 @@ export const Entry = Schema.Struct({
   reason_the_effect_matters: Element,
   extent: Schema.Struct({ per_person: Element, persons_affected: Element, likelihood: Element, timing: Element }),
 });
-/** One column per option: its advantages, then its disadvantages. */
-export const Column = Schema.Struct({ option: Schema.String, advantages: Schema.Array(Entry), disadvantages: Schema.Array(Entry) });
+/** The column of an option argued from: its advantages, then its disadvantages. */
+export const ArguedColumn = Schema.Struct({ kind: Schema.Literal("argued"), option: Schema.String, advantages: Schema.Array(Entry), disadvantages: Schema.Array(Entry) });
+/**
+ * The column of an option whose meaning is unclear (issue #35, decision Q8): no arguments, only what is unclear and which
+ * readings are possible ("Inputs" of docs/decision-making.md).
+ */
+export const UnclearColumn = Schema.Struct({ kind: Schema.Literal("unclear"), option: Schema.String, unclear: Schema.String });
+/** One column per option, argued or unclear. */
+export const Column = Schema.Union([ArguedColumn, UnclearColumn]);
 /** The representation. The root is an object (a bare $ref root is rejected by the Agent SDK); an empty `recommendation.option` is none. */
 export const DecisionAnalysis = Schema.Struct({
   decision: Schema.String,
@@ -125,6 +132,8 @@ export const DecisionApplied = Schema.Struct({ analysis: DecisionAnalysis });
  */
 export const InterviewTurn = Schema.Struct({
   message_to_user: Schema.String,
+  /** Issue #35 (Q5, Q6): the question the message asks the user to answer now, its id and its text alone; both empty when none. */
+  current_question: Schema.Struct({ id: Schema.String, text: Schema.String }),
   asked_ids: Schema.Array(Schema.String),
   answered_ids: Schema.Array(Schema.String),
   complete: Schema.Boolean,
@@ -240,6 +249,8 @@ export type InterviewTurn = typeof InterviewTurn.Type;
 export type Element = typeof Element.Type;
 export type Entry = typeof Entry.Type;
 export type Column = typeof Column.Type;
+export type ArguedColumn = typeof ArguedColumn.Type;
+export type UnclearColumn = typeof UnclearColumn.Type;
 export type DecisionAnalysis = typeof DecisionAnalysis.Type;
 export type DecisionResponse = typeof DecisionResponse.Type;
 export type DecisionApplied = typeof DecisionApplied.Type;

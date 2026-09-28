@@ -4,6 +4,7 @@ import { analysisLines, interviewSays, recordHeading, renderDecision, renderResp
 import { issue, respond } from "./helpers.ts";
 import { viewOf } from "../src/analysisView.ts";
 import type { Argument, DecisionAnalysis, Entry } from "../src/schema.ts";
+import { OPPOSES_MARKER } from "../src/prompts.ts";
 
 // Finding 27 / recommendation D: the Store writes; the text of the records is composed here.
 test("subject headings", () => {
@@ -81,17 +82,63 @@ test("analysisLines: each option in turn, Disadvantages:, arguments indented by 
   const analysis: DecisionAnalysis = {
     decision: "d",
     columns: [
-      { option: "SQLite", advantages: [entry("E1", [{ id: "A1", text: "But x.", equivalent_to: "", replies: [{ id: "A2", text: "On the other hand y.", equivalent_to: "E2", replies: [] }] }])], disadvantages: [] },
-      { option: "PostgreSQL", advantages: [], disadvantages: [entry("E2")] },
+      { kind: "argued", option: "SQLite", advantages: [entry("E1", [{ id: "A1", text: "But x.", equivalent_to: "", replies: [{ id: "A2", text: "On the other hand y.", equivalent_to: "E2", replies: [] }] }])], disadvantages: [] },
+      { kind: "argued", option: "PostgreSQL", advantages: [], disadvantages: [entry("E2")] },
     ],
     recommendation: { option: "SQLite", reason: "It is sooner." },
   };
   const lines = analysisLines(2, "Which database?", viewOf(analysis));
-  assert.deepEqual(lines.slice(0, 8), ["", "Decision 2: Which database?", "", "Option 1: SQLite", "", "  Title E1.", "    - c E1", "        But x."]);
-  assert.equal(lines[8], "          On the other hand y. *");
+  const m = OPPOSES_MARKER;
+  assert.deepEqual(lines.slice(0, 11), ["", "Decision 2: Which database?", "", "Option 1: SQLite", "", "  Advantages:", "", "  Advantage 1: Title E1.", "    - c E1", `        ${m}But x.`, "          On the other hand y. *"]);
   const second = lines.indexOf("Option 2: PostgreSQL");
   assert.ok(second > 0);
+  assert.equal(lines.filter((l) => l === "  Advantages:").length, 2);
   assert.equal(lines.filter((l) => l === "  Disadvantages:").length, 2);
-  assert.ok(lines.includes("  Title E2. *"));
+  assert.ok(lines.includes(`  ${m}Disadvantage 1: Title E2. *`));
+  assert.ok(lines.includes(`    ${m}- c E2`));
   assert.deepEqual(lines.slice(-3), ["", "Recommended option: SQLite", "It is sooner."]);
+});
+
+// Issue #35 (Q9): the terminal marks exactly the texts the page colors, both derived from the view of one analysis.
+test("analysisLines marks exactly the texts that oppose the column's option, and an unclear column shows its statement", () => {
+  const el = (text: string, counterarguments: Argument[] = []) => ({ text, counterarguments });
+  const entry = (id: string, counter: Argument[] = []): Entry => ({
+    id,
+    title: `Title ${id}.`,
+    comparative_condition: el(`c ${id}`, counter),
+    starting_cause: el(`s ${id}`),
+    intermediate_steps: el(`i ${id}`),
+    threshold: el(`t ${id}`),
+    effect_on_persons: el(`e ${id}`),
+    reason_the_effect_matters: el(`r ${id}`),
+    extent: { per_person: el(`pp ${id}`), persons_affected: el(`pa ${id}`), likelihood: el(`l ${id}`), timing: el(`w ${id}`) },
+  });
+  const chain = (p: string): Argument[] => [{ id: `${p}1`, text: `${p} one.`, equivalent_to: "", replies: [{ id: `${p}2`, text: `${p} two.`, equivalent_to: "", replies: [{ id: `${p}3`, text: `${p} three.`, equivalent_to: "", replies: [] }] }] }];
+  const analysis: DecisionAnalysis = {
+    decision: "d",
+    columns: [
+      { kind: "argued", option: "SQLite", advantages: [entry("E1", chain("a"))], disadvantages: [entry("E2", chain("d"))] },
+      { kind: "unclear", option: "PostgreSQL", unclear: "It could mean a server or a hosted service." },
+    ],
+    recommendation: { option: "", reason: "" },
+  };
+  const view = viewOf(analysis);
+  const marked = (text: string, symbol: string | null) => (symbol === null ? text : `${text} ${symbol}`);
+  const expected = view.columns.flatMap((c) =>
+    c.kind === "unclear"
+      ? []
+      : [...c.advantages, ...c.disadvantages].flatMap((e) => [
+          [`${e.label} ${marked(e.title, e.symbol)}`, e.opposes],
+          ...e.elements.flatMap((x) => [[`- ${x.text}`, x.opposes], ...x.arguments.map((a) => [marked(a.text, a.symbol), a.opposes])]),
+        ]),
+  );
+  const lines = analysisLines(1, "Which?", view);
+  const items = lines
+    .map((l) => l.trimStart())
+    .filter((l) => l !== "" && !/^(Decision|Option) \d/.test(l) && l !== "Advantages:" && l !== "Disadvantages:" && l !== "It could mean a server or a hosted service.")
+    .map((l) => (l.startsWith(OPPOSES_MARKER) ? [l.slice(OPPOSES_MARKER.length), true] : [l, false]));
+  assert.deepEqual(items, expected);
+  assert.ok(expected.some(([, opposes]) => opposes));
+  const unclear = lines.indexOf("Option 2: PostgreSQL");
+  assert.deepEqual(lines.slice(unclear, unclear + 3), ["Option 2: PostgreSQL", "", "  It could mean a server or a hosted service."]);
 });

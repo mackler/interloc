@@ -36,7 +36,7 @@ const duplicates = (ids: readonly string[]): string[] => [...new Set(ids.filter(
 /**
  * The analysis checked against the question's options, with every reference that names no entry dropped (a note for
  * each). One column per option, in order, labeled exactly or after normalization (then rewritten, with a note); unique non-empty ids across entries and arguments; a
- * recommendation, when present, names an option. Otherwise AnalysisInvalid.
+ * recommendation, when present, names an option; an unclear column states what is unclear. Otherwise AnalysisInvalid.
  */
 export const validateAnalysis = (options: readonly Readonly<{ label: string }>[], analysis: DecisionAnalysis): Result.Result<ValidatedAnalysis, AnalysisInvalid> => {
   const expected = options.map((o) => o.label);
@@ -54,8 +54,9 @@ export const validateAnalysis = (options: readonly Readonly<{ label: string }>[]
     duplicateIds: duplicates(ids),
     emptyIds: ids.filter((id) => id === "").length,
     recommendation: recommendation.exact === null ? { given: recommended, matches: recommendation.matches } : null,
+    blankUnclear: analysis.columns.flatMap((c) => (c.kind === "unclear" && c.unclear.trim() === "" ? [c.option] : [])),
   };
-  if (problems.columns !== null || problems.duplicateIds.length > 0 || problems.emptyIds > 0 || problems.recommendation !== null) return Result.fail(new AnalysisInvalid(problems));
+  if (problems.columns !== null || problems.duplicateIds.length > 0 || problems.emptyIds > 0 || problems.recommendation !== null || problems.blankUnclear.length > 0) return Result.fail(new AnalysisInvalid(problems));
 
   const exactColumns = columnLabels as readonly string[];
   const exactRecommendation = recommendation.exact as string;
@@ -83,6 +84,6 @@ export const validateAnalysis = (options: readonly Readonly<{ label: string }>[]
     reason_the_effect_matters: fixElement(e.reason_the_effect_matters),
     extent: { per_person: fixElement(e.extent.per_person), persons_affected: fixElement(e.extent.persons_affected), likelihood: fixElement(e.extent.likelihood), timing: fixElement(e.extent.timing) },
   });
-  const fixed: DecisionAnalysis = { ...labeled, columns: labeled.columns.map((c) => ({ ...c, advantages: c.advantages.map(fixEntry), disadvantages: c.disadvantages.map(fixEntry) })) };
+  const fixed: DecisionAnalysis = { ...labeled, columns: labeled.columns.map((c) => (c.kind === "unclear" ? c : { ...c, advantages: c.advantages.map(fixEntry), disadvantages: c.disadvantages.map(fixEntry) })) };
   return Result.succeed({ analysis: fixed, notes });
 };

@@ -51,7 +51,9 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
       // The turn's numbered answers are its options (decision support); the page keeps them from the InterviewTurn event.
       // Their labels are the answers without the number, so that an answer by label chooses its option (W2-R1-2).
       const options = numberedOptionLabels(turn.message);
-      const question = { question: turn.message, options: numberedOptions(options) };
+      // Issue #35 (Q5, Q6): the decision names the question the message asks now, not the whole message.
+      const asked = turn.current.text.trim() === "" ? turn.message : prompts.questionHeading(turn.current.id, turn.current.text);
+      const question = { question: asked, options: numberedOptions(options) };
       // A blank message is asked again inside the offer, so that it is never recorded as the choice (W1-R1-1).
       const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.interviewMessagePrompt, question, Effect.void, (m) => m !== ""));
       if (reply.kind === "empty") continue;

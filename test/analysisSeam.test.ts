@@ -29,7 +29,7 @@ export const labelsInPrompt = (text: string): readonly string[] =>
   });
 const analysisWith = (labels: readonly string[], recommended: string): DecisionAnalysis => ({
   decision: "d",
-  columns: labels.map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })),
+  columns: labels.map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })),
   recommendation: { option: recommended, reason: recommended === "" ? "" : "because" },
 });
 export const OPTION_SETS: readonly (readonly Readonly<{ label: string; description: string }>[])[] = [
@@ -74,10 +74,15 @@ test("the option labels the analysis repair prompt presents are the labels the v
 
 test("the analysis repair prompt names duplicate and empty ids, an ambiguous recommendation, and asks for the complete output", () => {
   const options = OPTION_SETS[2];
-  const text = prompts.analysisRepairPrompt({ columns: null, duplicateIds: ["E2"], emptyIds: 1, recommendation: { given: "Retry", matches: ["1. Retry", "2. Retry"] } }, options);
+  const text = prompts.analysisRepairPrompt({ columns: null, duplicateIds: ["E2"], emptyIds: 1, recommendation: { given: "Retry", matches: ["1. Retry", "2. Retry"] }, blankUnclear: [] }, options);
   assert.match(text, /E2/);
   assert.match(text, /1 empty id/);
   assert.match(text, /more than one option/);
   assert.match(text, /Return the complete output again/);
   assert.match(text, /Do not modify any file/);
+});
+
+test("the analysis repair prompt names an unclear column without its statement", () => {
+  const text = prompts.analysisRepairPrompt({ columns: null, duplicateIds: [], emptyIds: 0, recommendation: null, blankUnclear: ["SQLite"] }, OPTION_SETS[0]);
+  assert.match(text, /"SQLite" is marked unclear but does not state what is unclear/);
 });

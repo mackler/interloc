@@ -39,6 +39,8 @@ export class AnalysisInvalid extends Data.TaggedError("AnalysisInvalid")<{
   readonly emptyIds: number;
   /** The recommended option that names no option, with the options it matches after normalization (none, or more than one). */
   readonly recommendation: Readonly<{ given: string; matches: readonly string[] }> | null;
+  /** The options of the unclear columns whose statement of what is unclear is blank (issue #35, Q8). */
+  readonly blankUnclear: readonly string[];
 }> {}
 /** docs/decision-making.md of the program could not be read before the run (decision support, D7). */
 export class DecisionFormatUnreadable extends Data.TaggedError("DecisionFormatUnreadable")<{ readonly file: string; readonly message: string }> {}
@@ -129,6 +131,7 @@ export const describe = (error: RunErrorFields): string => {
             ? `the analysis recommends ${error.recommendation.given}, which matches more than one option: ${error.recommendation.matches.join(", ")}`
             : `the analysis recommends ${error.recommendation.given}, which is not an option`,
         );
+      if (error.blankUnclear.length > 0) parts.push(`the unclear column of ${error.blankUnclear.join(", ")} states nothing`);
       return analysisInvalidText(parts);
     }
     case "Interrupted":
@@ -179,6 +182,7 @@ const RunErrorData = Schema.Union([
     duplicateIds: Strings,
     emptyIds: Schema.Number,
     recommendation: Schema.NullOr(Schema.Struct({ given: Schema.String, matches: Strings })),
+    blankUnclear: Strings,
   }),
   Schema.Struct({ _tag: Schema.Literal("Interrupted"), where: Schema.String }),
 ]);

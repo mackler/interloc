@@ -6,14 +6,14 @@ import { QuestionListInvalid } from "./errors.ts";
 import type { ExecReport, InterviewTurn, QuestionList, QuestionsFile } from "./schema.ts";
 
 /** The questions asked and answered so far, as Claude Code reports them in each turn (issue #21). */
-type TurnIds = Readonly<{ asked: readonly string[]; answered: readonly string[] }>;
+type TurnIds = Readonly<{ asked: readonly string[]; answered: readonly string[]; current: Readonly<{ id: string; text: string }> }>;
 /** What an interview turn says: the conversation continues, or Claude Code proposes the summary. */
 export type TurnText = Readonly<{ kind: "continuing"; message: string }> | Readonly<{ kind: "summary_proposed"; message: string; summary: string }>;
 /** One interview turn: its text and the questions asked and answered so far. */
 export type TurnVariant = TurnText & TurnIds;
 /** `complete` with a blank summary, and a summary without `complete`, both continue the conversation (Q4: no coverage check). */
 export const normalizeTurn = (turn: InterviewTurn): TurnVariant => {
-  const ids = { asked: turn.asked_ids, answered: turn.answered_ids };
+  const ids = { asked: turn.asked_ids, answered: turn.answered_ids, current: turn.current_question };
   return turn.complete && turn.summary.trim() !== "" ? { kind: "summary_proposed", message: turn.message_to_user, summary: turn.summary, ...ids } : { kind: "continuing", message: turn.message_to_user, ...ids };
 };
 

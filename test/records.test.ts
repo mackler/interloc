@@ -118,7 +118,7 @@ test("readCheckpoint requires baseline.json and the four logs for started, and r
 });
 
 // Decision support, plan step 1.4: the records of decision k and its checkpoint.
-const emptyAnalysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
+const emptyAnalysis = { decision: "d", columns: [{ kind: "argued", option: "A", advantages: [], disadvantages: [] }, { kind: "argued", option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
 test("the decision record files decode their version-2 shape", () => {
   const decode = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown) => Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(value);
   const question = { version: 2, decision: 1, phase: { kind: "planning", n: 2 }, question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };

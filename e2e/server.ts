@@ -25,7 +25,7 @@ import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from
 
 const noQuestions = { questions_for_user: [] };
 /** A scripted interview turn; `asked` and `answered` are the ids Claude reports (issue #21). */
-const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, asked_ids: asked, answered_ids: answered, complete, summary });
+const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: asked, answered_ids: answered, complete, summary });
 const LONG = 60;
 /** An analysis of the "decide" scenario: two columns, a counterargument with a defense, one equivalence, a recommendation. */
 const element = (text: string, counterarguments: unknown[] = []) => ({ text, counterarguments });
@@ -44,11 +44,12 @@ const DECIDE_ANALYSIS = {
   decision: "Which database should the service use?",
   columns: [
     {
+      kind: "argued" as const,
       option: "SQLite",
       advantages: [entry("E1", "Developers set up the service sooner, because no database server is needed.", [{ id: "A1", text: "But the container already runs a database server.", equivalent_to: "", replies: [{ id: "A2", text: "On the other hand, the server needs its own configuration.", equivalent_to: "E2", replies: [] }] }])],
       disadvantages: [],
     },
-    { option: "PostgreSQL", advantages: [], disadvantages: [entry("E2", "Operators maintain one more server, so outages are more likely.")] },
+    { kind: "argued" as const, option: "PostgreSQL", advantages: [], disadvantages: [entry("E2", "Operators maintain one more server, so outages are more likely.")] },
   ],
   recommendation: { option: "", reason: "" },
 };

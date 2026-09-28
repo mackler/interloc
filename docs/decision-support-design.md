@@ -180,6 +180,23 @@ Details the renderer owns rather than the agent: the heading "Disadvantages:" ab
 of each column, the visual offset of a counterargument from the element it disputes — indentation or
 parentheses, the document allows either — and the symbol sequence ("Equivalence symbols").
 
+**Amended, 28 Sep 2026 (issue #35), with `docs/decision-making.md`:**
+
+- **The header** is `Decision <k>: ` and the question alone: not the record of an earlier answer, the
+  options or the default. For an interview turn the question is the turn's `current_question`, and an
+  agreed question's id is written out, "Question 4: " (a follow-up's "Follow-up question 2: ").
+- **Both headings**, "Advantages:" and "Disadvantages:", and each entry **labeled** within its heading,
+  "Advantage 1:", "Disadvantage 2:", numbered from one in each heading of each column. The renderer
+  owns them, as it owns the symbols.
+- **Which side a text is on.** A text is shown in the scheme's error color exactly when it argues
+  against the column's option: a disadvantage, its title and its elements; a counterargument to an
+  advantage; a defense under a disadvantage; and so on, each level of reply turning the side. The
+  headings and the option's name keep their color. The terminal, which has no color, puts `✗ ` after
+  the indentation of those lines.
+- **An unclear option.** A column is argued or unclear. An unclear column carries, in place of the
+  option's arguments, what is unclear about it and which readings are possible, and is shown under
+  the option's heading in place of the two headings.
+
 ## 8. What this costs
 
 A decision loop is a full review loop: at least one Claude Code call and one Codex turn, and more if

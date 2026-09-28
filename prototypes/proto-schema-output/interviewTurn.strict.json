@@ -4,6 +4,22 @@
     "message_to_user": {
       "type": "string"
     },
+    "current_question": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ],
+      "additionalProperties": false
+    },
     "asked_ids": {
       "type": "array",
       "items": {
@@ -25,6 +41,7 @@
   },
   "required": [
     "message_to_user",
+    "current_question",
     "asked_ids",
     "answered_ids",
     "complete",

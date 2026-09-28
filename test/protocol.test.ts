@@ -55,7 +55,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
     decision: nat,
     question: text,
     options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }),
-    analysis: fc.record({ decision: text, columns: fc.array(fc.record({ option: text, advantages: fc.constant([]), disadvantages: fc.constant([]) }), { maxLength: 2 }), recommendation: fc.record({ option: text, reason: text }) }),
+    analysis: fc.record({ decision: text, columns: fc.array(fc.oneof(fc.record({ kind: fc.constant("argued" as const), option: text, advantages: fc.constant([]), disadvantages: fc.constant([]) }), fc.record({ kind: fc.constant("unclear" as const), option: text, unclear: text })), { maxLength: 2 }), recommendation: fc.record({ option: text, reason: text }) }),
   }),
 );
 const promptTexts = [prompts.decisionPrompt("x"), prompts.limitPrompt(3, "go"), prompts.permissionPrompt, prompts.interviewMessagePrompt, "unknown > "];
@@ -165,7 +165,7 @@ test("a question review's ResponseReceived survives the round trip, live and in 
   assert.deepEqual(decoded(decodeServer(JSON.stringify(replay))), replay);
 });
 
-const decisionAnalysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
+const decisionAnalysis = { decision: "d", columns: [{ kind: "argued", option: "A", advantages: [], disadvantages: [] }, { kind: "argued", option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
 const decisionResponseSchema = decisionSubject(1, 1, "format", (a) => Result.succeed({ value: a, notes: [] })).respond.schema;
 
 test("every subject's response, as its own schema decodes it, survives the round trip inside a ResponseReceived", () => {

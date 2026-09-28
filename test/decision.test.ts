@@ -8,9 +8,15 @@ import { askOffering, limitOptions, numberedOptions, type OfferedQuestion, permi
 import * as prompts from "../src/prompts.ts";
 import { withOffer } from "../src/prompts.ts";
 import type { RunError } from "../src/errors.ts";
-import type { DecisionAnalysis, Entry } from "../src/schema.ts";
+import type { ArguedColumn, Column, DecisionAnalysis, Entry } from "../src/schema.ts";
 import { Decider, type DecisionQuestion, type Services, Store, Ui } from "../src/services.ts";
 import { issue, respond, tempRepo, testLayer, type TestOptions } from "./helpers.ts";
+
+/** The column as an argued one (a test fails on an unclear column). */
+const argued = (column: Column): ArguedColumn => {
+  if (column.kind !== "argued") throw new Error(`column ${column.option} is not argued`);
+  return column;
+};
 
 // Decision support, plan step 2.5: the decision loop over the scripted agents.
 const FORMAT = fs.readFileSync(new URL("../docs/decision-making.md", import.meta.url), "utf8");
@@ -30,8 +36,8 @@ const entry = (id: string, title = `title ${id}`, counter: Entry["threshold"]["c
 const analysis = (title = "first"): DecisionAnalysis => ({
   decision: "Which database?",
   columns: [
-    { option: "SQLite", advantages: [entry("E1", title)], disadvantages: [] },
-    { option: "PostgreSQL", advantages: [], disadvantages: [entry("E2")] },
+    { kind: "argued", option: "SQLite", advantages: [entry("E1", title)], disadvantages: [] },
+    { kind: "argued", option: "PostgreSQL", advantages: [], disadvantages: [entry("E2")] },
   ],
   recommendation: { option: "", reason: "" },
 });
@@ -81,8 +87,8 @@ test("an accepted issue rewrites analysis.json, the log holds D1 ids with the en
     reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
   });
   const end = await Effect.runPromise(loop(layer));
-  assert.deepEqual([end.result, end.analysis.columns[0].advantages[0].title], ["converged", "second"]);
-  assert.equal(json(probe.dir, "decision-1/analysis.json").analysis.columns[0].advantages[0].title, "second");
+  assert.deepEqual([end.result, argued(end.analysis.columns[0]).advantages[0].title], ["converged", "second"]);
+  assert.equal(argued(json(probe.dir, "decision-1/analysis.json").analysis.columns[0]).advantages[0].title, "second");
   assert.deepEqual((await probe.loadLog({ decision: 1 })).map((e) => [e.id, e.phase, e.action]), [["D1-R1-1", 1, "accepted"]]);
   assert.match(probe.reviewer.prompts[1], /D1-R2-1/);
 });
@@ -127,11 +133,11 @@ test("the initial analysis is validated (P1-R2-1): a missing column halts before
   assert.equal(halted.probe.planner.prompts.length, 2);
   assert.equal(halted.probe.reviewer.prompts.length, 0);
 
-  const dangling: DecisionAnalysis = { ...analysis(), columns: [{ option: "SQLite", advantages: [entry("E1", "t", [{ id: "A1", text: "But x.", equivalent_to: "E9", replies: [] }])], disadvantages: [] }, analysis().columns[1]] };
+  const dangling: DecisionAnalysis = { ...analysis(), columns: [{ kind: "argued", option: "SQLite", advantages: [entry("E1", "t", [{ id: "A1", text: "But x.", equivalent_to: "E9", replies: [] }])], disadvantages: [] }, analysis().columns[1]] };
   const noted = await setUp({ steps: [{ output: dangling }], reviews: [{ issues: [] }] });
   const end = await Effect.runPromise(loop(noted.layer));
   assert.equal(end.result, "converged");
-  assert.equal(json(noted.probe.dir, "decision-1/analysis.json").analysis.columns[0].advantages[0].comparative_condition.counterarguments[0].equivalent_to, "");
+  assert.equal(argued(json(noted.probe.dir, "decision-1/analysis.json").analysis.columns[0]).advantages[0].comparative_condition.counterarguments[0].equivalent_to, "");
   assert.match(fs.readFileSync(path.join(noted.probe.dir, "conversation.md"), "utf8"), /\*\*Reference dropped:\*\* argument A1 names E9, which is no entry of the analysis/);
 });
 
@@ -269,7 +275,7 @@ test("a decision inside a decision: a pause of decision 1 opens decision 2 in th
 });
 
 test("at the cycle limit Help me decide is offered, and a number afterwards adds cycles", async () => {
-  const threeColumns: DecisionAnalysis = { ...analysis(), columns: [prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_MORE].map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })) };
+  const threeColumns: DecisionAnalysis = { ...analysis(), columns: [prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_MORE].map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })) };
   const { probe, finished } = await runTaskWith({
     config: { maxRounds: 1 },
     answers: ["/decide", "1"],
@@ -343,7 +349,7 @@ test("a review response with an invalid analysis gets the validation repair turn
     reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
   });
   const end = await Effect.runPromise(loop(layer));
-  assert.deepEqual([end.result, end.analysis.columns[0].advantages[0].title], ["converged", "second"]);
+  assert.deepEqual([end.result, argued(end.analysis.columns[0]).advantages[0].title], ["converged", "second"]);
   repairListsLabels(probe.planner.prompts[2]);
   assert.deepEqual((await probe.loadLog({ decision: 1 })).map((e) => [e.id, e.action]), [["D1-R1-1", "accepted"]]);
 });
@@ -356,7 +362,7 @@ test("the application of the user's decisions with an invalid analysis gets the 
     reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
   });
   const end = await Effect.runPromise(loop(layer));
-  assert.deepEqual([end.result, end.analysis.columns[0].advantages[0].title], ["converged", "third"]);
+  assert.deepEqual([end.result, argued(end.analysis.columns[0]).advantages[0].title], ["converged", "third"]);
   assert.match(probe.planner.prompts[2], /user-decisions\.md/);
   repairListsLabels(probe.planner.prompts[3]);
 });

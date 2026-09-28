@@ -28,8 +28,9 @@ type WithQuestions<T> = Omit<T, "questions_for_user"> & { questions_for_user: Us
 const userQuestion: UserQuestion = { question: "q?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
 const plannerResponse: WithQuestions<legacy.PlannerResponse> = { dispositions: [disposition], self_corrections: [selfCorrection], reviewer_feedback: "", questions_for_user: [userQuestion] };
 const questionEntry: legacy.QuestionEntry = { id: "Q1", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: "A" };
-// Issue #21 (Q6 follow-up): the one field the interview turn has beyond the frozen legacy shape.
-const interviewTurn: legacy.InterviewTurn & { asked_ids: string[] } = { message_to_user: "m", asked_ids: ["Q1", "F1"], answered_ids: ["Q1"], complete: false, summary: "" };
+// Issue #21 (Q6 follow-up) and issue #35 (Q5, Q6): the fields the interview turn has beyond the frozen legacy shape.
+type CurrentQuestion = { current_question: { id: string; text: string } };
+const interviewTurn: legacy.InterviewTurn & { asked_ids: string[] } & CurrentQuestion = { message_to_user: "m", current_question: { id: "F1", text: "q?" }, asked_ids: ["Q1", "F1"], answered_ids: ["Q1"], complete: false, summary: "" };
 const execReport: legacy.ExecReport = { status: "finished", summary: "s", question: "", remaining_work: "" };
 const execOutcome: legacy.ExecOutcome = { status: "needs_input", summary: "s", question: "q", remainingWork: "w", userInput: null };
 // Version 2 (Q5): three shapes tagged by source.
@@ -69,7 +70,7 @@ test("each schema decodes a valid sample and its type matches the legacy type", 
   sameType<Equals<DeepMutable<typeof S.QuestionEntry.Type>, DeepMutable<legacy.QuestionEntry>>>();
   sameType<Equals<DeepMutable<typeof S.QuestionList.Type>, DeepMutable<legacy.QuestionList>>>();
   sameType<Equals<DeepMutable<typeof S.QuestionListResponse.Type>, DeepMutable<WithQuestions<legacy.QuestionListResponse>>>>();
-  sameType<Equals<DeepMutable<typeof S.InterviewTurn.Type>, DeepMutable<legacy.InterviewTurn & { asked_ids: readonly string[] }>>>();
+  sameType<Equals<DeepMutable<typeof S.InterviewTurn.Type>, DeepMutable<legacy.InterviewTurn & { asked_ids: readonly string[] } & CurrentQuestion>>>();
   sameType<Equals<DeepMutable<typeof S.ExecReport.Type>, DeepMutable<legacy.ExecReport>>>();
   sameType<Equals<DeepMutable<typeof S.ExecOutcome.Type>, DeepMutable<legacy.ExecOutcome>>>();
   sameType<Equals<DeepMutable<typeof S.Config.Type>, DeepMutable<legacy.Config>>>();
@@ -85,7 +86,9 @@ test("each schema rejects a wrong enum value, a missing field and a wrong type",
   rejects(S.PlannerResponse, { ...plannerResponse, reviewer_feedback: 1 }, "numeric reviewer_feedback");
   rejects(S.QuestionEntry, { ...questionEntry, proposed_answers: [{ label: "A" }] }, "a proposed answer without a description");
   rejects(S.InterviewTurn, { ...interviewTurn, complete: "yes" }, "complete as a string");
-  rejects(S.InterviewTurn, { message_to_user: "m", answered_ids: [], complete: false, summary: "" }, "a turn without asked_ids");
+  rejects(S.InterviewTurn, { message_to_user: "m", current_question: { id: "", text: "" }, answered_ids: [], complete: false, summary: "" }, "a turn without asked_ids");
+  rejects(S.InterviewTurn, { message_to_user: "m", asked_ids: [], answered_ids: [], complete: false, summary: "" }, "a turn without current_question");
+  rejects(S.InterviewTurn, { ...interviewTurn, current_question: { id: "Q1" } }, "a current question without its text");
   rejects(S.ExecReport, { ...execReport, status: "done" }, "status done");
   rejects(S.ExecOutcome, { ...execOutcome, userInput: 5 }, "numeric userInput");
   rejects(S.LogEntry, { ...reviewEntry, source: "robot" }, "source robot");
@@ -152,8 +155,10 @@ const nested = [{ id: "a1", text: "But x.", equivalent_to: "", replies: [{ id: "
 const analysis = {
   decision: "d",
   columns: [
-    { option: "A", advantages: [entry("E1", "T1", nested)], disadvantages: [] },
-    { option: "B", advantages: [], disadvantages: [entry("E2", "T2")] },
+    { kind: "argued", option: "A", advantages: [entry("E1", "T1", nested)], disadvantages: [] },
+    { kind: "argued", option: "B", advantages: [], disadvantages: [entry("E2", "T2")] },
+    // Issue #35 (Q8): an option whose meaning is unclear is not argued from; the column states what is unclear.
+    { kind: "unclear", option: "C", unclear: "C could mean a cache or a copy." },
   ],
   recommendation: { option: "", reason: "" },
 };
@@ -167,9 +172,12 @@ test("the decision analysis decodes three levels of nested arguments; the respon
 
 test("the decision analysis rejects a missing element, a missing part of the extent and an argument without replies", () => {
   const { threshold: _t, ...withoutThreshold } = entry("E1", "T1");
-  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ option: "A", advantages: [withoutThreshold], disadvantages: [] }] }, "an entry without a threshold");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ kind: "argued", option: "A", advantages: [withoutThreshold], disadvantages: [] }] }, "an entry without a threshold");
   const e = entry("E1", "T1");
-  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ option: "A", advantages: [{ ...e, extent: { per_person: el("p") } }], disadvantages: [] }] }, "an extent with one part");
-  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ option: "A", advantages: [entry("E1", "T1", [{ id: "a", text: "t", equivalent_to: "" }])], disadvantages: [] }] }, "an argument without replies");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ kind: "argued", option: "A", advantages: [{ ...e, extent: { per_person: el("p") } }], disadvantages: [] }] }, "an extent with one part");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ kind: "argued", option: "A", advantages: [entry("E1", "T1", [{ id: "a", text: "t", equivalent_to: "" }])], disadvantages: [] }] }, "an argument without replies");
   rejects(S.DecisionAnalysis, { decision: "d", columns: [] }, "an analysis without a recommendation");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ option: "A", advantages: [], disadvantages: [] }] }, "a column without kind");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ kind: "unclear", option: "A", advantages: [], disadvantages: [] }] }, "an unclear column without its statement");
+  rejects(S.DecisionAnalysis, { ...analysis, columns: [{ kind: "argued", option: "A", unclear: "u" }] }, "an argued column without entries");
 });

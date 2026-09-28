@@ -234,3 +234,40 @@ test("the offer's label reads Help me decide, and the terminal's offer line carr
   assert.equal(prompts.HELP_ME_DECIDE, "Help me decide");
   assert.ok(prompts.OFFER_LINE.includes(`/decide = ${prompts.HELP_ME_DECIDE}:`), prompts.OFFER_LINE);
 });
+
+// Issue #35 (Q5, Q6): the ids the question list and interview prompts assign are the ids questionHeading expands.
+test("the ids the prompts assign to agreed and follow-up questions are the ids the decision header writes out", () => {
+  const agreed = `${prompts.AGREED_QUESTION_PREFIX}1, ${prompts.AGREED_QUESTION_PREFIX}2, and so on`;
+  assert.ok(prompts.questionListPrompt("t").includes(`id: ${agreed}`), "the question list prompt assigns other ids");
+  const rules = [prompts.interviewOpenPrompt, prompts.interviewOpenEmptyPrompt("hello"), prompts.interviewGapsPrompt("f", ["G-R1-1"])];
+  for (const text of rules) {
+    assert.ok(text.includes(`${prompts.FOLLOW_UP_PREFIX}1, ${prompts.FOLLOW_UP_PREFIX}2, …`), "the interview rules assign other follow-up ids");
+    assert.match(text, /current_question: the question this message asks the user to answer now: its id and its text alone/);
+  }
+  assert.equal(prompts.questionHeading(`${prompts.AGREED_QUESTION_PREFIX}4`, "Should you see it?"), "Question 4: Should you see it?");
+  assert.equal(prompts.questionHeading(`${prompts.FOLLOW_UP_PREFIX}2`, "And then?"), "Follow-up question 2: And then?");
+  // An issue id of a second interview, an empty id, and look-alikes: the text alone.
+  for (const id of ["G-R1-1", "", "Q-R1-1", "Q4a", "F", "q4"]) assert.equal(prompts.questionHeading(id, "Which?"), "Which?", id);
+});
+
+// Issue #35: the prompts of a decision follow the amended docs/decision-making.md ("Also,", both headings and the
+// labels placed by the program, the unclear option), and contradict it nowhere.
+test("the analysis prompt maps the amended format: Also, sequences, headings and labels left to the program, unclear columns", () => {
+  const text = prompts.decisionAnalysisPrompt(FORMAT, decisionQuestion, { task: "t", requirements: null, plan: null });
+  assert.match(text, /first counterargument at an element begins with "But," and each further one at that element with "Also,"/);
+  assert.match(text, /first defense of a counterargument begins with "On the other hand," and each further one with "Also,"/);
+  assert.match(text, /first counterargument to a defense begins with "Then again," and each further one with "Also,"/);
+  assert.doesNotMatch(text, /Begin the text of a counterargument with "But", of a defense with/);
+  for (const placed of ['"Advantages:"', '"Disadvantages:"', '"Advantage 1:"', '"Disadvantage 1:"']) assert.ok(text.includes(placed), placed);
+  assert.match(text, /the program places the headings, the labels of the entries and the symbols/);
+  assert.match(text, /kind: "argued"/);
+  assert.match(text, /kind: "unclear"/);
+  assert.match(text, /unclear: what is unclear about the option and which readings are possible/);
+});
+
+test("the decision review prompt says the program places both headings and the labels, and how an unclear option is represented", () => {
+  const first = prompts.decisionReviewPrompt(FORMAT, 3, 1);
+  assert.match(first, /places the headings "Advantages:" and "Disadvantages:" and the labels of the entries \("Advantage 1:", "Disadvantage 1:"\)/);
+  assert.match(first, /kind "unclear"/);
+  assert.match(first, /"Also,"/);
+});

@@ -18,6 +18,7 @@ const q = (id: string): QuestionEntry => ({
 });
 const turn = (message: string, answered: string[], summary = ""): InterviewTurn => ({
   message_to_user: message,
+  current_question: { id: "", text: "" },
   asked_ids: answered,
   answered_ids: answered,
   complete: summary !== "",
@@ -148,7 +149,7 @@ test("/done ends the interview early", async () => {
 
 // Issue #21 (Q6): a follow-up question raises the total; Claude reports it in asked_ids with an id of its own.
 test("a follow-up asked during the clarification raises its total", async () => {
-  const withFollowUp = (message: string, asked: string[], answered: string[], summary = ""): InterviewTurn => ({ message_to_user: message, asked_ids: asked, answered_ids: answered, complete: summary !== "", summary });
+  const withFollowUp = (message: string, asked: string[], answered: string[], summary = ""): InterviewTurn => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: asked, answered_ids: answered, complete: summary !== "", summary });
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["A", "3", ""],
     steps: [

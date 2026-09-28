@@ -5,8 +5,8 @@ import { describe } from "../src/errors.ts";
 import { clarificationCount, normalizeQuestionList, normalizeReport, normalizeTurn } from "../src/schemaNormalize.ts";
 
 // Finding 8 / decision Q4: the wire shapes become variants after decoding.
-const turn = (complete: boolean, summary: string) => ({ message_to_user: "m", asked_ids: ["Q1", "F1"], answered_ids: ["Q1"], complete, summary });
-const ids = { asked: ["Q1", "F1"], answered: ["Q1"] };
+const turn = (complete: boolean, summary: string) => ({ message_to_user: "m", current_question: { id: "", text: "" }, asked_ids: ["Q1", "F1"], answered_ids: ["Q1"], complete, summary });
+const ids = { asked: ["Q1", "F1"], answered: ["Q1"], current: { id: "", text: "" } };
 
 test("normalizeTurn: a summary is proposed only when complete is true and the summary is not blank", () => {
   assert.deepEqual(normalizeTurn(turn(true, "# Requirements")), { kind: "summary_proposed", message: "m", summary: "# Requirements", ...ids });

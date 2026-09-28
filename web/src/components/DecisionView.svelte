@@ -5,8 +5,13 @@
   // Q5) [aesthetic and minimalist design: nothing is squeezed to unreadable widths; match between the system and the
   // real world: it reads as prose, in columns as on paper]; each column names its option at its head [recognition
   // rather than recall], and a line says when columns lie outside the window [visibility of system status]. Each
-  // counterargument is offset under the element it disputes, one step per level, with a rule on its left; the heading
-  // "Disadvantages:" and the equivalence symbols come from src/analysisView.ts. Below 390 px nothing is laid out and a
+  // counterargument is offset under the element it disputes, one step per level, with a rule on its left; the headings
+  // "Advantages:" and "Disadvantages:", each entry's label ("Advantage 1:"), the equivalence symbols, and which texts
+  // oppose the column's option come from src/analysisView.ts (issue #35). Every text that argues against the column's
+  // option is in the scheme's error color, so that a rebuttal reads apart from what it disputes [visibility of system
+  // status; match between the system and the real world: the two voices of an argument are told apart at a glance]; the
+  // headings and the option's name keep their color. An option whose meaning is unclear shows what is unclear in place of
+  // its headings (decision Q8). Below 390 px nothing is laid out and a
   // message asks for a wider window; the prompt below stays usable [help users recognize and recover]. The
   // conversation is one click away and back [user control and freedom].
   import { Button } from "m3-svelte";
@@ -32,15 +37,15 @@
 <svelte:window onresize={measure} />
 {#snippet entryOf(entry: EntryView)}
   <div class="entry">
-    <p class="title m3-font-title-small">{marked(entry.title, entry.symbol)}</p>
+    <p class="title m3-font-title-small" class:opposes={entry.opposes} data-opposes={entry.opposes}><span class="label">{entry.label}</span> {marked(entry.title, entry.symbol)}</p>
     <ul class="elements">
       {#each entry.elements as element, i (i)}
         <li class="element">
-          <span>{element.text}</span>
+          <span class="element-text" class:opposes={element.opposes} data-opposes={element.opposes}>{element.text}</span>
           {#if element.arguments.length > 0}
             <ul class="arguments">
               {#each element.arguments as argument (argument.id)}
-                <li class="argument" data-level={argument.level} style:margin-left="{(argument.level - 1) * 1.25}rem">{marked(argument.text, argument.symbol)}</li>
+                <li class="argument" class:opposes={argument.opposes} data-opposes={argument.opposes} data-level={argument.level} style:margin-left="{(argument.level - 1) * 1.25}rem">{marked(argument.text, argument.symbol)}</li>
               {/each}
             </ul>
           {/if}
@@ -66,9 +71,14 @@
       {#each view.columns as column, i (i)}
         <article class="column m3-font-body-medium">
           <h3 class="m3-font-title-medium">{column.option}</h3>
-          {#each column.advantages as entry (entry.id)}{@render entryOf(entry)}{/each}
-          <h4 class="disadvantages-heading m3-font-title-small">{column.disadvantagesHeading}</h4>
-          {#each column.disadvantages as entry (entry.id)}{@render entryOf(entry)}{/each}
+          {#if column.kind === "unclear"}
+            <p class="unclear">{column.unclear}</p>
+          {:else}
+            <h4 class="advantages-heading m3-font-title-small">{column.advantagesHeading}</h4>
+            {#each column.advantages as entry (entry.id)}{@render entryOf(entry)}{/each}
+            <h4 class="disadvantages-heading m3-font-title-small">{column.disadvantagesHeading}</h4>
+            {#each column.disadvantages as entry (entry.id)}{@render entryOf(entry)}{/each}
+          {/if}
         </article>
       {/each}
     </div>
@@ -92,13 +102,18 @@
   .columns { display: grid; gap: 0.75rem; flex-shrink: 0; align-items: start; }
   .column { padding: 0.75rem; border-radius: var(--m3-shape-medium); background: var(--m3c-surface-container); user-select: text; }
   .column h3 { margin: 0 0 0.5rem; position: sticky; top: 0; background: inherit; }
+  .advantages-heading { margin: 0 0 0.5rem; }
   .disadvantages-heading { margin: 1rem 0 0.5rem; }
+  .unclear { margin: 0; }
+  .label { font-weight: 600; }
   .entry { margin-bottom: 0.75rem; }
   .title { margin: 0 0 0.25rem; }
   .elements { margin: 0; padding-left: 1.25rem; }
   .element { margin-bottom: 0.25rem; }
   .arguments { list-style: none; margin: 0.25rem 0 0.25rem 0.5rem; padding: 0; }
-  .argument { margin-top: 0.25rem; padding-left: 0.5rem; border-left: 2px solid var(--m3c-outline-variant); color: var(--m3c-on-surface-variant); }
+  .argument { margin-top: 0.25rem; padding-left: 0.5rem; border-left: 2px solid var(--m3c-outline-variant); }
+  /* Issue #35 (Q7): what argues against the column's option, in the scheme's error color; the rest keeps the text color. */
+  .opposes { color: var(--m3c-error); }
   .recommendation { padding: 0.75rem; border-radius: var(--m3-shape-medium); background: var(--m3c-secondary-container); color: var(--m3c-on-secondary-container); }
   .recommendation { position: sticky; left: 0; flex-shrink: 0; }
   .recommendation h3 { margin: 0; }

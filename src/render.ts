@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "./artifacts.ts";
 import type { AnalysisView, EntryView } from "./analysisView.ts";
-import { decisionViewHeading, optionHeading, recommendedOption } from "./prompts.ts";
+import { decisionViewHeading, OPPOSES_MARKER, optionHeading, recommendedOption } from "./prompts.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { TurnText } from "./schemaNormalize.ts";
@@ -109,22 +109,26 @@ export const optionLines = (options: readonly Readonly<{ label: string; descript
   options.map((o, i) => `  ${i + 1}. ${o.label}${o.description === "" ? "" : ` - ${o.description}`}`);
 
 /**
- * A decision's analysis as the terminal prints it (decision support): the options one after another, each with its
- * advantages, the heading "Disadvantages:" and its disadvantages; every element a bullet, each counterargument indented
- * under the element it disputes, two more spaces per level; the equivalence symbols after titles and sentences.
+ * A decision's analysis as the terminal prints it (decision support): the options one after another, each with the
+ * heading "Advantages:", its labeled advantages ("Advantage 1:"), the heading "Disadvantages:" and its labeled
+ * disadvantages (issue #35); every element a bullet, each counterargument indented under the element it disputes, two
+ * more spaces per level; the equivalence symbols after titles and sentences. A line whose text argues against the
+ * option carries OPPOSES_MARKER after its indentation, where the page uses the error color (issue #35, Q9). An unclear
+ * option shows what is unclear in place of its headings.
  */
 export const analysisLines = (k: number, question: string, view: AnalysisView): readonly string[] => {
   const marked = (text: string, symbol: string | null) => (symbol === null ? text : `${text} ${symbol}`);
+  const line = (indent: number, opposes: boolean, text: string) => `${" ".repeat(indent)}${opposes ? OPPOSES_MARKER : ""}${text}`;
   const entryLines = (entry: EntryView): readonly string[] => [
-    `  ${marked(entry.title, entry.symbol)}`,
-    ...entry.elements.flatMap((el) => [`    - ${el.text}`, ...el.arguments.map((a) => `${" ".repeat(6 + 2 * a.level)}${marked(a.text, a.symbol)}`)]),
+    line(2, entry.opposes, `${entry.label} ${marked(entry.title, entry.symbol)}`),
+    ...entry.elements.flatMap((el) => [line(4, el.opposes, `- ${el.text}`), ...el.arguments.map((a) => line(6 + 2 * a.level, a.opposes, marked(a.text, a.symbol)))]),
   ];
   const columns = view.columns.flatMap((column, i) => [
     optionHeading(i + 1, column.option),
     "",
-    ...column.advantages.flatMap((e) => [...entryLines(e), ""]),
-    `  ${column.disadvantagesHeading}`,
-    ...column.disadvantages.flatMap((e) => ["", ...entryLines(e)]),
+    ...(column.kind === "unclear"
+      ? [`  ${column.unclear}`]
+      : [`  ${column.advantagesHeading}`, ...column.advantages.flatMap((e) => ["", ...entryLines(e)]), "", `  ${column.disadvantagesHeading}`, ...column.disadvantages.flatMap((e) => ["", ...entryLines(e)])]),
     "",
   ]);
   const recommendation = view.recommendation === null ? [] : [recommendedOption(view.recommendation.option), view.recommendation.reason];

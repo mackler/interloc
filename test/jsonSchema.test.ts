@@ -31,7 +31,13 @@ const agentSchemas = {
     effect: S.InterviewTurn,
     legacy: {
       ...legacy.interviewTurnSchema,
-      properties: (({ message_to_user, ...rest }) => ({ message_to_user, asked_ids: { type: "array", items: { type: "string" } }, ...rest }))(legacy.interviewTurnSchema.properties),
+      properties: (({ message_to_user, ...rest }) => ({
+        message_to_user,
+        // Issue #35 (Q5, Q6): the question the message asks now, its id and its text alone.
+        current_question: { type: "object", properties: { id: { type: "string" }, text: { type: "string" } } },
+        asked_ids: { type: "array", items: { type: "string" } },
+        ...rest,
+      }))(legacy.interviewTurnSchema.properties),
     },
   },
 };
@@ -132,5 +138,31 @@ test("the decision analysis generates an object root, a $defs cycle, and closed 
 test("the decision schemas' raw files in prototypes/proto-schema-output/ are what the program sends", () => {
   for (const [name, schema] of [["decisionAnalysis", S.DecisionAnalysis], ["decisionResponse", S.DecisionResponse], ["decisionApplied", S.DecisionApplied]] as const) {
     assert.deepEqual(agentJsonSchema(schema), proven(name, "raw"), name);
+  }
+});
+
+// Issue #35 (Q8): a column is argued or unclear, a union the agents receive as anyOf of two closed objects.
+test("a decision column is an anyOf of an argued column and an unclear column, each tagged by kind", () => {
+  const json = agentJsonSchema(S.DecisionAnalysis);
+  const found: Json[] = [];
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(walk);
+    if (node === null || typeof node !== "object") return;
+    const n = node as Json;
+    if (Array.isArray(n.anyOf)) found.push(n);
+    Object.values(n).forEach(walk);
+  };
+  walk(json);
+  const columns = found.find((n) => (n.anyOf as Json[]).every((m) => (m.properties as Json | undefined)?.kind !== undefined));
+  assert.ok(columns !== undefined, JSON.stringify(json).slice(0, 400));
+  assert.deepEqual((columns.anyOf as Json[]).map((m) => Object.keys(m.properties as Json).sort()), [["advantages", "disadvantages", "kind", "option"], ["kind", "option", "unclear"]]);
+});
+
+// P1-R1-2: the prototype defines its own copies of the schemas; they must be what the program sends, or the proof proves
+// another shape.
+test("the prototype's schemas generate what the program sends", async () => {
+  const { protoSchemas, protoRaw } = await import("../prototypes/protoSchemas.ts");
+  for (const [name, schema] of [["interviewTurn", S.InterviewTurn], ["decisionAnalysis", S.DecisionAnalysis], ["decisionResponse", S.DecisionResponse], ["decisionApplied", S.DecisionApplied], ["review", S.Review], ["plannerResponse", S.PlannerResponse], ["planWrite", S.PlanWriteResult], ["execReport", S.ExecReport], ["questionList", S.QuestionList], ["questionListResponse", S.QuestionListResponse]] as const) {
+    assert.deepEqual(protoRaw(protoSchemas[name]), rawJsonSchema(schema), name);
   }
 });
