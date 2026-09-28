@@ -1,6 +1,7 @@
 # Decision support: design note
 
-**Status: a proposal for the developer to check. Nothing here is decided behavior yet.**
+**Status: a proposal for the developer to check. Nothing here is decided behavior yet.** The
+developer settled four points on 28 Sep 2026; they are marked **Decided** below.
 
 This note describes a new part of the program: whenever the user must choose between options,
 Interloq offers to work out the arguments for and against each one before the user chooses. The form
@@ -93,6 +94,9 @@ developer's instruction is required for that.
 | Issue id prefix | `D<k>-R<n>-<i>` |
 | Checkpoint subject | `decision-<k>`, with the phase in the existing `phase` field |
 
+**Decided, 28 Sep 2026:** behavior 8 may gain a fifth log and a fifth loop directory. The amendment
+to `CLAUDE.md` is part of the work, not a reason to stop and ask.
+
 `guardedRecord` needs no change: it is a denylist, so new paths under `plan-review/` are guarded
 automatically.
 
@@ -110,32 +114,36 @@ receive.
 
 The shape follows `docs/decision-making.md`. Four things in that document drive the design:
 
-- **Every entry has seven elements** (§37): comparative condition, starting cause, intermediate
+- **Every entry has seven elements** ("Elements of an advantage or disadvantage"): comparative condition, starting cause, intermediate
   steps, threshold, effect on persons, reason the effect matters, extent of the effect. The extent
-  has four parts of its own (§45). These are fields, not free text, even though each is written as
+  has four parts of its own ("Elements of an advantage or disadvantage"). These are fields, not free text, even though each is written as
   prose sentences.
-- **Counterarguments nest without limit** (§93): under each counterargument its defenses, under each
+- **Counterarguments attach to an element, not to the entry** ("Layout and wording" and
+  "Counterarguments", as the developer revised them on 28 Sep 2026). Each counterargument sits
+  immediately after the one element of the seven that it disputes and begins with "But,". So every
+  element carries its own list, rather than the entry carrying one list at its end.
+- **Counterarguments nest without limit** ("Counterarguments"): under each counterargument its defenses, under each
   defense its further counterarguments, "until no further counterargument or defense exists". The
   schema is therefore recursive. Whether Effect Schema's recursive types survive the JSON Schema
   generation that both agents accept is the first thing to verify — the seven existing schemas were
   proved to work in `prototypes/proto-schema.ts`, and this one should be proved the same way before
   it is built.
-- **Entries are cross-referenced by symbol** (§111, §113): a counterargument equivalent to an entry
+- **Entries are cross-referenced by symbol** ("Equivalence symbols"): a counterargument equivalent to an entry
   elsewhere is written once and marked, and the symbols are assigned in a fixed sequence. Symbols are
   a rendering concern derived from the references; the data needs stable entry identifiers so that a
   reference points at something, and the renderer assigns the symbols.
-- **Reversals point at entries too** (§105), and are listed in full in a column while appearing as a
+- **Reversals point at entries too** ("Reversals"), and are listed in full in a column while appearing as a
   single sentence with a symbol under the entry they counter.
 
 An open question for the schema: the document requires that a claim derived by reasoning must not be
-labeled as reasoning (§55), and that unknown values are stated as unknown with the measurement that
-would settle them (§57). Both are properties of the prose inside a field, so neither is enforceable
+labeled as reasoning ("Source of each claim"), and that unknown values are stated as unknown with the measurement that
+would settle them ("Source of each claim"). Both are properties of the prose inside a field, so neither is enforceable
 by the schema; they are for Codex to check in review.
 
 ## 6. Context
 
-`docs/decision-making.md` requires the system, its users and its constraints as input (§15), and
-forbids assuming a value the input does not contain (§17).
+`docs/decision-making.md` requires the system, its users and its constraints as input ("Inputs"), and
+forbids assuming a value the input does not contain ("Inputs").
 
 The prompt should therefore carry whatever exists at that moment: the task, `requirements.md` and
 `plan.md` when they exist, the phase, and the question itself with its options. The project is
@@ -148,34 +156,34 @@ should see one before judging whether it is useful.
 
 ## 7. Showing the result
 
-`docs/decision-making.md` specifies one column per option (§65). That is straightforward on a wide
+`docs/decision-making.md` specifies one column per option ("Layout and wording"). That is straightforward on a wide
 window and impossible at 390 px, where the page already shows one panel at a time.
 
-What has to be decided:
+**Decided, 28 Sep 2026:**
 
-- **Where it appears.** In the transcript as a message, or on a surface of its own. Issue #22 already
-  asks whether status content belongs in the chat; a full argument representation is much larger than
-  anything the chat carries today, so a separate surface — a sheet or a dialog over the panel, with
-  the original question and its buttons still reachable — is the likelier answer.
-- **Narrow windows.** Columns become sections, one option after another, with the same content.
-- **The terminal.** It has no columns. One option after another, with indentation for the nested
-  arguments.
-- **The recommendation** (§117) is optional in the document. Whether Interloq asks for one, and
-  whether it is shown, is the developer's choice.
+- **Where it appears.** A separate browser window if that can be done; otherwise the representation
+  covers both chat columns until the user chooses. A window opened from the button's click is
+  permitted by browsers, because the click is a user gesture, but a second window is a second page
+  with its own connection to the server and its own copy of the run's state. Build the in-page form
+  first and treat the separate window as a later addition.
+- **Below 390 px.** No attempt to lay the representation out. A message tells the user to enlarge the
+  window.
+- **The recommendation.** Neither required nor prohibited. The agent producing the representation may
+  recommend one option, and if it does, the recommendation must carry the affirmative case that the
+  document's "Recommendation" section describes. So the schema has an optional recommendation, and
+  Codex checks that a recommendation that is present is supported as required.
 
-Two details from the document that the renderer owns rather than the agent: the headings
-"Disadvantages:" and "But:" that introduce the arguments against an entry (§69), and the symbol
-sequence (§113).
+- **The terminal.** It has no columns, so the arguments for and against each option are shown one
+  after another.
 
-One ambiguity in the document itself, worth resolving before implementation: §69 introduces the
-arguments against an advantage with the heading "Disadvantages:", while §65 uses the same word for
-the second half of every column. The same word denotes two different things, which will confuse both
-the renderer and the reader.
+Details the renderer owns rather than the agent: the heading "Disadvantages:" above the second half
+of each column, the visual offset of a counterargument from the element it disputes — indentation or
+parentheses, the document allows either — and the symbol sequence ("Equivalence symbols").
 
 ## 8. What this costs
 
 A decision loop is a full review loop: at least one Claude Code call and one Codex turn, and more if
-the review raises issues. The completeness requirement (§61) — every argument an informed person
+the review raises issues. The completeness requirement ("Completeness") — every argument an informed person
 could make, every counterargument, every defense — is unbounded by construction, and Codex reviewing
 for completeness has an obvious way to raise an issue in every cycle.
 
@@ -197,9 +205,13 @@ Two consequences the developer should weigh:
 
 ## 10. What is still open
 
-1. The word that replaces "interview" (issue #24), since this note uses "clarification".
-2. Whether the recommendation (§117) is requested and shown.
-3. Where the representation appears in the page, and its behavior at 390 px.
-4. The §69 heading ambiguity above.
-5. Whether a recursive schema survives the JSON Schema generation both agents accept — to be proved
-   in `prototypes/` before the work starts, as every other schema was.
+1. Whether a recursive schema survives the JSON Schema generation both agents accept — to be proved
+   in `prototypes/` before the work starts, as every other schema was. This is a prototype run, not a
+   question for the developer, but if it fails the shape of the feature changes.
+
+Settled on 28 Sep 2026: behavior 8 may gain a fifth log and loop directory; the representation covers
+both chat columns, or a separate window later, with a message to enlarge below 390 px; the terminal
+shows each option's arguments one after another; a recommendation is optional but must carry its
+affirmative case when made; the phase is called clarification, with issue #24 renaming the code to
+match; and the developer revised `docs/decision-making.md` so that "Disadvantages:" heads only a
+column's disadvantages while a counterargument begins with "But," beside the element it disputes.

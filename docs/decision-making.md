@@ -62,11 +62,11 @@ Include every argument that a person informed about the relevant technologies, t
 
 ## Layout and wording
 
-The representation contains one column for each option. Each column lists the advantages of its option, followed by the disadvantages of its option. Under each advantage and each disadvantage, list its counterarguments in the manner described under "Counterarguments."
+The representation contains one column for each option. Each column lists the advantages of its option, followed by the disadvantages of its option. Within each advantage and each disadvantage, place each counterargument immediately after the element that it disputes, in the manner described under "Counterarguments."
 
 Each advantage and each disadvantage begins with a title. The title is one complete sentence that states the outcome and its effect on persons.
 
-The representation is written for persons who have no knowledge of formal argument or of the terms defined in this prompt. Write every item as complete sentences. Write so that each sentence reads naturally when read aloud. When a sentence has the same grammatical subject as the preceding sentence, refer to the subject with a pronoun instead of repeating the noun, unless the pronoun could refer to more than one noun in the preceding sentence. This rule applies across consecutive bullet items. Do not use abbreviations, labels, or names of categories of argument. Do not use the words "counterargument," "defense," "reversal," or "rebuttal" in the representation. Introduce the list of arguments against an advantage with the heading "Disadvantages:", and introduce the list of arguments against a disadvantage with the heading "But:".
+The representation is written for persons who have no knowledge of formal argument or of the terms defined in this prompt. Write every item as complete sentences. Write so that each sentence reads naturally when read aloud. When a sentence has the same grammatical subject as the preceding sentence, refer to the subject with a pronoun instead of repeating the noun, unless the pronoun could refer to more than one noun in the preceding sentence. This rule applies across consecutive bullet items. Do not use abbreviations, labels, or names of categories of argument. Do not use the words "counterargument," "defense," "reversal," or "rebuttal" in the representation. Introduce the disadvantages of an option, which are the arguments against choosing that option, with the heading "Disadvantages:".
 
 ## Placement of advantages and disadvantages
 
@@ -92,7 +92,7 @@ The following kinds of counterargument exist. The names of the kinds are for you
 
 Under each counterargument, list the defenses of the argument against it. Under each defense, list the further counterarguments to that defense. Continue until no further counterargument or defense exists.
 
-Write a counterargument that is listed directly under an entry without an introductory phrase. Begin each defense with the words "On the other hand," and begin each counterargument to a defense with the words "Then again,".
+Place each counterargument immediately after the element of the advantage or disadvantage that it disputes, begin it with the word "But," and offset it visually from the element, for example by indentation or by parentheses. Begin each defense with the words "On the other hand," and begin each counterargument to a defense with the words "Then again,".
 
 ## Reversals
 
@@ -129,16 +129,21 @@ Known vulnerabilities in dependencies are removed from the production system soo
 - [Comparative condition] Option A applies a patched dependency version without waiting for a scheduled update or for a person to review the change.
 - [Starting cause] It merges each new dependency version automatically.
 - [Intermediate steps] When the maintainer of a dependency releases a version that removes a disclosed vulnerability, the update tool opens a change request for that version. If the automated tests pass, the change is merged and deployed. Whether the tests detect an incompatible update depends on how much of the application the tests cover, which is unknown.
+  - But option A does not merge an update that causes the tests to fail, and no person applies that update until someone notices the failure, so a vulnerability can remain in the production system longer and users' personal data are more likely to be obtained by unauthorized persons. †
+    - On the other hand, the update tool notifies the developers when a change request fails, so a developer can apply the update promptly.
+      - Then again, the notification requires a developer to act, so a failed update waits for a developer in the same way as an update that requires review.
 - [Threshold] The benefit increases with the number of vulnerabilities disclosed in the application's dependencies.
 - [Effect on persons] A disclosed vulnerability remains in the production system for a shorter time.
 - [Reason the effect matters] Users' personal data are less likely to be obtained by unauthorized persons.
+  - But an automatically merged update can contain malicious code that no person has examined, so users' personal data are more likely to be obtained by unauthorized persons. ‡
 - [Extent of the effect] The time during which a vulnerability remains in the production system is reduced to the time required for the tests and the deployment. Every user whose data the system stores is affected. How likely the benefit is depends on whether a disclosed vulnerability can be exploited in this application, and that is unknown. The benefit begins with the first vulnerability disclosed after option A is adopted and continues while option A is in use.
+
+Column for option A, after its advantages (titles only; the elements and counterarguments of these entries are omitted from this example):
 
 Disadvantages:
 
-- Option A does not merge an update that causes the tests to fail, and no person applies that update until someone notices the failure, so a vulnerability can remain in the production system longer and users' personal data are more likely to be obtained by unauthorized persons. †
-  - On the other hand, the update tool notifies the developers when a change request fails, so a developer can apply the update promptly.
-    - Then again, the notification requires a developer to act, so a failed update waits for a developer in the same way as an update that requires review.
-- An automatically merged update can contain malicious code that no person has examined, so users' personal data are more likely to be obtained by unauthorized persons. ‡
+A vulnerability can remain in the production system until someone notices that its update failed the tests, so users' personal data are more likely to be obtained by unauthorized persons. †
+
+Updates that no person has examined can introduce malicious code, so users' personal data are more likely to be obtained by unauthorized persons. ‡
 
 The entries marked † and ‡ are listed in full as disadvantages in the column for option A, and each carries its symbol after its title.
