@@ -132,13 +132,17 @@
           <Button summary variant="text">{progressOf(run)}</Button>
           <TimelineRail timeline={run.timeline} busy={run.busy} />
         </details>
-        <ConnectedButtons>
-          {#each ["left", "right"] as const as pane (pane)}
-            <Button variant={layout.selected === pane ? "filled" : "tonal"} type="button" aria-pressed={layout.selected === pane} onclick={() => (layout = select(layout, pane))}>
-              {TITLES[pane]}{#if layout.unseen[pane] > 0}<span class="badge">&nbsp;{unseenBadge(layout.unseen[pane])}</span>{/if}
-            </Button>
-          {/each}
-        </ConnectedButtons>
+        <!-- While the analysis is shown both panels are hidden, so the buttons would select nothing; "Show the
+             conversation" is the way back (W4-R1-1) [aesthetic and minimalist design]. -->
+        {#if !deciding}
+          <ConnectedButtons>
+            {#each ["left", "right"] as const as pane (pane)}
+              <Button variant={layout.selected === pane ? "filled" : "tonal"} type="button" aria-pressed={layout.selected === pane} onclick={() => (layout = select(layout, pane))}>
+                {TITLES[pane]}{#if layout.unseen[pane] > 0}<span class="badge">&nbsp;{unseenBadge(layout.unseen[pane])}</span>{/if}
+              </Button>
+            {/each}
+          </ConnectedButtons>
+        {/if}
         <!-- The latest notice above the panels, whichever is shown (W2-R1-2) [visibility of system status]. -->
         {#if latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
       {:else}
@@ -202,6 +206,15 @@
   /* The shown column fills the window; its panel scrolls inside it and keeps at least 12.5rem, below which the page scrolls. */
   .run.compact .left, .run.compact .right { flex: 1 0 0; }
   .run.compact .left :global(.panel), .run.compact .right :global(.panel) { min-height: 12.5rem; }
+  /* W4-R1-1: while the analysis is shown, only the decision area flexes; it never grows to its content and keeps a
+     floor of min(12rem, 40dvh), and DecisionView's .scroll scrolls inside it. The columns hold only the prompt and
+     the activity line then, sized by their content. The run keeps its outer scroll, so that where the controls and
+     the floor do not fit (a short window, or the progress opened) they are reached by scrolling, never clipped.
+     Measured (e2e, decideLong): at 390 × 844 the progress, prompt, activity line, gaps and padding take 420 px, and
+     with the 192 px floor 612 px fit the run's 742, so it does not scroll; at 640 × 400 they take 402 px, and with
+     the 160 px floor 562 px exceed its 294, so it scrolls. No height query is needed. */
+  .run.compact.deciding > .decision-area { flex: 1 1 0; min-height: min(12rem, 40dvh); }
+  .run.compact.deciding .left, .run.compact.deciding .right { flex: 0 0 auto; }
   .progress { border-radius: var(--m3-shape-medium); background: var(--m3c-surface-container-low); }
   .progress :global(.rail) { max-height: 40vh; }
   .badge { font-weight: 700; }

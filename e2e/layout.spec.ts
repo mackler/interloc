@@ -296,3 +296,103 @@ test("(L13) a long recommendation at 1280 × 800: the columns keep their height,
   await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
   await expect(analysis).toBeHidden();
 });
+
+// W4-R1-1: in the compact layout a long analysis scrolls inside a bounded area, and the answer controls stay in view
+// (a tall window) or can be scrolled into the run's view (a short window, or the progress opened), never overlapping
+// the analysis or each other and never clipped.
+const openLongAnalysis = async (page: Page, width: number, height: number) => {
+  await page.setViewportSize({ width, height });
+  await startTask(page, "Add a database", "http://127.0.0.1:8112/");
+  await page.getByRole("button", { name: "Help me Decide" }).click();
+  const analysis = page.getByRole("region", { name: /^Decision 1: / });
+  await expect(analysis).toBeVisible();
+  return {
+    analysis,
+    run: page.locator("main.run"),
+    area: page.locator(".decision-area"),
+    scroll: analysis.locator(".scroll"),
+    prompt: page.getByRole("group", { name: "Your answer" }),
+    activity: page.locator("[data-activity]"),
+  };
+};
+type Parts = Awaited<ReturnType<typeof openLongAnalysis>>;
+/** The height of the decision area's floor, min(12rem, 40dvh), in this window. */
+const floorOf = (page: Page) => page.evaluate(() => Math.min(12 * parseFloat(getComputedStyle(document.documentElement).fontSize), 0.4 * window.innerHeight));
+/** The decision area, the prompt and the activity line do not overlap, and the prompt shows all of its content. */
+const separateAndWhole = async (parts: Parts) => {
+  const rect = (l: Locator) => l.evaluate((el) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom }; });
+  const [area, prompt, activity] = [await rect(parts.area), await rect(parts.prompt), await rect(parts.activity)];
+  const apart = (a: { top: number; bottom: number }, b: { top: number; bottom: number }) => a.bottom <= b.top + 1 || b.bottom <= a.top + 1;
+  expect(apart(area, prompt), `the decision area ${JSON.stringify(area)} and the prompt ${JSON.stringify(prompt)} overlap`).toBe(true);
+  expect(apart(area, activity), `the decision area ${JSON.stringify(area)} and the activity line ${JSON.stringify(activity)} overlap`).toBe(true);
+  expect(apart(prompt, activity), `the prompt ${JSON.stringify(prompt)} and the activity line ${JSON.stringify(activity)} overlap`).toBe(true);
+  const clip = await parts.prompt.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(clip.scroll, "the prompt is clipped").toBeLessThanOrEqual(clip.client + 1);
+};
+/** Each of the prompt and the activity line can be scrolled fully into the run's view. */
+const reachable = async (parts: Parts) => {
+  for (const [name, part] of [["the prompt", parts.prompt], ["the activity line", parts.activity]] as const) {
+    await part.scrollIntoViewIfNeeded();
+    const within = await part.evaluate((el) => {
+      const run = el.closest("main.run");
+      if (run === null) return null;
+      const [r, e] = [run.getBoundingClientRect(), el.getBoundingClientRect()];
+      return { run: { top: r.top, bottom: r.bottom }, el: { top: e.top, bottom: e.bottom } };
+    });
+    expect(within, `${name} is outside the run`).not.toBeNull();
+    if (within === null) return;
+    expect(within.el.top, `${name}'s top is above the run's view`).toBeGreaterThanOrEqual(within.run.top - 1);
+    expect(within.el.bottom, `${name}'s bottom is below the run's view`).toBeLessThanOrEqual(within.run.bottom + 1);
+  }
+};
+const answerDismisses = async (page: Page, parts: Parts) => {
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
+  await expect(parts.analysis).toBeHidden();
+};
+
+test("(L14) a long analysis at 390 × 844: it scrolls inside itself, and the answer controls are in view", async ({ page }) => {
+  const parts = await openLongAnalysis(page, 390, 844);
+  const run = await parts.run.evaluate((el) => ({ top: el.scrollTop, scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(run.top).toBe(0);
+  expect(run.scroll, "the run scrolls").toBeLessThanOrEqual(run.client + 1);
+  for (const [name, part] of [["the prompt", parts.prompt], ["the activity line", parts.activity]] as const) {
+    const b = await box(part);
+    expect(b.y, `${name}'s top`).toBeGreaterThanOrEqual(0);
+    expect(b.y + b.height, `${name} is below the window`).toBeLessThanOrEqual(844 + 1);
+  }
+  const inner = await parts.scroll.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(inner.scroll, "the analysis does not scroll inside itself").toBeGreaterThan(inner.client);
+  const last = parts.analysis.getByText("The last paragraph of the recommendation.");
+  await last.scrollIntoViewIfNeeded();
+  const [end, scroll] = [await box(last), await box(parts.scroll)];
+  expect(end.y).toBeGreaterThanOrEqual(scroll.y - 1);
+  expect(end.y + end.height).toBeLessThanOrEqual(scroll.y + scroll.height + 1);
+  expect(await parts.run.evaluate((el) => el.scrollTop), "the run scrolled to show the recommendation").toBe(0);
+  await expect(page.getByRole("button", { name: new RegExp(LEFT) })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: new RegExp(RIGHT) })).toHaveCount(0);
+  await separateAndWhole(parts);
+  await answerDismisses(page, parts);
+});
+
+test("(L15) a long analysis at 640 × 400: the analysis stays at its floor, and the answer controls can be reached", async ({ page }) => {
+  const parts = await openLongAnalysis(page, 640, 400);
+  const floor = await floorOf(page);
+  expect((await box(parts.area)).height, "the decision area grows beyond its floor").toBeLessThanOrEqual(floor + 1);
+  const inner = await parts.scroll.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }));
+  expect(inner.scroll, "the analysis does not scroll inside itself").toBeGreaterThan(inner.client);
+  await separateAndWhole(parts);
+  await reachable(parts);
+  await answerDismisses(page, parts);
+});
+
+test("(L16) a long analysis at 390 × 600 with the progress opened: the analysis stays at its floor, and the answer controls can be reached", async ({ page }) => {
+  // At 844 px the scenario's short timeline leaves the controls and the floor room enough; at 600 px they do not.
+  const parts = await openLongAnalysis(page, 390, 600);
+  await page.locator("details.progress > summary, details.progress summary").first().click();
+  await expect(page.locator("details.progress")).toHaveAttribute("open", "");
+  const floor = await floorOf(page);
+  expect((await box(parts.area)).height, "the decision area grows beyond its floor").toBeLessThanOrEqual(floor + 1);
+  await separateAndWhole(parts);
+  await reachable(parts);
+  await answerDismisses(page, parts);
+});
