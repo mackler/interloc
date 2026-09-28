@@ -2,24 +2,28 @@
 // Tests provide scripted layers; main.ts provides the live ones. API names: docs/effect-v4-api.md.
 
 import { Context, Effect } from "effect";
-import type { Brand, Schema } from "effect";
+import type { Brand, Option, Schema } from "effect";
 import type { CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
 import type { SubjectId } from "./artifacts.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
-import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, Review, UserQuestion } from "./schema.ts";
+import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, RecordedPlan, Review, UserQuestion } from "./schema.ts";
 import type { LoopResult, Phase, UiEvent } from "./uiEvents.ts";
 import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
 import type { RecordsSnapshot, Snapshot } from "./snapshot.ts";
 
 export type StoreError = FileSystemError | StateFileInvalid | GitError;
-/** The question a decision analyzes (decision support): its text and options, and the phase in which it was asked. */
-export type DecisionQuestion = Readonly<{ phase: Phase; question: string; options: UserQuestion["options"] }>;
+/** The question a decision analyzes (decision support): its text and options, the phase in which it was asked and that phase's label (W1-R1-2). */
+export type DecisionQuestion = Readonly<{ phase: Phase; label: string; question: string; options: UserQuestion["options"] }>;
 /** The user's answer after an analysis, and the option it chose (null for free text; decision Q4). */
 export type Choice = Readonly<{ answer: string; option: string | null }>;
 /** A planning or execution call can also end in a decision loop's error: a relayed question or a permission request carries the offer. */
 export type PlannerError = RunError;
+/** What report_step answers Claude Code (issue #6, Q2 and Q3): a text, and whether it is an error (an id not in the plan). */
+export type StepReply = Readonly<{ text: string; isError: boolean }>;
+/** Records one report of report_step during an execution call; a failure to write the plan ends the call. */
+export type StepReporter = (id: string, status: "started" | "done") => Effect.Effect<StepReply, RunError>;
 export type ReviewerError = CodexCallFailed | StoreError;
 
 export interface UiShape {
@@ -48,7 +52,8 @@ export interface PlannerShape {
    */
   planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability?: PlanningCapability): Effect.Effect<PlanningResult, PlannerError, Decider>;
   /** A call in which Claude Code implements the plan. */
-  executing(prompt: string): Effect.Effect<ExecOutcome, PlannerError, Decider>;
+  /** An execution call; `reporter` answers its report_step calls (issue #6, Q2). */
+  executing(prompt: string, reporter: StepReporter): Effect.Effect<ExecOutcome, PlannerError, Decider>;
   readonly sessionId: Effect.Effect<string | null>;
   /** A planner over a new session, with the same hooks and callbacks (a decision loop, D4 of the decision-support plan). */
   readonly fresh: Effect.Effect<PlannerShape>;
@@ -96,7 +101,10 @@ export interface StoreShape {
   saveQuestions(task: string, questions: QuestionsFile["questions"]): Effect.Effect<void, StoreError>;
   loadQuestions(): Effect.Effect<QuestionsFile, StoreError>;
   writeRequirements(text: string): Effect.Effect<void, StoreError>;
-  planExists(): Effect.Effect<boolean, StoreError>;
+  /** Writes plan.json (issue #6, F1), then plan.md rendered from it (F2). */
+  savePlan(plan: RecordedPlan): Effect.Effect<void, StoreError>;
+  /** The plan of plan.json; none before the first plan is written. */
+  loadPlan(): Effect.Effect<Option.Option<RecordedPlan>, StoreError>;
   loadLog(subject: SubjectId): Effect.Effect<readonly LogEntry[], StoreError>;
   saveLog(subject: SubjectId, log: readonly LogEntry[]): Effect.Effect<void, StoreError>;
   /** One decision of the user: the line in user-decisions.md and the transcript line derive from the one event. */
@@ -143,10 +151,11 @@ export type DecisionOutcome = Readonly<{ decision: number; analysis: DecisionAna
 /**
  * Decision support (D3 of the decision-support plan): runs a decision loop for a question, over the services of the run,
  * from any place a prompt is asked, SDK callbacks included (its `decide` requires nothing). An instance is bound to the
- * phase in which the question is asked; `at` gives the instance of another phase.
+ * phase in which the question is asked, and to that phase's label as the run names it (W1-R1-2: "Planning", or
+ * "Planning 2" once the run holds two); `at` gives the instance of another phase.
  */
 export interface DeciderShape {
-  at(phase: Phase): DeciderShape;
+  at(phase: Phase, label: string): DeciderShape;
   decide(request: DecisionRequest): Effect.Effect<DecisionOutcome, RunError>;
 }
 export class Decider extends Context.Service<Decider, DeciderShape>()("plan-review/Decider") {}

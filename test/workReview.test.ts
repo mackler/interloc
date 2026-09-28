@@ -288,9 +288,9 @@ for (const [label, file, content] of [
   });
 }
 
-test("(A) a plan response that rewrites plan.md is not a read-only call and passes", async () => {
+test("(A) a plan response that writes under plan-review/ is not a read-only call and passes", async () => {
   const { layer } = testLayer(tempRepo(), {
-    steps: [planWrite("v1"), { output: respond([["P1-R1-1", "accepted"]]), editRecord: { file: "plan.md", content: "v2" } }],
+    steps: [planWrite("v1"), { output: respond([["P1-R1-1", "accepted"]]), plan: "v2", editRecord: { file: "notes.md", content: "v2" } }],
     reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   });

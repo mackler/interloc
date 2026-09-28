@@ -79,9 +79,10 @@ test("the question phase notifies its beginning and end and every interview turn
     config: { questionPhase: true },
   });
   await runTask(layer);
+  // Issue #6: the run's shape is notified first, then the question phase begins.
   const tags = probe.ui.notified.map((e) => e._tag);
-  assert.equal(tags[0], "PhaseBegan");
-  assert.deepEqual(probe.ui.notified[0], { _tag: "PhaseBegan", phase: { kind: "questions" } });
+  assert.deepEqual(tags.slice(0, 2), ["PhasesForeseen", "PhaseBegan"]);
+  assert.deepEqual(probe.ui.notified[1], { _tag: "PhaseBegan", phase: { kind: "questions" } });
   const turns = probe.ui.notified.filter((e) => e._tag === "InterviewTurn");
   assert.deepEqual(turns, [
     { _tag: "InterviewTurn", heading: "Conversation before planning", message: "Anything to add?", summary: null, answered: 0, total: 0 },

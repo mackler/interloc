@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { platformLayer } from "../src/platform.ts";
 import type { StoreShape } from "../src/services.ts";
 import { makeStore } from "../src/store.ts";
@@ -120,7 +120,7 @@ test("recordsSnapshot changes with every guarded record and not with usage.jsonl
 // Decision support, plan step 1.5: the records of decision k.
 const logEntry = (id: string, phase = 1) => ({ id, phase, round: 1, source: "self_correction" as const, problem: "p", action: "plan_error" as const, rationale: "r", superseded: false }) as never;
 const analysis = { decision: "d", columns: [{ kind: "argued" as const, option: "A", advantages: [], disadvantages: [] }, { kind: "argued" as const, option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
-const question = { phase: { kind: "planning" as const, n: 1 }, question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
+const question = { phase: { kind: "planning" as const, n: 1 }, label: "Planning", question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
 const json = (repo: string, name: string) => JSON.parse(fs.readFileSync(path.join(repo, "plan-review", name), "utf8"));
 
 test("decisions are numbered across the run, each with its question, analysis, raw output and choice", async () => {
@@ -170,4 +170,32 @@ test("readContext gives requirements.md and plan.md where they exist", async () 
   assert.deepEqual(await run(store.readContext()), { requirements: null, plan: null });
   write(repo, "plan-review/plan.md", "1. [ ] step\n");
   assert.deepEqual(await run(store.readContext()), { requirements: null, plan: "1. [ ] step\n" });
+});
+
+// Issue #6 (F1, F2): the program writes plan.json, the reviewed file, and plan.md rendered from it.
+test("savePlan writes plan.json and plan.md rendered from it, and replaces both; loadPlan reads plan.json back", async () => {
+  const { renderPlanMarkdown } = await import("../src/plan.ts");
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  assert.ok(Option.isNone(await run(store.loadPlan())));
+  const plan = (text: string, status: "pending" | "done") => ({ stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "l", text, status }] }] });
+  await run(store.savePlan(plan("first", "pending")));
+  await run(store.savePlan(plan("second", "done")));
+  const loaded = await run(store.loadPlan());
+  assert.ok(Option.isSome(loaded));
+  assert.deepEqual(loaded.value, plan("second", "done"));
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(repo, "plan-review", "plan.json"), "utf8")), { version: 2, plan: plan("second", "done") });
+  // The seam of F2: plan.md is what renderPlanMarkdown makes of what loadPlan returns.
+  assert.equal(fs.readFileSync(path.join(repo, "plan-review", "plan.md"), "utf8"), renderPlanMarkdown(loaded.value));
+  assert.doesNotMatch(fs.readFileSync(path.join(repo, "plan-review", "plan.md"), "utf8"), /first/);
+});
+
+test("a plan.json that does not decode is a typed error", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  fs.writeFileSync(path.join(repo, "plan-review", "plan.json"), JSON.stringify({ version: 2, plan: { stages: [{ number: 1 }] } }));
+  const failure = await run(Effect.flip(store.loadPlan()));
+  assert.equal(failure._tag, "StateFileInvalid");
 });

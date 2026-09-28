@@ -27,11 +27,11 @@ test("the interview prompts prescribe the answer format that the page's numbered
 test("the work review prompt names the change record, the plan, the requirements, the log and the ids", () => {
   const first = prompts.workReviewPrompt(2, 1, true);
   assert.match(first, /plan-review\/work-review-2\/changes\.diff/);
-  assert.match(first, /plan-review\/plan\.md/);
+  assert.match(first, /plan-review\/plan\.json/);
   assert.match(first, /plan-review\/requirements\.md/);
   assert.match(first, /plan-review\/work-review-log\.json/);
   assert.match(first, /W2-R1-1/);
-  assert.match(first, /not marked completed .* not yet implemented/);
+  assert.match(first, /Missing work of a step with another status is not an issue/);
   assert.doesNotMatch(prompts.workReviewPrompt(2, 1, false), /requirements\.md/);
   const later = prompts.workReviewPrompt(2, 3, true);
   assert.match(later, /W2-R3-1/);
@@ -70,7 +70,7 @@ test("the revision prompt after an execution phase names the stop and the work r
   assert.match(revise, /Work review 2 ended in round 3/);
   assert.match(revise, /plan-review\/work-review-2\/round-3\.json/);
   assert.match(revise, /plan-review\/work-review-log\.json/);
-  assert.match(revise, /keep the completed steps and their markers/);
+  assert.ok(revise.includes(prompts.PLAN_ID_RULE));
   const both = prompts.revisePlanAfterExecutionPrompt(1, { stopped: true, workReview: { revisedInRound: 1 } });
   assert.match(both, /user's input for this stop/);
   assert.match(both, /Work review 1 ended in round 1/);
@@ -123,8 +123,11 @@ test("the cycle limit's prompts, in the terminal and in the page, speak of cycle
 
 test("the status lines of the phases name Gather Requirements and Implementation", () => {
   assert.equal(prompts.questionListLine, "Gather Requirements: Claude Code formulates the question list ...");
-  assert.equal(prompts.implementationBeganLine(2, "auto"), "\nImplementation phase 2: Claude Code implements the plan (permission mode auto) ...");
-  assert.equal(prompts.implementationEndedLine(2, "finished"), "\nImplementation phase 2 ended with status: finished");
+  assert.equal(prompts.implementationBeganLine("Implementation 2", "auto"), "\nImplementation 2: Claude Code implements the plan (permission mode auto) ...");
+  assert.equal(prompts.implementationEndedLine("Implementation", "finished"), "\nImplementation ended with status: finished");
+  assert.equal(prompts.planningBeganLine("Planning", true), "Planning: requesting the initial plan from Claude Code ...");
+  assert.equal(prompts.planningBeganLine("Planning 2", false), "\nPlanning 2: Claude Code revises the plan ...");
+  assert.equal(prompts.workReviewBeganLine("Work review"), "\nWork review: Codex reviews the changes to the project since the run began ...");
   assert.equal(prompts.taskFinishedLine(3), "\nClaude Code reports that the task is finished after 3 implementation phase(s).");
   assert.equal(prompts.IMPLEMENTATION_STOPPED_LINE, "\nClaude Code has stopped implementation with a question.");
 });
@@ -146,11 +149,29 @@ test("the cycle lines and the finished loop's line", () => {
   assert.equal(prompts.cycleLine(1, 1, 1), "cycle 1: 1 issue");
   assert.equal(prompts.cycleLine(3, 0, 0), "cycle 3: 0 issues");
   assert.equal(prompts.cycleLine(2, 3, 1), "cycle 2: 3 issues (1 counted)");
-  assert.equal(prompts.loopSummary(2, 3, "converged"), "2 cycles resolved 3 issues");
-  assert.equal(prompts.loopSummary(1, 1, "converged"), "1 cycle resolved 1 issue");
-  assert.equal(prompts.loopSummary(5, 4, "proceed"), "5 cycles resolved 4 issues, proceeded without convergence");
-  assert.equal(prompts.loopSummary(1, 0, "revise"), "1 cycle: 0 corrections due");
-  assert.equal(prompts.loopSummary(2, 1, "revise"), "2 cycles: 1 correction due");
+});
+
+// Issue #28: "n issues resolved in m cycles", singular and plural on both numbers, in every branch.
+test("a finished loop's line reads n issues resolved in m cycles", () => {
+  const table: readonly (readonly [number, number, "converged" | "proceed" | "revise", string])[] = [
+    [1, 0, "converged", "0 issues resolved in 1 cycle"],
+    [1, 1, "converged", "1 issue resolved in 1 cycle"],
+    [2, 2, "converged", "2 issues resolved in 2 cycles"],
+    [2, 1, "proceed", "1 issue resolved in 2 cycles, proceeded without convergence"],
+    [1, 0, "proceed", "0 issues resolved in 1 cycle, proceeded without convergence"],
+    [5, 2, "proceed", "2 issues resolved in 5 cycles, proceeded without convergence"],
+    [1, 0, "revise", "0 corrections due after 1 cycle"],
+    [1, 2, "revise", "2 corrections due after 1 cycle"],
+    [2, 1, "revise", "1 correction due after 2 cycles"],
+  ];
+  for (const [cycles, corrections, result, expected] of table) assert.equal(prompts.loopSummary(cycles, corrections, result), expected);
+});
+
+// Issue #33: the first step of Gather Requirements identifies the choices; the other steps keep their names.
+test("the steps of Gather Requirements", () => {
+  assert.equal(prompts.stepLabel("formulate"), "Identify choices");
+  assert.equal(prompts.stepLabel("clarification"), "Clarification");
+  assert.equal(prompts.stepLabel("followUp"), "Follow-up clarification");
 });
 
 // Issue #21 (Q6 follow-up): Claude reports every question asked, follow-ups with ids of their own, and the answered ones.
@@ -188,7 +209,7 @@ test("every prompt that may return questions_for_user says how to fill a questio
 
 // Decision support, plan step 2.2 (D7): the prompts carry docs/decision-making.md verbatim.
 const FORMAT = fs.readFileSync(new URL("../docs/decision-making.md", import.meta.url), "utf8");
-const decisionQuestion = { phase: { kind: "planning" as const, n: 2 }, question: "Which database?", options: [{ label: "SQLite", description: "one file" }, { label: "PostgreSQL", description: "a server" }] };
+const decisionQuestion = { phase: { kind: "planning" as const, n: 2 }, label: "Planning 2", question: "Which database?", options: [{ label: "SQLite", description: "one file" }, { label: "PostgreSQL", description: "a server" }] };
 
 test("the analysis prompt carries the format byte for byte, the binding sentence, the question, the options in order and the context", () => {
   const text = prompts.decisionAnalysisPrompt(FORMAT, decisionQuestion, { task: "Build it.", requirements: "# R\nreq text", plan: null });
@@ -270,4 +291,73 @@ test("the decision review prompt says the program places both headings and the l
   assert.match(first, /places the headings "Advantages:" and "Disadvantages:" and the labels of the entries \("Advantage 1:", "Disadvantage 1:"\)/);
   assert.match(first, /kind "unclear"/);
   assert.match(first, /"Also,"/);
+});
+
+// Issue #6 (F1, G-R1-1): every call that creates or changes the plan returns it whole in 'plan' and keeps the ids; the
+// prompt's rule and the validation that enforces it are tested together, and the repair turn repeats the rule.
+const planProducing = () => [
+  prompts.initialPlanPrompt("t", false),
+  prompts.revisePlanPrompt,
+  prompts.revisePlanAfterExecutionPrompt(1, { stopped: true, workReview: "converged" }),
+  prompts.planApplyDecisionsPrompt,
+  prompts.planRespondPrompt(1, 1),
+];
+test("every prompt that produces the plan asks for it whole as data and states the id rule", () => {
+  for (const text of planProducing()) {
+    assert.ok(text.includes(prompts.PLAN_FORMAT), text.slice(0, 80));
+    assert.ok(text.includes(prompts.PLAN_ID_RULE), text.slice(0, 80));
+    assert.doesNotMatch(text, /(Write|amend|Revise) plan-review\/plan\.md/);
+  }
+  assert.match(prompts.PLAN_FORMAT, /'plan'/);
+  assert.match(prompts.PLAN_FORMAT, /do not write either file/);
+});
+
+test("each clause of the id rule is enforced by validatePlan, and the repair prompt states the rule", async () => {
+  const { validatePlan } = await import("../src/plan.ts");
+  const { Result } = await import("effect");
+  const step = (id: string, text = `t ${id}`) => ({ id, number: 1, label: `l ${id}`, text });
+  const plan = (...steps: ReturnType<typeof step>[]) => ({ stages: [{ number: 1, title: "s", steps: steps.map((st, i) => ({ ...st, number: i + 1 })) }] });
+  const previous = { stages: [{ number: 1, title: "s", steps: [{ ...step("S1"), status: "done" as const }, { ...step("S2"), number: 2, status: "pending" as const }] }] };
+  const clauses: readonly [RegExp, ReturnType<typeof plan>][] = [
+    [/unique across the plan/, plan(step("S1"), step("S1"))],
+    [/every step has an id/i, plan(step("S1"), step(""))],
+    [/'done' stays in the plan/, plan(step("S2"))],
+    [/with its id, label and text unchanged/, plan(step("S1", "rewritten"), step("S2"))],
+  ];
+  for (const [clause, reply] of clauses) {
+    assert.match(prompts.PLAN_ID_RULE, clause);
+    const r = validatePlan(previous, reply);
+    assert.ok(Result.isFailure(r), String(clause));
+    const repair = prompts.planRepairPrompt(r.failure);
+    assert.ok(repair.includes(prompts.PLAN_ID_RULE));
+    for (const line of prompts.planProblemLines(r.failure)) assert.ok(repair.includes(line));
+  }
+});
+
+test("the plan review and the work review read plan.json with its statuses", () => {
+  for (const text of [prompts.planReviewPrompt(1, 1, false), prompts.workReviewPrompt(1, 1, false)]) {
+    assert.match(text, /plan-review\/plan\.json/);
+    assert.match(text, /status 'done'/);
+    assert.doesNotMatch(text, /plan-review\/plan\.md/);
+  }
+  assert.match(prompts.planReviewPrompt(1, 2, false), /plan-review\/plan\.json/);
+});
+
+// Issue #6 (numbering): a kind with one instance in the run carries no number; with two or more, every one does.
+test("phaseLabel numbers a phase only when the run holds more than one of its kind", () => {
+  assert.deepEqual([prompts.phaseLabel("planning", 1, 1), prompts.phaseLabel("execution", 1, 1), prompts.phaseLabel("work", 1, 1)], ["Planning", "Implementation", "Work review"]);
+  assert.deepEqual([prompts.phaseLabel("planning", 1, 2), prompts.phaseLabel("execution", 2, 2), prompts.phaseLabel("work", 2, 3)], ["Planning 1", "Implementation 2", "Work review 2"]);
+  assert.equal(prompts.phaseLabel("questions", 0, 1), "Gather Requirements");
+});
+
+// Issue #42 (Q7): the busy indicator asserts only that an agent works, beside the measured time of the call.
+test("runningFor gives m:ss, and h:mm:ss from one hour on; elapsedMs is clamped at 0", async () => {
+  const { elapsedMs } = await import("../web/src/time.ts");
+  assert.equal(prompts.runningFor(0), "running for 0:00");
+  assert.equal(prompts.runningFor(65_999), "running for 1:05");
+  assert.equal(prompts.runningFor(3_599_000), "running for 59:59");
+  assert.equal(prompts.runningFor(3_600_000 + 62_000), "running for 1:01:02");
+  assert.equal(elapsedMs("2026-09-28T12:00:00.000Z", Date.parse("2026-09-28T12:01:30.000Z")), 90_000);
+  assert.equal(elapsedMs("2026-09-28T12:00:10.000Z", Date.parse("2026-09-28T12:00:00.000Z")), 0);
+  assert.equal(elapsedMs("not a time", 0), 0);
 });

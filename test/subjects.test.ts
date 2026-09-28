@@ -4,11 +4,11 @@ import { test } from "node:test";
 import { Effect, Layer } from "effect";
 import type { Subject } from "../src/review.ts";
 import * as S from "../src/schema.ts";
-import { Store } from "../src/services.ts";
+import { Store, Ui } from "../src/services.ts";
 import { planSubject, questionSubject, requirementsSubject, workSubject } from "../src/subjects.ts";
 import { platformLayer } from "../src/platform.ts";
 import { makeStore } from "../src/store.ts";
-import { tempRepo } from "./helpers.ts";
+import { ScriptedUi, tempRepo } from "./helpers.ts";
 
 // Finding 12 of docs/functional-design-review.md: a subject's decoded output and its handler share one type.
 
@@ -34,7 +34,7 @@ test("the question subject's handlers receive the decoded list and write questio
   const store = await Effect.runPromise(makeStore(tempRepo(), []).pipe(Effect.provide(platformLayer)));
   await Effect.runPromise(store.init("task"));
   const subject = questionSubject("task");
-  const withStore = <A, E>(effect: Effect.Effect<A, E, Store>): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(Layer.succeed(Store, store))));
+  const withStore = <A, E>(effect: Effect.Effect<A, E, Store | Ui>): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Ui, new ScriptedUi([]))))));
   const list = { questions: [{ id: "Q1", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: "A" }] };
   assert.ok(subject.applyDecisions.after !== null && subject.respond.after !== null);
   await withStore(subject.applyDecisions.after(list));
@@ -54,7 +54,7 @@ test("the work subject: its id, file, prompts and policies", () => {
   assert.deepEqual([work.proceed, work.leaveOnAcceptance, work.leaveOnDecision, work.amend], [null, true, true, null]);
   assert.notEqual(work.prepare, null);
   assert.equal(work.respond.capability, "readOnly", "a work response is read-only (finding 1 of docs/gui-review.md)");
-  for (const other of [planSubject(1, true), questionSubject("t"), requirementsSubject()]) {
+  for (const other of [planSubject(1, true, null), questionSubject("t"), requirementsSubject()]) {
     assert.equal(other.respond.capability, "records");
     assert.equal(typeof other.proceed, "string");
     assert.deepEqual([other.leaveOnAcceptance, other.leaveOnDecision, other.prepare], [false, false, null]);
@@ -65,10 +65,10 @@ test("the work subject: its id, file, prompts and policies", () => {
 test("the proceed choices name the clarification and implementation", () => {
   assert.equal(questionSubject("t").proceed, "proceed to the clarification with the question list as it is");
   assert.equal(requirementsSubject().proceed, "proceed to planning with the requirements as they are");
-  assert.equal(planSubject(1, false).proceed, "proceed to implementation with the plan as it is");
+  assert.equal(planSubject(1, false, null).proceed, "proceed to implementation with the plan as it is");
 });
 
 // Decision support, plan step 1.3: a subject carries the phase its loop records (a decision's is where it took place).
 test("every subject carries its phase", () => {
-  assert.deepEqual([questionSubject("t").phase, requirementsSubject().phase, planSubject(3, false).phase, workSubject(2, false).phase], [0, 0, 3, 2]);
+  assert.deepEqual([questionSubject("t").phase, requirementsSubject().phase, planSubject(3, false, null).phase, workSubject(2, false).phase], [0, 0, 3, 2]);
 });

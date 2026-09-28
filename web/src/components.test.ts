@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { type Component, flushSync, mount, unmount } from "svelte";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import * as prompts from "../../src/prompts.ts";
@@ -10,7 +11,7 @@ import TimelineRail from "./components/TimelineRail.svelte";
 import TopBar from "./components/TopBar.svelte";
 import MessageView from "./components/Message.svelte";
 import ChatPanel from "./components/ChatPanel.svelte";
-import { clockTime, fullTime } from "./time.ts";
+import { clockTime, fullTime, TOOLTIP_GRACE_MS } from "./time.ts";
 import { emptyRun, initialState, type Message, reduce, type RoundGroup, type TimelineEntry, type TimelineStep, type Widget } from "./state.ts";
 
 // Plan step 4.5: the components, mounted in jsdom.
@@ -374,8 +375,8 @@ describe("TimelineRail", () => {
     const root = show(TimelineRail, {
       busy: true,
       timeline: [
-        { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [cycle(1, 0)], corrections: 0, result: "converged", done: true }], steps: [] },
-        { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "active", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 3, 1), cycle(3, null)], corrections: 2, result: null, done: false }], steps: [] },
+        { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [cycle(1, 0)], corrections: 0, result: "converged", done: true }], steps: [], plan: null },
+        { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "active", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 3, 1), cycle(3, null)], corrections: 2, result: null, done: false }], steps: [], plan: null },
       ],
     });
     const entries = [...root.querySelectorAll("[data-state]")].map((e) => `${e.getAttribute("data-state")}:${e.querySelector("[data-label]")?.textContent?.trim()}`);
@@ -391,26 +392,26 @@ describe("TimelineRail", () => {
 
   test("a finished loop collapses to its one line, for each way it can end", () => {
     const finished = (result: "converged" | "proceed" | "revise", corrections: number) =>
-      show(TimelineRail, { busy: false, timeline: [{ phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections, result, done: true }], steps: [] }] });
+      show(TimelineRail, { busy: false, timeline: [{ phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections, result, done: true }], steps: [], plan: null }] });
     const summary = (root: HTMLElement) => [...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim());
     const converged = finished("converged", 2);
-    expect(summary(converged)).toEqual(["2 cycles resolved 2 issues"]);
+    expect(summary(converged)).toEqual([prompts.loopSummary(2, 2, "converged")]);
     expect(converged.querySelectorAll("[data-cycle]").length).toBe(0);
-    expect(summary(finished("proceed", 1))).toEqual(["2 cycles resolved 1 issue, proceeded without convergence"]);
-    expect(summary(finished("revise", 0))).toEqual(["2 cycles: 0 corrections due"]);
+    expect(summary(finished("proceed", 1))).toEqual([prompts.loopSummary(2, 1, "proceed")]);
+    expect(summary(finished("revise", 0))).toEqual([prompts.loopSummary(2, 0, "revise")]);
   });
 
   // Issue #21: Gather Requirements shows its steps, the clarification's count, and #14's labels and cycle lines with them.
   const questionReview = { subject: "questions" as const, heading: "Question review", rounds: [cycle(1, 1), cycle(2, 0)], corrections: 1, result: "converged" as const, done: true };
-  const gather = (state: TimelineEntry["state"], steps: TimelineStep[]): TimelineEntry => ({ phase: { kind: "questions" }, label: "Gather Requirements", state, groups: [], steps });
+  const gather = (state: TimelineEntry["state"], steps: TimelineStep[]): TimelineEntry => ({ phase: { kind: "questions" }, label: "Gather Requirements", state, groups: [], steps, plan: null });
   const step = (kind: TimelineStep["kind"], label: string, state: TimelineStep["state"], count: TimelineStep["count"], groups: RoundGroup[] = []): TimelineStep => ({ kind, label, state, count, groups });
   const stepRows = (root: HTMLElement) => [...root.querySelectorAll("[data-step]")].map((e) => `${e.getAttribute("data-step")}:${e.querySelector("[data-step-label]")?.textContent?.trim()}:${e.getAttribute("aria-current") ?? "-"}`);
 
-  test("during a clarification: Formulate questions done with its loop's line, Clarification active with its count", () => {
-    const root = show(TimelineRail, { busy: true, timeline: [gather("active", [step("formulate", "Formulate questions", "done", null, [questionReview]), step("clarification", "Clarification", "active", { answered: 3, total: 7 })])] });
+  test("during a clarification: the first step done with its loop's line, Clarification active with its count", () => {
+    const root = show(TimelineRail, { busy: true, timeline: [gather("active", [step("formulate", prompts.stepLabel("formulate"), "done", null, [questionReview]), step("clarification", "Clarification", "active", { answered: 3, total: 7 })])] });
     expect(root.querySelector("[data-label]")?.textContent?.trim()).toBe("Gather Requirements");
-    expect(stepRows(root)).toEqual(["done:Formulate questions:-", "active:Clarification:step"]);
-    expect([...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim())).toEqual(["2 cycles resolved 1 issue"]);
+    expect(stepRows(root)).toEqual([`done:${prompts.stepLabel("formulate")}:-`, "active:Clarification:step"]);
+    expect([...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim())).toEqual([prompts.loopSummary(2, 1, "converged")]);
     expect(root.querySelector("[data-step=active] [data-count]")?.textContent?.trim()).toBe("3 of 7 answered");
     expect(root.textContent).not.toMatch(/Question phase|Interview|round/);
   });
@@ -419,27 +420,27 @@ describe("TimelineRail", () => {
     const requirements = { subject: "requirements" as const, heading: "Requirements review", rounds: [cycle(1, 2)], corrections: 0, result: null, done: false };
     const root = show(TimelineRail, {
       busy: false,
-      timeline: [gather("done", [step("formulate", "Formulate questions", "done", null, [questionReview]), step("clarification", "Clarification", "done", { answered: 7, total: 7 }), step("followUp", "Follow-up clarification", "done", { answered: 1, total: 2 }, [requirements])])],
+      timeline: [gather("done", [step("formulate", prompts.stepLabel("formulate"), "done", null, [questionReview]), step("clarification", "Clarification", "done", { answered: 7, total: 7 }), step("followUp", "Follow-up clarification", "done", { answered: 1, total: 2 }, [requirements])])],
     });
-    expect(stepRows(root)).toEqual(["done:Formulate questions:-", "done:Clarification:-", "done:Follow-up clarification:-"]);
+    expect(stepRows(root)).toEqual([`done:${prompts.stepLabel("formulate")}:-`, "done:Clarification:-", "done:Follow-up clarification:-"]);
     expect([...root.querySelectorAll("[data-cycle]")].map((e) => e.textContent?.trim())).toEqual(["cycle 1: 2 issues"]);
     expect([...root.querySelectorAll("[data-count]")].map((e) => e.textContent?.trim())).toEqual(["7 of 7 answered", "1 of 2 answered"]);
   });
 
   // The re-check after #21: #14's labels and cycle lines render beside the steps of Gather Requirements.
   test("Gather Requirements with its steps, a planning loop's cycles and Implementation, together", () => {
-    const planning: TimelineEntry = { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections: 2, result: "converged", done: true }], steps: [] };
-    const implementation: TimelineEntry = { phase: { kind: "execution", n: 1 }, label: "Implementation 1", state: "active", groups: [], steps: [] };
-    const root = show(TimelineRail, { busy: false, timeline: [gather("done", [step("formulate", "Formulate questions", "done", null, [questionReview]), step("clarification", "Clarification", "done", { answered: 2, total: 2 })]), planning, implementation] });
+    const planning: TimelineEntry = { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections: 2, result: "converged", done: true }], steps: [], plan: null };
+    const implementation: TimelineEntry = { phase: { kind: "execution", n: 1 }, label: "Implementation 1", state: "active", groups: [], steps: [], plan: null };
+    const root = show(TimelineRail, { busy: false, timeline: [gather("done", [step("formulate", prompts.stepLabel("formulate"), "done", null, [questionReview]), step("clarification", "Clarification", "done", { answered: 2, total: 2 })]), planning, implementation] });
     expect([...root.querySelectorAll("[data-label]")].map((e) => e.textContent?.trim())).toEqual(["Gather Requirements", "Planning 1", "Implementation 1"]);
-    expect([...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim())).toEqual(["2 cycles resolved 1 issue", "2 cycles resolved 2 issues"]);
-    expect(stepRows(root)).toEqual(["done:Formulate questions:-", "done:Clarification:-"]);
+    expect([...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim())).toEqual([prompts.loopSummary(2, 1, "converged"), prompts.loopSummary(2, 2, "converged")]);
+    expect(stepRows(root)).toEqual([`done:${prompts.stepLabel("formulate")}:-`, "done:Clarification:-"]);
     expect(root.textContent).not.toMatch(/Question phase|Execution|Interview|round| of 5/);
   });
 
   test("a stopped step shows the stopped mark and is not the current step", () => {
-    const root = show(TimelineRail, { busy: false, timeline: [gather("stopped", [step("formulate", "Formulate questions", "done", null), step("clarification", "Clarification", "stopped", { answered: 0, total: 3 })])] });
-    expect(stepRows(root)).toEqual(["done:Formulate questions:-", "stopped:Clarification:-"]);
+    const root = show(TimelineRail, { busy: false, timeline: [gather("stopped", [step("formulate", prompts.stepLabel("formulate"), "done", null), step("clarification", "Clarification", "stopped", { answered: 0, total: 3 })])] });
+    expect(stepRows(root)).toEqual([`done:${prompts.stepLabel("formulate")}:-`, "stopped:Clarification:-"]);
     expect(root.querySelector("[data-step=stopped] .mark")?.getAttribute("aria-label")).toBe("stopped");
   });
 
@@ -747,5 +748,135 @@ describe("DecisionView", () => {
     expect(root.querySelector(".column")).toBe(null);
     expect(one(root, "[role=alert]").textContent).toBe(prompts.ENLARGE_WINDOW_NOTICE);
     expect(prompts.ENLARGE_WINDOW_NOTICE).toMatch(/390/);
+  });
+});
+
+// Issue #6: the whole run in the rail, the plan's stages and steps under its Implementation, and each step's full text
+// in a hand-built rich tooltip reachable by hover and by keyboard.
+describe("TimelineRail: the plan", () => {
+  const recorded = (text = "Add the **schema**.") => ({
+    stages: [
+      { number: 1, title: "the schema and its records", steps: [{ id: "S1", number: 1, label: "Structured user questions (Q1)", text, status: "done" as const }, { id: "S2", number: 2, label: "The store", text: "x", status: "started" as const }] },
+      { number: 2, title: "the page", steps: [{ id: "S3", number: 1, label: "The rail", text: "y", status: "unfinished" as const }, { id: "S4", number: 2, label: "The tooltip", text: "z", status: "pending" as const }] },
+    ],
+  });
+  const entry = (state: TimelineEntry["state"], plan: TimelineEntry["plan"]): TimelineEntry => ({ phase: { kind: "execution", n: 1 }, label: "Implementation", state, groups: [], steps: [], plan });
+  const ahead = (kind: "planning" | "work", state: TimelineEntry["state"]): TimelineEntry => ({ phase: { kind, n: 1 }, label: kind === "planning" ? "Planning" : "Work review", state, groups: [], steps: [], plan: null });
+  const rows = (root: HTMLElement) => [...root.querySelectorAll("[data-plan-step]")].map((e) => `${e.getAttribute("data-plan-step")}:${e.querySelector("[data-plan-step-label]")?.textContent?.trim()}`);
+
+  test("the stages and the numbered steps hang under the Implementation that carries the plan, each with its mark", () => {
+    const root = show(TimelineRail, { busy: true, executing: true, timeline: [ahead("planning", "done"), entry("active", recorded()), ahead("work", "ahead")] });
+    expect([...root.querySelectorAll("[data-stage]")].map((e) => e.textContent?.trim())).toEqual([prompts.stageHeading(1, "the schema and its records"), prompts.stageHeading(2, "the page")]);
+    expect(rows(root)).toEqual([
+      `done:${prompts.planStepLabel(1, "Structured user questions (Q1)")}`,
+      `current:${prompts.planStepLabel(2, "The store")}`,
+      `unfinished:${prompts.planStepLabel(1, "The rail")}`,
+      `pending:${prompts.planStepLabel(2, "The tooltip")}`,
+    ]);
+    const marks = [...root.querySelectorAll("[data-plan-step] .mark")].map((e) => [e.textContent?.trim(), e.getAttribute("aria-label")]);
+    expect(marks).toEqual([["✓", prompts.PLAN_STEP_STATE_LABEL.done], ["●", prompts.PLAN_STEP_STATE_LABEL.current], ["◐", prompts.PLAN_STEP_STATE_LABEL.unfinished], ["○", prompts.PLAN_STEP_STATE_LABEL.pending]]);
+    expect(root.querySelector("[data-plan-step=current]")?.getAttribute("aria-current")).toBe("step");
+  });
+
+  test("without a running execution call a started step shows as unfinished, not current", () => {
+    const root = show(TimelineRail, { busy: false, executing: false, timeline: [entry("active", recorded())] });
+    expect(rows(root)[1]).toBe(`unfinished:${prompts.planStepLabel(2, "The store")}`);
+  });
+
+  test("a phase ahead and a phase not reached have marks and names of their own", () => {
+    const root = show(TimelineRail, { busy: false, executing: false, timeline: [ahead("planning", "stopped"), entry("notReached", null), ahead("work", "ahead")] });
+    const marks = [...root.querySelectorAll(".entry > .mark")].map((e) => [e.closest("[data-state]")?.getAttribute("data-state"), e.getAttribute("aria-label")]);
+    expect(marks).toEqual([["stopped", prompts.TIMELINE_STATE_LABEL.stopped], ["notReached", prompts.TIMELINE_STATE_LABEL.notReached], ["ahead", prompts.TIMELINE_STATE_LABEL.ahead]]);
+  });
+
+  test("focus opens the step's full text as a tooltip described by the step, and Escape closes it", () => {
+    const root = show(TimelineRail, { busy: false, executing: false, timeline: [entry("active", recorded())] });
+    const button = one(root, "[data-plan-step] button");
+    button.dispatchEvent(new FocusEvent("focus"));
+    flushSync();
+    const tip = one(root, "[role=tooltip]");
+    expect(button.getAttribute("aria-describedby")).toBe(tip.id);
+    expect(tip.querySelector("strong")?.textContent).toBe("schema");
+    button.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    flushSync();
+    expect(root.querySelector("[role=tooltip]")).toBe(null);
+    button.dispatchEvent(new MouseEvent("mouseenter"));
+    flushSync();
+    expect(root.querySelector("[role=tooltip]")).not.toBe(null);
+  });
+
+  // W1-R1-1: the pointer crosses a gap between the button and the tooltip; the tooltip waits for it.
+  test("after the pointer leaves the button the tooltip waits for it, stays open over the tooltip, and closes after both are left", () => {
+    vi.useFakeTimers();
+    try {
+      const root = show(TimelineRail, { busy: false, executing: false, timeline: [entry("active", recorded())] });
+      const button = one(root, "[data-plan-step] button");
+      const anchor = button.parentElement as HTMLElement;
+      button.dispatchEvent(new MouseEvent("mouseenter"));
+      flushSync();
+      anchor.dispatchEvent(new MouseEvent("mouseleave"));
+      flushSync();
+      vi.advanceTimersByTime(TOOLTIP_GRACE_MS - 1);
+      flushSync();
+      const tip = one(root, "[role=tooltip]");
+      tip.dispatchEvent(new MouseEvent("mouseenter"));
+      vi.advanceTimersByTime(TOOLTIP_GRACE_MS * 2);
+      flushSync();
+      expect(root.querySelector("[role=tooltip]")).not.toBe(null);
+      anchor.dispatchEvent(new MouseEvent("mouseleave"));
+      flushSync();
+      expect(root.querySelector("[role=tooltip]")).not.toBe(null);
+      vi.advanceTimersByTime(TOOLTIP_GRACE_MS);
+      flushSync();
+      expect(root.querySelector("[role=tooltip]")).toBe(null);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("a step's text is sanitized: no script and no event handler survives", () => {
+    const root = show(TimelineRail, { busy: false, executing: false, timeline: [entry("active", recorded('<script>window.bad = 1</script><img src="x" onerror="window.bad = 2">'))] });
+    const button = one(root, "[data-plan-step] button");
+    button.dispatchEvent(new FocusEvent("focus"));
+    flushSync();
+    const tip = one(root, "[role=tooltip]");
+    expect(tip.querySelector("script")).toBe(null);
+    expect(tip.querySelector("[onerror]")).toBe(null);
+  });
+});
+
+// Issue #42 (Q7): an indeterminate indicator written by hand, with no value and no completion, and the elapsed time of
+// the current call beside it, ticking once per second.
+describe("TimelineRail: the busy indicator", () => {
+  const active: TimelineEntry = { phase: { kind: "planning", n: 1 }, label: "Planning", state: "active", groups: [], steps: [], plan: null };
+  afterEach(() => vi.useRealTimers());
+
+  test("it is indeterminate: a progressbar without a value, and no element sized or moved by a value", () => {
+    const root = show(TimelineRail, { busy: true, executing: false, timeline: [active], callStartedAt: new Date().toISOString() });
+    const bar = one(root, "[role=progressbar]");
+    expect(bar.getAttribute("aria-label")).toBe(prompts.AGENT_WORKING_LABEL);
+    for (const attribute of ["aria-valuenow", "aria-valuemin", "aria-valuemax", "value"]) expect(bar.hasAttribute(attribute)).toBe(false);
+    for (const el of [bar, ...bar.querySelectorAll<HTMLElement>("*")]) {
+      expect(el.style.width, "a width set from a value").toBe("");
+      expect(el.style.transform, "a transform set from a value").toBe("");
+    }
+    expect(bar.closest("[data-busy]")).not.toBe(null);
+  });
+
+  test("the elapsed time of the call advances once per second from the call's start, and nothing marks it complete", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-28T12:00:05.000Z"));
+    const root = show(TimelineRail, { busy: true, executing: false, timeline: [active], callStartedAt: "2026-09-28T12:00:00.000Z" });
+    expect(one(root, "[data-elapsed]").textContent?.trim()).toBe(prompts.runningFor(5_000));
+    vi.advanceTimersByTime(60_000);
+    flushSync();
+    expect(one(root, "[data-elapsed]").textContent?.trim()).toBe(prompts.runningFor(65_000));
+    expect(one(root, "[role=progressbar]").hasAttribute("aria-valuenow")).toBe(false);
+  });
+
+  test("no component uses LinearProgressEstimate", async () => {
+    const sources = import.meta.glob("./components/*.svelte", { query: "?raw", import: "default", eager: true }) as Record<string, string>;
+    expect(Object.keys(sources).length).toBeGreaterThan(0);
+    for (const [file, text] of Object.entries(sources)) expect(text.includes("LinearProgressEstimate"), file).toBe(false);
   });
 });

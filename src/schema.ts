@@ -60,6 +60,30 @@ export const PlannerResponse = Schema.Struct(plannerResponseFields);
 
 export const PlanWriteResult = Schema.Struct({ questions_for_user: Schema.Array(UserQuestion) });
 
+// ---- the plan as data (issue #6, decisions Q1 and F1) ------------------------------------------------
+
+/**
+ * A step of the plan as Claude Code returns it: an id it keeps across revisions (G-R1-1), its number within its stage
+ * (display only), a short label and its full text in Markdown. The status is the program's, never the agent's.
+ */
+export const PlanStep = Schema.Struct({ id: Schema.String, number: Schema.Int, label: Schema.String, text: Schema.String });
+/** A stage of the plan: its number (display only), its title and its steps. */
+export const PlanStage = Schema.Struct({ number: Schema.Int, title: Schema.String, steps: Schema.Array(PlanStep) });
+/** The whole plan, as every call that creates or changes it returns it (F1). */
+export const Plan = Schema.Struct({ stages: Schema.Array(PlanStage) });
+/** The plan write, its revision and the application of the user's decisions to it. */
+export const PlanWrite = Schema.Struct({ plan: Plan, questions_for_user: Schema.Array(UserQuestion) });
+/** A response to a review of the plan, with the complete amended plan. */
+export const PlanResponse = Schema.Struct({ ...plannerResponseFields, plan: Plan });
+
+/** What the program records of a step (G-R1-2): reported started or done by report_step, unfinished when a call ended with it started. */
+export const StepStatus = Schema.Literals(["pending", "started", "done", "unfinished"]);
+export const RecordedStep = Schema.Struct({ ...PlanStep.fields, status: StepStatus });
+export const RecordedStage = Schema.Struct({ ...PlanStage.fields, steps: Schema.Array(RecordedStep) });
+export const RecordedPlan = Schema.Struct({ stages: Schema.Array(RecordedStage) });
+/** plan-review/plan.json: the plan with the status of each step, the reviewed file of the plan subject (F1). */
+export const PlanFile = Schema.Struct({ version: Schema.Literal(2), plan: RecordedPlan });
+
 // ---- decision support: the representation of docs/decision-making.md ------------------------------
 
 /**
@@ -242,6 +266,14 @@ export type SelfCorrection = typeof SelfCorrection.Type;
 export type UserQuestion = typeof UserQuestion.Type;
 export type PlannerResponse = typeof PlannerResponse.Type;
 export type PlanWriteResult = typeof PlanWriteResult.Type;
+export type PlanStep = typeof PlanStep.Type;
+export type Plan = typeof Plan.Type;
+export type PlanWrite = typeof PlanWrite.Type;
+export type PlanResponse = typeof PlanResponse.Type;
+export type StepStatus = typeof StepStatus.Type;
+export type RecordedStep = typeof RecordedStep.Type;
+export type RecordedPlan = typeof RecordedPlan.Type;
+export type PlanFile = typeof PlanFile.Type;
 export type QuestionEntry = typeof QuestionEntry.Type;
 export type QuestionList = typeof QuestionList.Type;
 export type QuestionListResponse = typeof QuestionListResponse.Type;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { describeEvent, phaseName, type UiEvent } from "../src/uiEvents.ts";
+import { countOfKind, describeEvent, foreseenPhases, phaseName, type UiEvent } from "../src/uiEvents.ts";
 
 const review = { issues: [] };
 const response = { dispositions: [], self_corrections: [], reviewer_feedback: "", questions_for_user: [] };
@@ -26,6 +26,8 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   OptionsPresented: [{ _tag: "OptionsPresented", question: "Which?", options: [{ label: "A", description: "" }, { label: "B", description: "" }] }, /options: Which\? \(2 options\)/],
   DecisionAnalyzed: [{ _tag: "DecisionAnalyzed", decision: 2, question: "Which?", options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } }, /decision 2 analyzed: Which\? \(0 columns\)/],
   AnswerRejected: [{ _tag: "AnswerRejected" }, /answer rejected, asked again/],
+  PhasesForeseen: [{ _tag: "PhasesForeseen", phases: [{ kind: "planning", n: 1 }, { kind: "execution", n: 1 }] }, /phases foreseen: Planning 1, Implementation 1/],
+  PlanChanged: [{ _tag: "PlanChanged", phase: 2, plan: { stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "l", text: "", status: "done" }, { id: "S2", number: 2, label: "l", text: "", status: "started" }] }] } }, /plan of phase 2 changed: 1 of 2 steps done/],
 };
 
 for (const [tag, [event, expected]] of Object.entries(examples)) {
@@ -36,8 +38,18 @@ for (const [tag, [event, expected]] of Object.entries(examples)) {
 
 // Issue #14: the phases are named for what they do; "Question phase" and "Execution" are gone from the labels.
 test("phaseName names the phases as the page shows them", () => {
-  assert.equal(phaseName({ kind: "questions" }), "Gather Requirements");
-  assert.equal(phaseName({ kind: "planning", n: 1 }), "Planning 1");
-  assert.equal(phaseName({ kind: "execution", n: 2 }), "Implementation 2");
-  assert.equal(phaseName({ kind: "work", n: 3 }), "Work review 3");
+  assert.equal(phaseName({ kind: "questions" }, 1), "Gather Requirements");
+  assert.equal(phaseName({ kind: "planning", n: 1 }, 1), "Planning");
+  assert.equal(phaseName({ kind: "planning", n: 1 }, 2), "Planning 1");
+  assert.equal(phaseName({ kind: "execution", n: 2 }, 2), "Implementation 2");
+  assert.equal(phaseName({ kind: "work", n: 3 }, 3), "Work review 3");
+  // Issue #6: the count of a kind among the known phases.
+  const phases = foreseenPhases(true, 2);
+  assert.deepEqual([countOfKind(phases, "questions"), countOfKind(phases, "planning"), countOfKind(phases.slice(0, 4), "work")], [1, 2, 1]);
+});
+
+// Issue #6: the run's shape, known from the start, and each further iteration as soon as it is known.
+test("foreseenPhases lists Gather Requirements when configured, then Planning, Implementation and Work review per iteration", () => {
+  assert.deepEqual(foreseenPhases(true, 1), [{ kind: "questions" }, { kind: "planning", n: 1 }, { kind: "execution", n: 1 }, { kind: "work", n: 1 }]);
+  assert.deepEqual(foreseenPhases(false, 2), [1, 2].flatMap((n) => [{ kind: "planning", n }, { kind: "execution", n }, { kind: "work", n }]));
 });

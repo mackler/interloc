@@ -24,7 +24,7 @@ export type Operation<T> = Readonly<{
   prompt: (round: number, context: RespondContext) => string;
   schema: Schema.Decoder<T>;
   /** Runs after every such call, for output that the program writes to the file; null when there is nothing to do. */
-  after: ((output: T) => Effect.Effect<void, RunError, Store>) | null;
+  after: ((output: T) => Effect.Effect<void, RunError, Store | Ui>) | null;
   /** What the call may do (finding 1 of docs/gui-review.md): "readOnly" for a work response, "records" otherwise. */
   capability: PlanningCapability;
   /** The validation beyond the schema, with its repair turn (issue #37); null when there is none. */
@@ -45,7 +45,7 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
   /** Claude Code's response to a review. */
   respond: Operation<R>;
   /** The call that applies the user's decisions; its prompt does not depend on the round. */
-  applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError, Store>) | null; validate: Validation<D> | null }>;
+  applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError, Store | Ui>) | null; validate: Validation<D> | null }>;
   /** After the response of a round, an amendment that requires the user (the requirements); null otherwise. */
   amend: ((review: Review, response: R, round: number) => Effect.Effect<void, RunError, Services>) | null;
   /** Text of the "p" choice at the round limit; null: no such choice (the work review, Q13). */
@@ -191,7 +191,7 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
     return { output, reply: used.output, resultText: used.resultText, costUsd: used.costUsd, repaired: second !== null };
   });
 
-export const applyDecisions = <D>(subject: Subject<PlannerResponse, D>): Effect.Effect<void, RunError, Services> =>
+export const applyDecisions = <R extends PlannerResponse, D>(subject: Subject<R, D>): Effect.Effect<void, RunError, Services> =>
   Effect.gen(function* () {
     const call = yield* planningCall(subject.applyDecisions.prompt, subject.applyDecisions.schema, "planning", "records", subject.applyDecisions.validate);
     if (subject.applyDecisions.after !== null) yield* subject.applyDecisions.after(call.output);

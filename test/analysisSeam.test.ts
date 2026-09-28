@@ -41,7 +41,7 @@ export const OPTION_SETS: readonly (readonly Readonly<{ label: string; descripti
 
 test("the option labels the analysis prompt presents are the labels the validation accepts, exactly", () => {
   for (const options of OPTION_SETS) {
-    const text = prompts.decisionAnalysisPrompt(FORMAT, { phase: { kind: "questions" }, question: "Which?", options }, { task: "t", requirements: null, plan: null });
+    const text = prompts.decisionAnalysisPrompt(FORMAT, { phase: { kind: "questions" }, label: "Gather Requirements", question: "Which?", options }, { task: "t", requirements: null, plan: null });
     const labels = labelsInPrompt(text);
     assert.deepEqual(labels.length, options.length, text.slice(-2000));
     for (const recommended of ["", ...labels]) {
@@ -51,7 +51,7 @@ test("the option labels the analysis prompt presents are the labels the validati
     }
   }
   // The prompt tells Claude Code to use the quoted text without its number.
-  assert.match(prompts.decisionAnalysisPrompt(FORMAT, { phase: { kind: "questions" }, question: "Which?", options: OPTION_SETS[0] }, { task: "t", requirements: null, plan: null }), /the text inside the quotation marks[^\n]*without the number/);
+  assert.match(prompts.decisionAnalysisPrompt(FORMAT, { phase: { kind: "questions" }, label: "Gather Requirements", question: "Which?", options: OPTION_SETS[0] }, { task: "t", requirements: null, plan: null }), /the text inside the quotation marks[^\n]*without the number/);
 });
 
 // The validation repair turn (decision Q1): the labels its prompt presents are the labels the validation accepts.

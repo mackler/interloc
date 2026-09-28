@@ -54,6 +54,7 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Effect.map` | 3568 | data-first and data-last |
 | `Effect.runPromise` rejection | 16701 | **Observed**: a typed failure rejects with the error object itself (`instanceof` the tagged class, `_tag` set), so `haltMessage(e)` in main.ts recognises it; a defect rejects with the defect |
 | `Option.isSome` / `isNone` | Option.d.ts:350 / 324 | type guards; `Cause.findErrorOption(exit.cause)` is `None` for a defect (observed) |
+| `Option.some` / `Option.none` / `Option.getOrNull` (read 28 Sep, issue #6) | Option.d.ts:268 / 239 / 1125 | `some(value)`, `none<A>()`; `getOrNull(self): A \| null`. `Store.loadPlan` returns an Option (no plan before the first write); `src/run.ts` and `src/planSteps.ts` take the plan or null |
 | `Effect.callback` (verified stage 5.3) | 1633 | `(register: (resume: (effect: Effect<A, E, R>) => void, signal: AbortSignal) => void \| Effect<void>) => Effect<A, E, R>`; the returned Effect runs when the waiting fiber is interrupted (used by `terminalUi.nextLine` to drop its waiter) |
 | `Effect.acquireRelease` (verified stage 5.3) | 12124 | `(acquire, release: (a, exit) => Effect<unknown, never>) => Effect<A, E, R \| Scope>`; the readline interface of `terminalUi` |
 | `Effect.scoped` (verified stage 5.3) | 12017 | closes the scope of `acquireRelease` at the end or on interruption; **observed**: interrupting a fiber that waits in `ask` closes the interface and removes its listeners from the input |

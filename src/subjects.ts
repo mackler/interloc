@@ -8,9 +8,10 @@ import * as prompts from "./prompts.ts";
 import { subjectHeading } from "./render.ts";
 import type { Subject, Validation } from "./review.ts";
 import * as S from "./schema.ts";
-import type { DecisionAnalysis, DecisionApplied, DecisionResponse, PlannerResponse, PlanWriteResult, QuestionList, QuestionListResponse } from "./schema.ts";
+import type { DecisionAnalysis, DecisionApplied, DecisionResponse, Plan, PlannerResponse, PlanResponse, PlanWrite, PlanWriteResult, QuestionList, QuestionListResponse, RecordedPlan } from "./schema.ts";
+import { validatePlan } from "./plan.ts";
 import { normalizeQuestionList } from "./schemaNormalize.ts";
-import { Store } from "./services.ts";
+import { Store, Ui } from "./services.ts";
 
 /** Records the list as questions.json after normalisation: an invalid list halts, and a dropped default is noted in the conversation. */
 export const writeQuestions = (task: string, list: QuestionList): Effect.Effect<void, RunError, Store> =>
@@ -63,16 +64,22 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
   };
 }
 
-export function planSubject(phase: number, withRequirements: boolean): Subject<PlannerResponse, PlanWriteResult> {
+/**
+ * The plan of planning phase k (issue #6, F1): Claude Code returns the whole plan with every write and every response, the
+ * program validates it against `previous`, the plan as it stood when the phase began (G-R1-1: its done steps and its
+ * statuses do not change within a planning phase), and writes plan.json and plan.md.
+ */
+export function planSubject(phase: number, withRequirements: boolean, previous: RecordedPlan | null): Subject<PlanResponse, PlanWrite> {
   const id = { plan: phase };
+  const validate = planValidation(previous);
   return {
     id,
     phase: phaseOf(id),
     heading: subjectHeading(id),
-    fileLabel: "plan.md",
+    fileLabel: "plan.json",
     reviewPrompt: (round) => prompts.planReviewPrompt(phase, round, withRequirements),
-    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlannerResponse, after: null, capability: "records", validate: null },
-    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null, validate: null },
+    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlanResponse, after: (output) => savePlan(phase, output.plan, previous), capability: "records", validate: planField(validate) },
+    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWrite, after: (output) => savePlan(phase, output.plan, previous), validate: planField(validate) },
     amend: null,
     proceed: prompts.PROCEED_TO_IMPLEMENTATION,
     leaveOnAcceptance: false,
@@ -80,6 +87,30 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
     prepare: null,
   };
 }
+
+/** The validation of a plan against the plan as the phase began (G-R1-1), with the repair turn's prompt. */
+export const planValidation =
+  (previous: RecordedPlan | null): Validation<Plan> =>
+  (plan) => {
+    const validated = validatePlan(previous, plan);
+    return Result.isFailure(validated) ? Result.fail({ error: validated.failure, repair: prompts.planRepairPrompt(validated.failure) }) : Result.succeed({ value: plan, notes: validated.success.notes });
+  };
+/** A plan's validation for an output that carries the plan in its field `plan`. */
+export const planField =
+  <T extends Readonly<{ plan: Plan }>>(validate: Validation<Plan>): Validation<T> =>
+  (output) =>
+    Result.map(validate(output.plan), ({ value, notes }) => ({ value: { ...output, plan: value }, notes }));
+
+/**
+ * Writes the plan of planning phase k as recorded against `previous` (statuses carried by id), then notifies it: the
+ * plan belongs to Implementation k (Q5). The reply was validated before, so the validation succeeds here.
+ */
+export const savePlan = (phase: number, plan: Plan, previous: RecordedPlan | null): Effect.Effect<void, RunError, Store | Ui> =>
+  Effect.gen(function* () {
+    const recorded = yield* Effect.fromResult(validatePlan(previous, plan));
+    yield* (yield* Store).savePlan(recorded.value);
+    yield* (yield* Ui).notify({ _tag: "PlanChanged", phase, plan: recorded.value });
+  });
 
 /**
  * Decision k (decision support): Codex reviews decision-<k>/analysis.json against docs/decision-making.md; Claude Code
@@ -119,7 +150,7 @@ export function decisionSubject(k: number, phase: number, format: string, valida
  * issue or a user decision leaves for a planning phase; there is no proceed choice; changes.diff is rewritten before
  * every round's review.
  */
-export function workSubject(phase: number, withRequirements: boolean): Subject<PlannerResponse, PlanWriteResult> {
+export function workSubject(phase: number, withRequirements: boolean): Subject<PlannerResponse, PlanWrite> {
   const id = { work: phase };
   return {
     id,
@@ -129,7 +160,7 @@ export function workSubject(phase: number, withRequirements: boolean): Subject<P
     reviewPrompt: (round) => prompts.workReviewPrompt(phase, round, withRequirements),
     respond: { prompt: (round, context) => prompts.workRespondPrompt(phase, round, context), schema: S.PlannerResponse, after: null, capability: "readOnly", validate: null },
     // Never issued: leaveOnDecision ends the loop instead of a planning call (G-R1-1); typed as the plan's.
-    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null, validate: null },
+    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWrite, after: null, validate: null },
     amend: null,
     proceed: null,
     leaveOnAcceptance: true,

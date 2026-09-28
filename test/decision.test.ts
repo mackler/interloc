@@ -20,7 +20,7 @@ const argued = (column: Column): ArguedColumn => {
 
 // Decision support, plan step 2.5: the decision loop over the scripted agents.
 const FORMAT = fs.readFileSync(new URL("../docs/decision-making.md", import.meta.url), "utf8");
-const question: DecisionQuestion = { phase: { kind: "planning", n: 1 }, question: "Which database?", options: [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "a server" }] };
+const question: DecisionQuestion = { phase: { kind: "planning", n: 1 }, label: "Planning", question: "Which database?", options: [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "a server" }] };
 const el = (text = "t", counterarguments: Entry["threshold"]["counterarguments"] = []) => ({ text, counterarguments });
 const entry = (id: string, title = `title ${id}`, counter: Entry["threshold"]["counterarguments"] = []): Entry => ({
   id,
@@ -145,7 +145,7 @@ test("the initial analysis is validated (P1-R2-1): a missing column halts before
 test("the Decider of a phase runs a decision loop recorded in that phase", async () => {
   const { layer, probe } = await setUp({ steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
   const outcome = await Effect.runPromise(Effect.gen(function* () {
-    const decider = (yield* Decider).at({ kind: "work", n: 2 });
+    const decider = (yield* Decider).at({ kind: "work", n: 2 }, "Work review 2");
     return yield* decider.decide({ question: question.question, options: question.options });
   }).pipe(Effect.provide(layer)));
   assert.deepEqual([outcome.decision, outcome.result], [1, "converged"]);
@@ -399,4 +399,36 @@ test("a repair of a duplicate id permits no recommendation, and the repaired ana
   assert.equal(end.result, "converged");
   assert.match(probe.planner.prompts[1], /To recommend no option, leave the recommendation's option and reason empty\./);
   assert.equal(json(probe.dir, "decision-1/analysis.json").analysis.recommendation.option, "");
+});
+
+// W1-R1-2: a decision's prompt names its phase as the terminal and the rail do, by the count of its kind in the run.
+test("a decision names its phase by the run's count: Planning in a run of one iteration, Planning 2 once a second is foreseen", async () => {
+  const { run } = await import("../src/run.ts");
+  const { countOfKind, foreseenPhases, phaseName } = await import("../src/uiEvents.ts");
+  const { finished } = await import("./helpers.ts");
+  const noQuestions = { questions_for_user: [] };
+  const asking = { questions_for_user: [{ question: question.question, options: question.options }] };
+  const expected = (iterations: number, n: number) => `The run is in ${phaseName({ kind: "planning", n }, countOfKind(foreseenPhases(false, iterations), "planning"))}.`;
+  const analysisPrompt = (prompts: readonly string[]) => prompts.find((p) => p.includes(prompts_.DECISION_FORMAT_AUTHORITY)) ?? "";
+  const prompts_ = prompts;
+
+  const one = testLayer(tempRepo(), {
+    answers: ["/decide", "1"],
+    steps: [{ output: asking, plan: "v1" }, { output: analysis() }, { output: noQuestions }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  await Effect.runPromise(run("task").pipe(Effect.provide(one.layer)));
+  assert.ok(analysisPrompt(one.probe.planner.prompts).includes(expected(1, 1)), analysisPrompt(one.probe.planner.prompts).slice(-600));
+
+  const stopped = { status: "needs_input" as const, summary: "s", question: "A or B?", remainingWork: "w", userInput: "B" };
+  const two = testLayer(tempRepo(), {
+    answers: ["/decide", "1"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: asking }, { output: analysis() }, { output: noQuestions }],
+    // Plan review 1, work review 1, the decision's review, plan review 2, work review 2.
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [stopped, finished],
+  });
+  await Effect.runPromise(run("task").pipe(Effect.provide(two.layer)));
+  assert.ok(analysisPrompt(two.probe.planner.prompts).includes(expected(2, 2)), analysisPrompt(two.probe.planner.prompts).slice(-600));
 });

@@ -1,10 +1,10 @@
 import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
-import { HELP_ME_DECIDE } from "../src/prompts.ts";
+import { HELP_ME_DECIDE, loopSummary, PLAN_STEP_STATE_LABEL, planStepLabel, stageHeading, stepLabel } from "../src/prompts.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
 // fails on an uncaught error or a console error in any of its pages (e2e/fixtures.ts, finding 10 of docs/gui-review.md).
-const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113, decideBlank: 8114 } as const;
+const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113, decideBlank: 8114, planSteps: 8115 } as const;
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
@@ -54,15 +54,16 @@ const startTask = async (page: Page, scenario: Scenario, task: string) => {
 
 test("(1) a run from the form: the timeline shows its phases and the right panel the agents' exchange", async ({ page }) => {
   await startTask(page, "converge", "Document the service");
-  await expect(rail(page).getByText("Planning 1", { exact: true })).toBeVisible();
-  await expect(rail(page).getByText("Implementation 1", { exact: true })).toBeVisible();
-  await expect(rail(page).getByText("Work review 1", { exact: true })).toBeVisible();
+  // Issue #6: one iteration, so the phases carry no number.
+  await expect(rail(page).getByText("Planning", { exact: true })).toBeVisible();
+  await expect(rail(page).getByText("Implementation", { exact: true })).toBeVisible();
+  await expect(rail(page).getByText("Work review", { exact: true })).toBeVisible();
   await expect(right(page).getByText("The step names no file.")).toBeVisible();
   await expect(right(page).getByText(/accepted: rationale P1-R1-1/)).toBeVisible();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
-  // Issue #14: a finished loop is one line with what its cycles resolved, and no limit is shown.
-  await expect(rail(page).getByText("2 cycles resolved 1 issue", { exact: true })).toBeVisible();
-  await expect(rail(page).getByText("1 cycle resolved 0 issues", { exact: true })).toBeVisible();
+  // Issues #14 and #28: a finished loop is one line with what its cycles resolved, and no limit is shown.
+  await expect(rail(page).getByText(loopSummary(2, 1, "converged"), { exact: true })).toBeVisible();
+  await expect(rail(page).getByText(loopSummary(1, 0, "converged"), { exact: true })).toBeVisible();
   await expect(rail(page).getByText(/ of \d/)).toHaveCount(0);
   await expect(page.locator("button[name=new]")).toBeVisible();
   // Issue #2: in the right panel Claude speaks from the left and Codex from the right.
@@ -70,8 +71,8 @@ test("(1) a run from the form: the timeline shows its phases and the right panel
   await onSide(list.locator("article[data-author=claude]").first(), list, "left");
   await onSide(list.locator("article[data-author=codex]").first(), list, "right");
   // Issue #15: each phase is a band opened by its label with the time it began; each kind of phase has its own tone.
-  await expect(left(page).locator(".phase-label", { hasText: /^Planning 1 · \S/ })).toBeVisible();
-  await expect(left(page).locator(".phase-label", { hasText: /^Implementation 1 · \S/ })).toBeVisible();
+  await expect(left(page).locator(".phase-label", { hasText: /^Planning · \S/ })).toBeVisible();
+  await expect(left(page).locator(".phase-label", { hasText: /^Implementation · \S/ })).toBeVisible();
   const tone = (band: Locator) => band.evaluate((e) => getComputedStyle(e).backgroundColor);
   const [planningTone, executionTone] = [await tone(left(page).locator(".band-planning").first()), await tone(left(page).locator(".band-execution").first())];
   expect(planningTone).not.toBe(executionTone);
@@ -128,7 +129,7 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await expect(left(page).getByText('"""')).toHaveCount(0);
   // Issue #21: Gather Requirements shows its steps; the clarification counts the agreed question, answered or not.
   const step = (label: string) => rail(page).locator("[data-step]", { has: page.locator("[data-step-label]", { hasText: label }) });
-  await expect(step("Formulate questions")).toHaveAttribute("data-step", "done");
+  await expect(step(stepLabel("formulate"))).toHaveAttribute("data-step", "done");
   await expect(step("Clarification")).toHaveAttribute("data-step", "active");
   await expect(step("Clarification").locator("[data-count]")).toHaveText("0 of 1 answered");
   await page.getByRole("button", { name: "1. PostgreSQL" }).click();
@@ -153,7 +154,7 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await expect(rail(page).getByText("Gather Requirements", { exact: true })).toBeVisible();
   await expect(step("Clarification")).toHaveAttribute("data-step", "done");
-  await expect(step("Clarification").getByText("1 cycle resolved 0 issues", { exact: true })).toBeVisible();
+  await expect(step("Clarification").getByText(loopSummary(1, 0, "converged"), { exact: true })).toBeVisible();
 });
 
 test("(6) a work correction runs planning, execution and the work review a second time", async ({ page }) => {
@@ -161,7 +162,7 @@ test("(6) a work correction runs planning, execution and the work review a secon
   await expect(left(page).getByText(/finished after 2 implementation phase/)).toBeVisible();
   for (const phase of ["Planning 1", "Implementation 1", "Work review 1", "Planning 2", "Implementation 2", "Work review 2"]) await expect(rail(page).getByText(phase, { exact: true })).toBeVisible();
   // Issue #14 (G-R1-1): the work review that led to the second planning phase names its corrections due.
-  await expect(rail(page).getByText("1 cycle: 1 correction due", { exact: true })).toBeVisible();
+  await expect(rail(page).getByText(loopSummary(1, 1, "revise"), { exact: true })).toBeVisible();
   await expect(right(page).getByText("The step misses its test.")).toBeVisible();
   // Issue #15: every planning phase has the same tone, and so has every execution phase, apart from the other's.
   const tones = (kind: string) => left(page).locator(`.band-${kind}`).evaluateAll((els) => els.map((e) => getComputedStyle(e).backgroundColor));
@@ -235,7 +236,7 @@ test("(10) Start still starts when the browser refuses to store the directory", 
     };
   });
   await startTask(page, "converge", "Document the service once more");
-  await expect(rail(page).getByText("Planning 1", { exact: true })).toBeVisible();
+  await expect(rail(page).getByText("Planning", { exact: true })).toBeVisible();
 });
 
 test("(11) Enter while an input method is composing does not answer", async ({ page }) => {
@@ -324,4 +325,27 @@ test("(15) a rejected empty reply keeps the analysis shown; the answer that foll
   await expect(analysis).toBeHidden();
   await page.getByRole("button", { name: "Confirm" }).click();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+});
+
+test("(16) the plan in the rail: its stages and steps under the Implementation that carries it out, the current step, the revision", async ({ page }) => {
+  await startTask(page, "planSteps", "Build the rail");
+  const step = (label: string) => rail(page).locator("[data-plan-step]", { has: page.locator("[data-plan-step-label]", { hasText: label }) });
+  // The run waits in its second execution: the stop of the first foresaw the second iteration, so every phase is numbered.
+  await expect(step(planStepLabel(2, "The store"))).toHaveAttribute("data-plan-step", "current");
+  for (const phase of ["Planning 1", "Implementation 1", "Work review 1", "Planning 2", "Implementation 2", "Work review 2"]) await expect(rail(page).getByText(phase, { exact: true })).toBeVisible();
+  // The revised plan hangs under Implementation 2 alone (Q5, Q9), with its new stage and step.
+  const implementation2 = rail(page).locator("[data-state]", { has: page.locator("[data-label]", { hasText: /^Implementation 2$/ }) });
+  await expect(implementation2.getByText(stageHeading(2, "the page"), { exact: true })).toBeVisible();
+  await expect(rail(page).locator("[data-plan-step]")).toHaveCount(3);
+  await expect(step(planStepLabel(1, "Structured user questions (Q1)")).locator(".mark")).toHaveAttribute("aria-label", PLAN_STEP_STATE_LABEL.done);
+  await expect(step(planStepLabel(1, "The long step"))).toHaveAttribute("data-plan-step", "pending");
+  // The step's full text by keyboard.
+  await step(planStepLabel(1, "Structured user questions (Q1)")).locator("button").focus();
+  await expect(rail(page).getByRole("tooltip")).toContainText("Add the schema of a question.");
+  await page.keyboard.press("Escape");
+  await expect(rail(page).getByRole("tooltip")).toHaveCount(0);
+  await page.locator("button[name=stop]").click();
+  await expect(page.locator("button[name=new]")).toBeVisible();
+  // After the stop no execution runs: the started step is unfinished.
+  await expect(step(planStepLabel(2, "The store"))).toHaveAttribute("data-plan-step", "unfinished");
 });

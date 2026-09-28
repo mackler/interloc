@@ -12,6 +12,7 @@ test("pathOf gives every record its path under plan-review/", () => {
     [{ kind: "questions" }, "questions.json"],
     [{ kind: "requirements" }, "requirements.md"],
     [{ kind: "plan" }, "plan.md"],
+    [{ kind: "planFile" }, "plan.json"],
     [{ kind: "checkpoint" }, "checkpoint.json"],
     [{ kind: "config" }, "config.json"],
     [{ kind: "log", subject: "questions" }, "questions-log.json"],
@@ -33,7 +34,7 @@ test("subjects: directory names, phases, reviewed files, and the inverse of the 
   assert.equal(subjectDir("requirements"), "requirements-review");
   assert.equal(subjectDir({ plan: 7 }), "planning-7");
   assert.deepEqual([phaseOf("questions"), phaseOf("requirements"), phaseOf({ plan: 7 })], [0, 0, 7]);
-  assert.deepEqual([reviewedFile("questions"), reviewedFile("requirements"), reviewedFile({ plan: 1 })], [{ kind: "questions" }, { kind: "requirements" }, { kind: "plan" }]);
+  assert.deepEqual([reviewedFile("questions"), reviewedFile("requirements"), reviewedFile({ plan: 1 })], [{ kind: "questions" }, { kind: "requirements" }, { kind: "planFile" }]);
   assert.deepEqual([subjectOf("question-review"), subjectOf("requirements-review"), subjectOf("planning-12"), subjectOf("planning-0"), subjectOf("execution-1"), subjectOf("planning-x")], ["questions", "requirements", { plan: 12 }, null, null, null]);
 });
 
@@ -59,7 +60,7 @@ test("guardedRecord exempts only the program's own writes during a call and the 
   assert.equal(guardedRecord("archive-2026-09-26T08-10-39-966Z-2/work-review-1/changes.diff"), false);
   // Every other kind of the catalog is guarded; a kind added later is guarded unless it is exempted by name.
   const guarded: Artifact[] = [
-    { kind: "conversation" }, { kind: "decisions" }, { kind: "feedback" }, { kind: "questions" }, { kind: "requirements" }, { kind: "plan" },
+    { kind: "conversation" }, { kind: "decisions" }, { kind: "feedback" }, { kind: "questions" }, { kind: "requirements" }, { kind: "plan" }, { kind: "planFile" },
     { kind: "checkpoint" }, { kind: "config" }, { kind: "baseline" }, { kind: "changes", phase: 1 },
     ...LOG_SUBJECTS.map((subject): Artifact => ({ kind: "log", subject })),
     ...LOG_SUBJECTS.flatMap((subject) => (["review", "response", "round"] as const).map((kind): Artifact => ({ kind, subject, round: 1 }))),

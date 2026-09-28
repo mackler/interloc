@@ -14,7 +14,7 @@ import { type Broadcast, type Listener, makePublisher, makeRunManager, type Refu
 import { subscribeBounded } from "../src/webServer.ts";
 import { numberedChoices } from "../src/userPrompts.ts";
 import { FakeSdk, init, messages, success, turn } from "./fakeSdk.ts";
-import { finished, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
+import { finished, scriptedPlan, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
 import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 
 // Plan step 3.3: the run manager with scripted clients over the scripted wiring (and once over the real adapters).
@@ -93,7 +93,7 @@ test("start while a run is active is refused; a bad project path is refused with
   const repo = tempRepo();
   const h = await harness(repo, [{ steps: [{ hang: true }] }]);
   const id = await started(h, repo);
-  await until("the hanging call", () => eventsOf(h, id).some((e) => e._tag === "Said" && /Planning phase 1/.test(e.text)));
+  await until("the hanging call", () => eventsOf(h, id).some((e) => e._tag === "Said" && /^Planning: requesting the initial plan/.test(e.text)));
   const refusedStart = (await run(h.manager.start(repo, "second"))) as Refusal;
   assert.match(refusedStart.refused, /a run is in progress/);
   await run(h.manager.stop(h.manager.incarnation, id));
@@ -176,11 +176,10 @@ test("an interview's numbered answer sent through the manager reaches Claude Cod
 
 test("over the real adapters and the fake SDK, the run reports both agents' activity", async () => {
   const repo = tempRepo();
-  const plan = path.join(repo, "plan-review", "plan.md");
+  // Issue #6 (F1): the plan is the reply.
   const writePlan = () => (async function* () {
-    fs.writeFileSync(plan, "1. [ ] step\n");
     yield init("s-1");
-    yield success(noQuestions);
+    yield success({ ...noQuestions, plan: scriptedPlan("step") });
   })();
   const report = { status: "finished", summary: "done", question: "", remaining_work: "" };
   const sdk = new FakeSdk([writePlan, messages(init("s-1"), success(report))], [turn(JSON.stringify({ issues: [] })), turn(JSON.stringify({ issues: [] }))]);

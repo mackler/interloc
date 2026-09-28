@@ -1,10 +1,14 @@
 import assert from "node:assert/strict";
-import { withOffer } from "../src/prompts.ts";
+import { planRepairPrompt, withOffer } from "../src/prompts.ts";
+import * as S from "../src/schema.ts";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
-import { finished, issue, respond, runFails, runTask, tempRepo, testLayer } from "./helpers.ts";
+import { Effect, Fiber } from "effect";
+import { run } from "../src/run.ts";
+import type { UiEvent } from "../src/uiEvents.ts";
+import { finished, issue, respond, runFails, runTask, scriptedRecordedPlan, tempRepo, testLayer } from "./helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
 
@@ -21,7 +25,7 @@ test("one accepted issue, then convergence, then finished", async () => {
   assert.equal(log[0].action, "accepted");
   const conversation = fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8");
   assert.match(conversation, /\[P1-R1-1\]\*\* accepted/);
-  assert.match(conversation, /The review of plan.md has converged/);
+  assert.match(conversation, /The review of plan.json has converged/);
 });
 
 test("a rejected issue raised again produces one prompt", async () => {
@@ -90,7 +94,7 @@ test("an accepted issue without a plan change halts the run", async () => {
     steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["A", "accepted"]]) }],
     reviews: [{ issues: [issue("A")] }],
   });
-  await runFails(layer, "AcceptedWithoutChange", /plan\.md is unchanged/);
+  await runFails(layer, "AcceptedWithoutChange", /plan\.json is unchanged/);
 });
 
 test("the round limit offers to proceed to implementation", async () => {
@@ -182,9 +186,11 @@ test("a missing disposition stops with RoundInvalid naming the id", async () => 
   await runFails(layer, "RoundInvalid", /Claude Code returned no disposition for: B/);
 });
 
-test("no plan written stops with PlanNotWritten", async () => {
-  const { layer } = testLayer(tempRepo(), { steps: [{ output: noQuestions }] });
-  await runFails(layer, "PlanNotWritten", /did not write plan-review\/plan\.md/);
+// Issue #6 (F1): a plan write without a plan is a schema mismatch, with its repair turn, not a missing file.
+test("a plan write without a plan gets the schema repair turn, and a second one stops the run", async () => {
+  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: noQuestions }, { output: noQuestions }] });
+  await runFails(layer, "AgentReplyInvalid", /plan/);
+  assert.equal(probe.planner.prompts.length, 2);
 });
 
 test("Codex changing the reviewed file stops with ReviewedFileChanged", async () => {
@@ -192,7 +198,7 @@ test("Codex changing the reviewed file stops with ReviewedFileChanged", async ()
     steps: [{ output: noQuestions, plan: "v1" }],
     reviews: [{ issues: [issue("A")], plan: "changed by the reviewer" }],
   });
-  await runFails(layer, "ReviewedFileChanged", /plan\.md changed during a Codex review/);
+  await runFails(layer, "ReviewedFileChanged", /plan\.json changed during a Codex review/);
 });
 
 // Finding 14 of docs/functional-design-review.md: after an idle-round decision appended a second hash for one
@@ -216,9 +222,9 @@ test("the identical-content message names the round after which the content was 
     config: { maxIdleRounds: 1, maxRounds: 6 },
   });
   assert.equal(await runTask(layer), 1);
-  const identical = probe.ui.said.filter((line) => /is identical to plan\.md after/.test(line));
+  const identical = probe.ui.said.filter((line) => /is identical to plan\.json after/.test(line));
   assert.equal(identical.length, 1, probe.ui.said.join("\n"));
-  assert.match(identical[0], /identical to plan\.md after cycle 2\b/);
+  assert.match(identical[0], /identical to plan\.json after cycle 2\b/);
 });
 
 // Finding 3 of docs/functional-design-review.md: duplicate or extra dispositions and duplicate review ids passed
@@ -352,4 +358,166 @@ test("the run notifies the phases, the plan write and the execution outcome in o
       { _tag: "PhaseEnded", phase: { kind: "work", n: 1 }, result: "converged" },
     ],
   );
+});
+
+// Issue #6 (F1, F2, G-R1-1, Q3): the plan is the reply; the program writes plan.json and plan.md, notifies the plan,
+// and a plan that breaks the id rule gets one validation repair turn.
+test("a plan write saves plan.json and plan.md and notifies the plan for its phase; a response replaces both", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "first text" }, { output: respond([["A", "accepted"]]), plan: "second text" }],
+    reviews: [{ issues: [issue("A")] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(layer), 1);
+  const recorded = JSON.parse(fs.readFileSync(path.join(probe.dir, "plan.json"), "utf8"));
+  assert.deepEqual(recorded, { version: 2, plan: scriptedRecordedPlan("second text") });
+  assert.match(fs.readFileSync(path.join(probe.dir, "plan.md"), "utf8"), /second text/);
+  const changed = probe.ui.notified.filter((e) => e._tag === "PlanChanged");
+  assert.deepEqual(changed.map((e) => (e._tag === "PlanChanged" ? [e.phase, e.plan.stages[0].steps[0].text] : null)), [[1, "first text"], [1, "second text"]]);
+  // The planner's schema carries the plan (F1).
+  assert.ok(probe.planner.schemas.slice(0, 2).every((s) => s === S.PlanWrite || s === S.PlanResponse));
+});
+
+test("a plan that breaks the id rule gets one validation repair turn, and a second failure stops the run", async () => {
+  const twice = { stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "a", text: "a" }, { id: "S1", number: 2, label: "b", text: "b" }] }] };
+  const repaired = testLayer(tempRepo(), {
+    steps: [{ output: { ...noQuestions, plan: twice } }, { output: noQuestions, plan: "fixed" }],
+    reviews: [{ issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  assert.equal(await runTask(repaired.layer), 1);
+  assert.equal(repaired.probe.planner.prompts[1], planRepairPrompt({ duplicateIds: ["S1"], emptyIds: 0, removedDone: [], changedDone: [] }));
+  const { layer } = testLayer(tempRepo(), { steps: [{ output: { ...noQuestions, plan: twice } }, { output: { ...noQuestions, plan: twice } }] });
+  await runFails(layer, "PlanInvalid", /S1/);
+});
+
+test("Codex changing plan.json during its turn stops with ReviewedFileChanged naming plan.json", async () => {
+  const { layer } = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [], plan: "changed by Codex" }] });
+  await runFails(layer, "ReviewedFileChanged", /plan\.json changed during a Codex review/);
+});
+
+// Issue #6 (Q2, Q5, G-R1-2): the steps reported during execution, and a started step that the call leaves unfinished.
+const planStatuses = (dir: string): Record<string, string> => {
+  const file = JSON.parse(fs.readFileSync(path.join(dir, "plan.json"), "utf8"));
+  return Object.fromEntries(file.plan.stages.flatMap((s: { steps: { id: string; status: string }[] }) => s.steps.map((st) => [st.id, st.status])));
+};
+const stopped = { status: "needs_input" as const, summary: "s", question: "A or B?", remainingWork: "w", userInput: "B" };
+
+test("a step started in a stopped execution is unfinished before the work review, remains for the next execution, and a report there belongs to phase 2", async () => {
+  const seen: Record<string, string>[] = [];
+  let dir = "";
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: noQuestions }],
+    // Plan review 1, work review 1 (sees S1 unfinished), plan review 2, work review 2.
+    reviews: [{ issues: [] }, { issues: [], onCall: () => seen.push(planStatuses(dir)) }, { issues: [] }, { issues: [] }],
+    execs: [stopped, finished],
+    execScripts: [{ reports: [["S1", "started"]] }, { onCall: () => seen.push(planStatuses(dir)), reports: [["S1", "started"], ["S1", "done"]] }],
+  });
+  dir = probe.dir;
+  assert.equal(await runTask(layer), 2);
+  assert.deepEqual(seen, [{ S1: "unfinished" }, { S1: "unfinished" }]);
+  assert.deepEqual(planStatuses(probe.dir), { S1: "done" });
+  const changed = probe.ui.notified.flatMap((e) => (e._tag === "PlanChanged" ? [`${e.phase}:${e.plan.stages[0].steps[0].status}`] : []));
+  assert.deepEqual(changed, ["1:pending", "1:started", "1:unfinished", "2:unfinished", "2:started", "2:done"]);
+});
+
+test("a report naming no step of the plan is answered with an error, changes nothing and the run goes on", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }, { issues: [] }],
+    execs: [finished],
+    execScripts: [{ reports: [["S7", "done"], ["S1", "done"]] }],
+  });
+  assert.equal(await runTask(layer), 1);
+  assert.deepEqual(probe.planner.stepReplies.map((r) => r.isError), [true, false]);
+  assert.deepEqual(planStatuses(probe.dir), { S1: "done" });
+});
+
+test("an edit of plan.json and plan.md after the last report does not survive the end of execution", async () => {
+  let dir = "";
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }, { issues: [] }],
+    execs: [finished],
+    execScripts: [
+      {
+        reports: [["S1", "done"]],
+        after: () => {
+          fs.writeFileSync(path.join(dir, "plan.json"), JSON.stringify({ version: 2, plan: scriptedRecordedPlan("edited", "pending") }));
+          fs.writeFileSync(path.join(dir, "plan.md"), "edited");
+        },
+      },
+    ],
+  });
+  dir = probe.dir;
+  assert.equal(await runTask(layer), 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, "plan.json"), "utf8")).plan, scriptedRecordedPlan("v1", "done"));
+  assert.doesNotMatch(fs.readFileSync(path.join(dir, "plan.md"), "utf8"), /edited/);
+});
+
+test("an interrupted execution leaves its started step unfinished", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }],
+    execScripts: [{ reports: [["S1", "started"]], hang: true }],
+  });
+  const fiber = Effect.runFork(run("task").pipe(Effect.provide(layer)));
+  for (let i = 0; i < 200 && planStatusesOrNull(probe.dir)?.S1 !== "started"; i++) await new Promise((r) => setTimeout(r, 10));
+  await Effect.runPromise(Fiber.interrupt(fiber));
+  assert.deepEqual(planStatuses(probe.dir), { S1: "unfinished" });
+});
+const planStatusesOrNull = (dir: string): Record<string, string> | null => (fs.existsSync(path.join(dir, "plan.json")) ? planStatuses(dir) : null);
+
+// Issue #6 ("the whole run from the start"): the phases known of the run, notified before they begin.
+const foreseen = (notified: readonly UiEvent[]): string[] =>
+  notified.flatMap((e) => (e._tag === "PhasesForeseen" ? [`foreseen ${e.phases.map((p) => (p.kind === "questions" ? "Q" : `${p.kind[0]}${p.n}`)).join(",")}`] : e._tag === "PhaseBegan" ? [`began ${e.phase.kind === "questions" ? "Q" : `${e.phase.kind[0]}${e.phase.n}`}`] : []));
+const everyBeganForeseen = (notified: readonly UiEvent[]): void => {
+  const known = new Set<string>();
+  for (const e of notified) {
+    if (e._tag === "PhasesForeseen") for (const p of e.phases) known.add(JSON.stringify(p));
+    if (e._tag === "PhaseBegan") assert.ok(known.has(JSON.stringify(e.phase)), `${JSON.stringify(e.phase)} began unforeseen`);
+  }
+};
+
+test("a converging run foresees its one iteration at the start, and every foreseen phase begins", async () => {
+  const { layer, probe } = testLayer(tempRepo(), { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] });
+  await runTask(layer);
+  assert.deepEqual(foreseen(probe.ui.notified), ["foreseen p1,e1,w1", "began p1", "began e1", "began w1"]);
+  everyBeganForeseen(probe.ui.notified);
+});
+
+test("a stopped execution foresees the second iteration at once; a work review that revises foresees it after the review", async () => {
+  const stop = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: noQuestions }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [stopped, finished],
+  });
+  await runTask(stop.layer);
+  assert.deepEqual(foreseen(stop.probe.ui.notified), ["foreseen p1,e1,w1", "began p1", "began e1", "foreseen p1,e1,w1,p2,e2,w2", "began w1", "began p2", "began e2", "began w2"]);
+  everyBeganForeseen(stop.probe.ui.notified);
+  const revise = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["W1-R1-1", "accepted"]]) }, { output: noQuestions, plan: "v2" }],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, { issues: [] }, { issues: [] }],
+    execs: [finished, finished],
+  });
+  await runTask(revise.layer);
+  assert.deepEqual(foreseen(revise.probe.ui.notified), ["foreseen p1,e1,w1", "began p1", "began e1", "began w1", "foreseen p1,e1,w1,p2,e2,w2", "began p2", "began e2", "began w2"]);
+});
+
+test("with the question phase configured, Gather Requirements is foreseen first", async () => {
+  // The run ends at its first planning call, which is not scripted; what was notified before is what counts.
+  const { layer, probe } = testLayer(tempRepo(), { config: { questionPhase: true } });
+  await Effect.runPromiseExit(run("task").pipe(Effect.provide(layer)));
+  assert.equal(foreseen(probe.ui.notified)[0], "foreseen Q,p1,e1,w1");
+});
+
+test("the terminal's phase lines carry numbers only once a second iteration is foreseen", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }, { output: noQuestions }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [stopped, finished],
+  });
+  await runTask(layer);
+  const lines = probe.ui.said.filter((l) => /^\n?(Planning|Implementation|Work review)( \d)?:/.test(l)).map((l) => l.trim().replace(/:.*/, ""));
+  assert.deepEqual(lines, ["Planning", "Implementation", "Work review 1", "Planning 2", "Implementation 2", "Work review 2"]);
 });

@@ -3,7 +3,7 @@
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { cycleHeading, phaseLabel } from "./prompts.ts";
-import type { DecisionAnalysis, DecisionResponse, ExecOutcome, PlannerResponse, QuestionListResponse, Review, UserQuestion } from "./schema.ts";
+import type { DecisionAnalysis, DecisionResponse, ExecOutcome, PlannerResponse, PlanResponse, QuestionListResponse, RecordedPlan, Review, UserQuestion } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
 export type Phase = Readonly<{ kind: "questions" }> | Readonly<{ kind: "planning" | "execution" | "work"; n: number }>;
@@ -17,8 +17,8 @@ export type UiEvent =
   | Readonly<{ _tag: "PhaseEnded"; phase: Phase; result: string }>
   | Readonly<{ _tag: "RoundBegan"; subject: SubjectId; round: number; limit: number }>
   | Readonly<{ _tag: "ReviewReceived"; subject: SubjectId; round: number; review: Review; counted: number }>
-  /** The question subject answers with its amended list besides (defect A of docs/page-question-phase-defects.md), a decision with its amended analysis (W2-R1-1). */
-  | Readonly<{ _tag: "ResponseReceived"; subject: SubjectId; round: number; response: PlannerResponse | QuestionListResponse | DecisionResponse; resultText: string }>
+  /** The question subject answers with its amended list besides (defect A of docs/page-question-phase-defects.md), a decision with its amended analysis (W2-R1-1), the plan with the whole plan (issue #6). */
+  | Readonly<{ _tag: "ResponseReceived"; subject: SubjectId; round: number; response: PlannerResponse | QuestionListResponse | DecisionResponse | PlanResponse; resultText: string }>
   | Readonly<{ _tag: "LoopFinished"; subject: SubjectId; result: LoopResult }>
   | Readonly<{ _tag: "PlanWritten"; phase: number; questions: readonly UserQuestion[]; resultText: string }>
   | Readonly<{ _tag: "ExecutionEnded"; phase: number; outcome: ExecOutcome }>
@@ -37,20 +37,36 @@ export type UiEvent =
   /** A decision loop has ended: its analysis, shown before the question is asked again (decision support). */
   | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>
   /** The last answer was rejected (a blank reply where one is required) and the question is asked again (W3-R1-1); for the page. */
-  | Readonly<{ _tag: "AnswerRejected" }>;
+  | Readonly<{ _tag: "AnswerRejected" }>
+  /** Every phase known of the run so far, begun or ahead, in order (issue #6): the whole list each time, so folding it twice changes nothing. */
+  | Readonly<{ _tag: "PhasesForeseen"; phases: readonly Phase[] }>
+  /** The plan with the status of each step (issue #6), after every write and every report of a step; `phase` is the planning and implementation phase it belongs to (Q5). */
+  | Readonly<{ _tag: "PlanChanged"; phase: number; plan: RecordedPlan }>;
 
 const AGENT_LABEL: Record<Agent, string> = { claude: "Claude Code", codex: "Codex" };
-/** The name of a phase as the progress display shows it. */
-export const phaseName = (phase: Phase): string => (phase.kind === "questions" ? phaseLabel("questions", 0) : phaseLabel(phase.kind, phase.n));
+/** The name of a phase as the progress display shows it; `count` is how many phases of its kind the run holds (issue #6). */
+export const phaseName = (phase: Phase, count: number): string => (phase.kind === "questions" ? phaseLabel("questions", 0, count) : phaseLabel(phase.kind, phase.n, count));
+/** How many of the phases are of the kind: the count the terminal, the progress rail and the bands number by (issue #6). */
+export const countOfKind = (phases: readonly Phase[], kind: Phase["kind"]): number => phases.filter((p) => p.kind === kind).length;
+/** The name of a phase in test output: always numbered. */
+const numberedName = (phase: Phase): string => phaseName(phase, 2);
+/**
+ * The phases known of a run (issue #6): Gather Requirements when the question phase is configured, then Planning,
+ * Implementation and Work review of each iteration known so far.
+ */
+export const foreseenPhases = (questionPhase: boolean, iterations: number): readonly Phase[] => [
+  ...(questionPhase ? [{ kind: "questions" } as const] : []),
+  ...Array.from({ length: iterations }, (_, i) => i + 1).flatMap((n): Phase[] => [{ kind: "planning", n }, { kind: "execution", n }, { kind: "work", n }]),
+];
 const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** One line per event, for test output. Total over the variants. */
 export const describeEvent = (event: UiEvent): string => {
   switch (event._tag) {
     case "PhaseBegan":
-      return `${phaseName(event.phase)} began`;
+      return `${numberedName(event.phase)} began`;
     case "PhaseEnded":
-      return `${phaseName(event.phase)} ended: ${event.result}`;
+      return `${numberedName(event.phase)} ended: ${event.result}`;
     case "RoundBegan":
       return cycleHeading(subjectDir(event.subject), event.round);
     case "ReviewReceived":
@@ -83,5 +99,11 @@ export const describeEvent = (event: UiEvent): string => {
       return `decision ${event.decision} analyzed: ${event.question} (${plural(event.analysis.columns.length, "column")})`;
     case "AnswerRejected":
       return "answer rejected, asked again";
+    case "PhasesForeseen":
+      return `phases foreseen: ${event.phases.map(numberedName).join(", ")}`;
+    case "PlanChanged": {
+      const steps = event.plan.stages.flatMap((st) => st.steps);
+      return `plan of phase ${event.phase} changed: ${steps.filter((st) => st.status === "done").length} of ${plural(steps.length, "step")} done`;
+    }
   }
 };

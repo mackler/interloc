@@ -28,9 +28,10 @@ test("a finished run prints the plan path and exits 0", async () => {
 });
 
 test("a halt prints HALTED and the reason, the session id and the usage, and exits 1", async () => {
-  const { wiring, probe } = testWiring(tempRepo(), { steps: [{ output: noQuestions }] });
+  // Issue #6 (F1): a plan write without the plan, twice, halts after the repair turn.
+  const { wiring, probe } = testWiring(tempRepo(), { steps: [{ output: noQuestions }, { output: noQuestions }] });
   assert.equal(await runProgram(["task"], wiring), 1);
-  assert.match(said(probe), /HALTED: Claude Code did not write plan-review\/plan\.md\nState is preserved in .*plan-review\./);
+  assert.match(said(probe), /HALTED: the reply of Claude Code does not match its schema: [^]*\nState is preserved in .*plan-review\./);
   assertTail(probe);
 });
 
@@ -39,8 +40,11 @@ test("the project directory argument is used, and the config of that project app
   const { wiring, probe } = testWiring(repo, { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished], config: { maxRounds: 3 } });
   assert.equal(await runProgram(["task", repo], { ...wiring, cwd: "/nonexistent" }), 0);
   assert.match(said(probe), /Planning phase 1, cycle 1: Codex review \.\.\./);
-  assert.match(said(probe), /Implementation phase 1: Claude Code implements the plan/);
-  assert.match(said(probe), /Implementation phase 1 ended with status: finished/);
+  // Issue #6: one iteration, so the phases carry no number.
+  assert.match(said(probe), /\nPlanning: requesting the initial plan/);
+  assert.match(said(probe), /\nImplementation: Claude Code implements the plan/);
+  assert.match(said(probe), /\nImplementation ended with status: finished/);
+  assert.match(said(probe), /\nWork review: Codex reviews the changes/);
   assert.match(said(probe), /finished after 1 implementation phase\(s\)\./);
 });
 

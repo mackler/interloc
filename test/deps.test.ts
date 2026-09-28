@@ -58,3 +58,17 @@ test("package.json requires Node >=22.18 through engines", () => {
 test(".npmrc makes npm refuse a Node outside engines", () => {
   assert.match(readText(".npmrc") ?? "(absent)", /^engine-strict=true$/m, ".npmrc does not set engine-strict=true");
 });
+
+// Issue #6 (Q2): the Agent SDK's tool() takes its input only as a zod shape, so zod is a dependency, permitted on the
+// developer's instruction of 28 Sep 2026, pinned exactly, and imported by src/sdkLive.ts alone.
+test("zod is a dependency pinned at 4.6.5 and the installed version matches", () => {
+  assert.equal(dependencies().zod, "4.6.5", "zod is not pinned at 4.6.5 in dependencies");
+  assert.equal(readJson("node_modules/zod/package.json")?.version, "4.6.5", "installed zod differs from the pinned version");
+});
+
+test("no module but src/sdkLive.ts imports zod", () => {
+  const files = (dir: string): string[] =>
+    fs.readdirSync(new URL(dir, root), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(`${dir}${e.name}/`) : /\.(ts|svelte)$/.test(e.name) ? [`${dir}${e.name}`] : []));
+  const importing = ["src/", "web/src/", "test/", "e2e/"].flatMap(files).filter((file) => /from\s+["']zod(\/[^"']*)?["']|import\(\s*["']zod/.test(fs.readFileSync(new URL(file, root), "utf8")));
+  assert.deepEqual(importing.filter((file) => file !== "src/sdkLive.ts"), []);
+});

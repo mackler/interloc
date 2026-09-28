@@ -10,7 +10,7 @@ export type SubjectId = "questions" | "requirements" | Readonly<{ plan: number }
 export type PhasedSubject = Exclude<SubjectId, Readonly<{ decision: number }>>;
 
 export type Artifact =
-  | Readonly<{ kind: "conversation" | "decisions" | "feedback" | "usage" | "questions" | "requirements" | "plan" | "checkpoint" | "config" }>
+  | Readonly<{ kind: "conversation" | "decisions" | "feedback" | "usage" | "questions" | "requirements" | "plan" | "planFile" | "checkpoint" | "config" }>
   | Readonly<{ kind: "log"; subject: SubjectId }>
   | Readonly<{ kind: "review" | "response" | "round"; subject: SubjectId; round: number }>
   | Readonly<{ kind: "planWrite" | "execution"; phase: number }>
@@ -56,18 +56,21 @@ export const reviewedFile = (subject: SubjectId): Artifact =>
   subject === "questions" || subject === "requirements"
     ? { kind: subject }
     : "plan" in subject
-      ? { kind: "plan" }
+      ? { kind: "planFile" }
       : "work" in subject
         ? { kind: "changes", phase: subject.work }
         : { kind: "analysis", decision: subject.decision };
-const FIXED: Record<Extract<Artifact, { kind: string }>["kind"] & ("conversation" | "decisions" | "feedback" | "usage" | "questions" | "requirements" | "plan" | "checkpoint" | "config"), string> = {
+const FIXED: Record<Extract<Artifact, { kind: string }>["kind"] & ("conversation" | "decisions" | "feedback" | "usage" | "questions" | "requirements" | "plan" | "planFile" | "checkpoint" | "config"), string> = {
   conversation: "conversation.md",
   decisions: "user-decisions.md",
   feedback: "reviewer-feedback.md",
   usage: "usage.jsonl",
   questions: "questions.json",
   requirements: "requirements.md",
+  /** Rendered from plan.json for the developer to read (issue #6, F2). */
   plan: "plan.md",
+  /** The plan with the status of each step, the plan subject's reviewed file (issue #6, F1). */
+  planFile: "plan.json",
   checkpoint: "checkpoint.json",
   config: "config.json",
 };

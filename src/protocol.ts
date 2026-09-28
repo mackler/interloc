@@ -58,8 +58,8 @@ export const UiEventSchema = Schema.Union([
   tagged("RoundBegan", { ...round, limit: Int }),
   tagged("ReviewReceived", { ...round, review: S.Review, counted: Int }),
   // The question subject's response is the planner's plus `questions` (defect A of docs/page-question-phase-defects.md).
-  // A decision's response carries its amended analysis (W2-R1-1).
-  tagged("ResponseReceived", { ...round, response: Schema.Union([S.QuestionListResponse, S.DecisionResponse, S.PlannerResponse]), resultText: Str }),
+  // A decision's response carries its amended analysis (W2-R1-1), the plan's the whole plan (issue #6).
+  tagged("ResponseReceived", { ...round, response: Schema.Union([S.QuestionListResponse, S.DecisionResponse, S.PlanResponse, S.PlannerResponse]), resultText: Str }),
   tagged("LoopFinished", { subject: SubjectIdSchema, result: Schema.Literals(["converged", "proceed", "revise"]) }),
   tagged("PlanWritten", { phase: Int, questions: Schema.Array(S.UserQuestion), resultText: Str }),
   tagged("ExecutionEnded", { phase: Int, outcome: S.ExecOutcome }),
@@ -73,6 +73,8 @@ export const UiEventSchema = Schema.Union([
   tagged("OptionsPresented", { question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) }),
   tagged("AnswerRejected", {}),
   tagged("DecisionAnalyzed", { decision: Int, question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })), analysis: S.DecisionAnalysis }),
+  tagged("PhasesForeseen", { phases: Schema.Array(PhaseSchema) }),
+  tagged("PlanChanged", { phase: Int, plan: S.RecordedPlan }),
 ]);
 
 const ChoiceSchema = Schema.Struct({ label: Str, sends: Str });

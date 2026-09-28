@@ -101,6 +101,8 @@ export const renderReferenceDropped = (argument: string, named: string): string 
 /** An option label of an analysis that matched only after normalization, rewritten to the exact label (issue #37, decision Q4). */
 export const renderLabelCorrected = (given: string, exact: string): string =>
   `**Option label corrected:** the analysis named ${JSON.stringify(given)}, which the program read as the option ${JSON.stringify(exact)}.\n\n`;
+/** A plan whose stage or step numbers were not 1…n in order, renumbered by position (issue #6: the numbers are display only). */
+export const renderPlanRenumbered = (): string => "**Plan renumbered:** the stage or step numbers of the plan were not 1, 2, 3 … in order; the program numbered them by position.\n\n";
 /** The user's answer after decision k (decision Q4), in conversation.md. */
 export const renderChoice = (k: number, answer: string, option: string | null): string =>
   `**User choice** after decision ${k}: ${answer === "" ? "(none)" : answer}${option === null ? "" : ` (${option})`}\n\n`;

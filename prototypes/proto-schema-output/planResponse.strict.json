@@ -1,0 +1,173 @@
+{
+  "type": "object",
+  "properties": {
+    "dispositions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "partially_accepted",
+              "rejected",
+              "no_change_needed",
+              "clarification_requested"
+            ]
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "duplicate_of": {
+            "type": "string"
+          },
+          "reverses": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "rationale",
+          "duplicate_of",
+          "reverses"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "self_corrections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "new_action": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected",
+              "plan_error"
+            ]
+          },
+          "explanation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "new_action",
+          "explanation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "reviewer_feedback": {
+      "type": "string"
+    },
+    "questions_for_user": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": "string"
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "question",
+          "options"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "plan": {
+      "type": "object",
+      "properties": {
+        "stages": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "number": {
+                "type": "integer"
+              },
+              "title": {
+                "type": "string"
+              },
+              "steps": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "number": {
+                      "type": "integer"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "text": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "number",
+                    "label",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "number",
+              "title",
+              "steps"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "stages"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "dispositions",
+    "self_corrections",
+    "reviewer_feedback",
+    "questions_for_user",
+    "plan"
+  ],
+  "additionalProperties": false
+}

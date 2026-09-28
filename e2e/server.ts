@@ -8,7 +8,9 @@
 // with two options on which the user takes "Help me decide" (decision support); "decideLong", the same with a
 // recommendation of several paragraphs (W1-R1-3); "decideRevise", an analysis whose first review raises an issue that
 // Claude accepts with an amended analysis (W2-R1-1); "decideBlank", an interview turn with numbered answers on which the
-// user takes "Help me decide" and then sends an empty message, which the run rejects (W3-R1-1).
+// user takes "Help me decide" and then sends an empty message, which the run rejects (W3-R1-1); "planSteps" (issue #6),
+// a plan of two stages whose execution reports its steps and stops, a revision with a new step whose text is long, and
+// a second execution that reports a step and then waits until it is stopped.
 // PORT is the port.
 
 import { Effect } from "effect";
@@ -203,6 +205,21 @@ export const SCENARIOS: Record<string, TestOptions> = {
     ],
     execs: [finished],
   },
+};
+
+// Issue #6: the plan of the "planSteps" scenario, and its revision with a step whose text is long enough to scroll.
+const S1 = { id: "S1", number: 1, label: "Structured user questions (Q1)", text: "Add the **schema** of a question." };
+const S2 = { id: "S2", number: 2, label: "The store", text: "Write `plan.json`." };
+export const LONG_STEP_TEXT = Array.from({ length: 40 }, (_, i) => `Line ${i + 1} of the step's text, which the tooltip scrolls.`).join("\n\n");
+const S3 = { id: "S3", number: 1, label: "The long step", text: LONG_STEP_TEXT };
+SCENARIOS.planSteps = {
+  steps: [
+    { output: { ...noQuestions, plan: { stages: [{ number: 1, title: "the schema and its records", steps: [S1, S2] }] } } },
+    { output: { ...noQuestions, plan: { stages: [{ number: 1, title: "the schema and its records", steps: [S1, S2] }, { number: 2, title: "the page", steps: [S3] }] } } },
+  ],
+  reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+  execs: [{ status: "needs_input", summary: "S1 done", question: "A or B?", remainingWork: "S2", userInput: "B" }],
+  execScripts: [{ reports: [["S1", "started"], ["S1", "done"], ["S2", "started"]] }, { reports: [["S2", "started"]], hang: true }],
 };
 
 const scenario = SCENARIOS[process.env.SCENARIO ?? "converge"] ?? SCENARIOS.converge;

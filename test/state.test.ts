@@ -113,13 +113,10 @@ test("the records: decisions, feedback, usage and the invalid-reply files", asyn
   assert.equal(fs.readFileSync(path.join(s.dir, "invalid-replies", "codex-2.json"), "utf8"), "y");
 });
 
-test("planExists and fileHash by subject; the save operations create their directories", async () => {
+test("fileHash by subject; the save operations create their directories", async () => {
   const s = await initialised();
-  assert.equal(await Effect.runPromise(s.planExists()), false);
-  fs.writeFileSync(s.plan, "");
-  assert.equal(await Effect.runPromise(s.planExists()), false);
-  fs.writeFileSync(s.plan, "v1");
-  assert.equal(await Effect.runPromise(s.planExists()), true);
+  // Issue #6 (F1): the plan subject's reviewed file is plan.json.
+  fs.writeFileSync(path.join(s.dir, "plan.json"), "v1");
   assert.equal(await Effect.runPromise(s.fileHash("requirements")), "", "an absent reviewed file hashes to the empty string");
   assert.notEqual(await Effect.runPromise(s.fileHash({ plan: 1 })), "");
   await Effect.runPromise(s.saveReview({ plan: 2 }, 1, { issues: [] }));

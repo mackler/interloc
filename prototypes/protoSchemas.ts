@@ -52,6 +52,9 @@ const DecisionAnalysis = Schema.Struct({
   ),
   recommendation: Schema.Struct({ option: Str, reason: Str }),
 });
+// Issue #6 (28 Sep 2026): the plan as data. Every call that creates or changes the plan returns it whole.
+const PlanStep = Schema.Struct({ id: Str, number: Schema.Int, label: Str, text: Str });
+const Plan = Schema.Struct({ stages: Schema.Array(Schema.Struct({ number: Schema.Int, title: Str, steps: Schema.Array(PlanStep) })) });
 /** The recursive schemas: their strict variant cannot exist (a cycle of $ref cannot be inlined), so only raw is sent. */
 export const RECURSIVE = new Set(["decisionAnalysis", "decisionResponse", "decisionApplied"]);
 
@@ -66,6 +69,8 @@ export const protoSchemas: Record<string, Schema.Top> = {
   decisionAnalysis: DecisionAnalysis,
   decisionResponse: Schema.Struct({ ...plannerFields, analysis: DecisionAnalysis }),
   decisionApplied: Schema.Struct({ analysis: DecisionAnalysis }),
+  planReply: Schema.Struct({ plan: Plan, questions_for_user: Schema.Array(UserQuestion) }),
+  planResponse: Schema.Struct({ ...plannerFields, plan: Plan }),
 };
 
 export type Json = Record<string, any>;

@@ -13,3 +13,12 @@ export const clockTime = (iso: string, locale?: string, timeZone?: string): stri
 /** The full date and time, for the message's title. */
 export const fullTime = (iso: string, locale?: string, timeZone?: string): string =>
   format(iso, { dateStyle: "full", timeStyle: "medium", timeZone }, locale);
+
+/** The milliseconds from an ISO time to `now`, never negative; 0 for a time that cannot be read (issue #42). */
+export const elapsedMs = (startIso: string, now: number): number => {
+  const start = Date.parse(startIso);
+  return Number.isNaN(start) ? 0 : Math.max(0, now - start);
+};
+
+/** How long a hovered tooltip waits for the pointer after it leaves the anchor (W1-R1-1): the way into the tooltip. */
+export const TOOLTIP_GRACE_MS = 150;

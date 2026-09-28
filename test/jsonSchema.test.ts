@@ -162,7 +162,28 @@ test("a decision column is an anyOf of an argued column and an unclear column, e
 // another shape.
 test("the prototype's schemas generate what the program sends", async () => {
   const { protoSchemas, protoRaw } = await import("../prototypes/protoSchemas.ts");
-  for (const [name, schema] of [["interviewTurn", S.InterviewTurn], ["decisionAnalysis", S.DecisionAnalysis], ["decisionResponse", S.DecisionResponse], ["decisionApplied", S.DecisionApplied], ["review", S.Review], ["plannerResponse", S.PlannerResponse], ["planWrite", S.PlanWriteResult], ["execReport", S.ExecReport], ["questionList", S.QuestionList], ["questionListResponse", S.QuestionListResponse]] as const) {
+  for (const [name, schema] of [["interviewTurn", S.InterviewTurn], ["decisionAnalysis", S.DecisionAnalysis], ["decisionResponse", S.DecisionResponse], ["decisionApplied", S.DecisionApplied], ["review", S.Review], ["plannerResponse", S.PlannerResponse], ["planWrite", S.PlanWriteResult], ["execReport", S.ExecReport], ["questionList", S.QuestionList], ["questionListResponse", S.QuestionListResponse], ["planReply", S.PlanWrite], ["planResponse", S.PlanResponse]] as const) {
+    assert.ok(protoSchemas[name] !== undefined, `the prototype does not send ${name}`);
     assert.deepEqual(protoRaw(protoSchemas[name]), rawJsonSchema(schema), name);
+  }
+});
+
+// Issue #6 (Q1): the plan's reply schemas generate a closed object root; the plan write's is not recursive, so its
+// strict variant exists too.
+test("the plan's agent schemas are total and closed", () => {
+  for (const schema of [S.PlanWrite, S.PlanResponse]) {
+    const json = agentJsonSchema(schema);
+    assert.equal(json.type, "object");
+    assert.equal(json.additionalProperties, false);
+    strict(rawJsonSchema(schema));
+  }
+});
+
+// Issue #6 (Q1): the files of the plan's schemas in prototypes/proto-schema-output/ are what the program sends; they
+// are unproven until the developer's run of prototypes/proto-schema.ts (CLAUDE.md, "Not yet known").
+test("the plan's schema files in prototypes/proto-schema-output/ are what the program sends", () => {
+  for (const [name, schema] of [["planReply", S.PlanWrite], ["planResponse", S.PlanResponse]] as const) {
+    assert.deepEqual(rawJsonSchema(schema), proven(name, "raw"), `${name} raw`);
+    assert.deepEqual(strict(rawJsonSchema(schema)), proven(name, "strict"), `${name} strict`);
   }
 });

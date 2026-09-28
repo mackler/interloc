@@ -121,7 +121,7 @@ test("readCheckpoint requires baseline.json and the four logs for started, and r
 const emptyAnalysis = { decision: "d", columns: [{ kind: "argued", option: "A", advantages: [], disadvantages: [] }, { kind: "argued", option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
 test("the decision record files decode their version-2 shape", () => {
   const decode = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown) => Schema.decodeUnknownSync(schema, { onExcessProperty: "error" })(value);
-  const question = { version: 2, decision: 1, phase: { kind: "planning", n: 2 }, question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
+  const question = { version: 2, decision: 1, phase: { kind: "planning", n: 2 }, label: "Planning 2", question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
   assert.deepEqual(decode(DecisionQuestionFile, question), question);
   assert.deepEqual(decode(DecisionQuestionFile, { ...question, phase: { kind: "questions" } }).phase, { kind: "questions" });
   assert.deepEqual(decode(AnalysisFile, { version: 2, analysis: emptyAnalysis }).analysis, emptyAnalysis);
@@ -144,7 +144,7 @@ test("readCheckpoint reads a decision checkpoint and requires its question and a
   put("checkpoint.json", { version: 2, subject: "decision-2", phase: 1, round: 1, stage: "reviewed", time: "t" });
   const missing = await read();
   assert.ok(missing._tag === "Failure" && /decision-2\/question\.json/.test(String(missing.cause)), "a decision checkpoint without question.json was accepted");
-  put("decision-2/question.json", { version: 2, decision: 2, phase: { kind: "planning", n: 1 }, question: "Which?", options: [] });
+  put("decision-2/question.json", { version: 2, decision: 2, phase: { kind: "planning", n: 1 }, label: "Planning", question: "Which?", options: [] });
   const noAnalysis = await read();
   assert.ok(noAnalysis._tag === "Failure" && /decision-2\/analysis\.json/.test(String(noAnalysis.cause)), "a decision checkpoint without analysis.json was accepted");
   put("decision-2/analysis.json", { version: 2, analysis: emptyAnalysis });

@@ -3,7 +3,9 @@
 
 import type { Options, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ThreadEvent, ThreadOptions, TurnOptions } from "@openai/codex-sdk";
-import type { AgentSdk, SdkThread } from "../src/sdk.ts";
+import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
+import type { AgentSdk, SdkThread, StepHandler } from "../src/sdk.ts";
+import { REPORT_STEP_SERVER } from "../src/prompts.ts";
 
 export type Call = { prompt: string; options: Options };
 /** One scripted Claude Code call: the messages it produces, possibly after calling back. */
@@ -85,6 +87,11 @@ export class FakeSdk implements AgentSdk {
     return script(call);
   }
 
+  /** The server a live binding would build; the handler is kept for `reportStep`. */
+  stepReporter(handler: StepHandler): McpServerConfig {
+    return { type: "sdk", name: REPORT_STEP_SERVER, instance: { handler } } as unknown as McpServerConfig;
+  }
+
   startThread(options?: ThreadOptions): SdkThread {
     const record: { options: ThreadOptions | undefined; calls: ThreadCall[] } = { options, calls: [] };
     this.threads.push(record);
@@ -108,3 +115,12 @@ export class FakeSdk implements AgentSdk {
     };
   }
 }
+
+/** The fake of the in-process report_step server: the handler, found again by `reportStep` in the options of a call. */
+type FakeStepServer = { type: "sdk"; name: string; instance: { handler: StepHandler } };
+/** Calls report_step as Claude Code would, through the server the adapter passed in the call's options. */
+export const reportStep = async (options: Options, id: string, status: "started" | "done"): Promise<Readonly<{ text: string; isError: boolean }>> => {
+  const server = options.mcpServers?.[REPORT_STEP_SERVER] as FakeStepServer | undefined;
+  if (server === undefined) throw new Error("the call offers no report_step server");
+  return server.instance.handler({ id, status });
+};

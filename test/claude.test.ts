@@ -14,8 +14,8 @@ import * as S from "../src/schema.ts";
 import { Decider, type DeciderShape, type PlannerShape, RunConfig, Sdk, Store, type StoreShape, Ui } from "../src/services.ts";
 import { platformLayer } from "../src/platform.ts";
 import { makeStore } from "../src/store.ts";
-import { assistantText, assistantTool, failure, FakeSdk, init, messages, success, type Script } from "./fakeSdk.ts";
-import { noDecider, ScriptedUi, tempRepo } from "./helpers.ts";
+import { assistantText, assistantTool, failure, FakeSdk, init, messages, reportStep, success, type Script } from "./fakeSdk.ts";
+import { noDecider, noReporter, ScriptedUi, tempRepo } from "./helpers.ts";
 
 /** Runs an effect with a Decider that no test here expects to be used, unless a test gives its own. */
 const run = <A, E>(effect: Effect.Effect<A, E, Decider>, decider: DeciderShape = noDecider): Promise<A> => Effect.runPromise(effect.pipe(Effect.provideService(Decider, decider)));
@@ -85,7 +85,10 @@ test("the planning hook denies an edit outside plan-review/ and permits one insi
   await run(fake.planner.planning("write the plan", schema));
   const options = fake.sdk.calls[0].options;
 
-  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.dir, "plan.md") })), undefined);
+  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.dir, "notes.md") })), undefined);
+  // Issue #6 (F1): plan.json and plan.md are the program's; Claude Code returns the plan and writes neither.
+  assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.dir, "plan.md") })), "deny");
+  assert.equal(decision(await runHook(options, "Edit", { file_path: path.join("plan-review", "plan.json") })), "deny");
   assert.equal(decision(await runHook(options, "Write", { file_path: path.join(fake.project, "src/x.ts") })), "deny");
   assert.equal(decision(await runHook(options, "Edit", { file_path: "../outside.txt" })), "deny");
 });
@@ -178,7 +181,7 @@ test("the planning call passes the agent JSON Schema of the given Effect schema 
 
 test("the execution call passes the agent JSON Schema of ExecReport as outputFormat", async () => {
   const fake = await planner([messages(init(), success({ status: "finished", summary: "done", question: "", remaining_work: "" }))]);
-  await run(fake.planner.executing("implement the plan"));
+  await run(fake.planner.executing("implement the plan", noReporter));
   assert.deepEqual(fake.sdk.calls[0].options.outputFormat, { type: "json_schema", schema: agentJsonSchema(S.ExecReport) });
 });
 
@@ -191,7 +194,7 @@ test("execution AskUserQuestion is a stop: needs_input with the answer, even wit
     yield success(null);
   })();
   const fake = await planner([script], ["A"]);
-  const outcome = await run(fake.planner.executing("implement the plan"));
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
 
   assert.equal(denials[0]?.behavior, "deny");
   assert.equal(outcome.status, "needs_input");
@@ -214,7 +217,7 @@ test("after a stop, the hook denies tools but permits the final structured outpu
     yield success({ status: "needs_input", summary: "s", question: "", remaining_work: "w" });
   })();
   const fake = await planner([script], ["A"]);
-  await run(fake.planner.executing("implement the plan"));
+  await run(fake.planner.executing("implement the plan", noReporter));
   assert.deepEqual(seen, [undefined, "deny", "deny", undefined]);
 });
 
@@ -226,7 +229,7 @@ test("an invalid execution report after a recorded stop still yields needs_input
     yield success({ status: "bogus", summary: 7 });
   })();
   const fake = await planner([script], ["A"]);
-  const outcome = await run(fake.planner.executing("implement the plan"));
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
   assert.equal(outcome.status, "needs_input");
   assert.equal(outcome.userInput, "A or B? -> A");
   assert.equal(outcome.summary, "");
@@ -235,7 +238,7 @@ test("an invalid execution report after a recorded stop still yields needs_input
 
 test("an invalid execution report without a stop yields aborted, and no repair prompt is sent", async () => {
   const fake = await planner([messages(init(), success({ status: "bogus" }, "text only"))]);
-  const outcome = await run(fake.planner.executing("implement the plan"));
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
   assert.equal(outcome.status, "aborted");
   assert.equal(outcome.summary, "text only");
   assert.match(outcome.question, /ended without a status report/);
@@ -245,14 +248,14 @@ test("an invalid execution report without a stop yields aborted, and no repair p
 // Issue #5: Claude Code's prose is attributed as data; the "[claude] " prefix is the terminal's rendering, not the text.
 test("Claude Code's prose in an execution call is a ClaudeSaid event, trimmed, and no line is said with the [claude] prefix", async () => {
   const fake = await planner([messages(init(), assistantText("  working  "), success(null, "text only"))]);
-  await run(fake.planner.executing("implement the plan"));
+  await run(fake.planner.executing("implement the plan", noReporter));
   assert.deepEqual(fake.ui.notified.filter((e) => e._tag === "ClaudeSaid"), [{ _tag: "ClaudeSaid", text: "working" }]);
   assert.ok(!fake.ui.said.some((l) => l.startsWith("[claude]")), "Claude Code's prose was said with the prefix");
 });
 
 test("execution without a report and without a stop is aborted", async () => {
   const fake = await planner([messages(init(), assistantText("working"), success(null, "text only"))]);
-  const outcome = await run(fake.planner.executing("implement the plan"));
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
   assert.equal(outcome.status, "aborted");
   assert.equal(outcome.summary, "text only");
 });
@@ -293,7 +296,7 @@ test("a second execution call cannot see the first call's stop", async () => {
     yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
   })();
   const fake = await planner([first, second], ["A"]);
-  const [one, two] = await run(Effect.all([fake.planner.executing("first"), fake.planner.executing("second")], { concurrency: "unbounded" }));
+  const [one, two] = await run(Effect.all([fake.planner.executing("first", noReporter), fake.planner.executing("second", noReporter)], { concurrency: "unbounded" }));
   assert.equal(one.status, "needs_input");
   assert.deepEqual(seen, [undefined], "the second call's hook saw the first call's stop");
   assert.equal(two.status, "finished");
@@ -308,7 +311,7 @@ test("an execution permission request asks the user; y allows, anything else den
     yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
   })();
   const fake = await planner([script], ["y", "n"]);
-  const outcome = await run(fake.planner.executing("implement the plan"));
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
   assert.deepEqual(results, ["allow", "deny"]);
   assert.equal(outcome.status, "finished");
 });
@@ -342,7 +345,7 @@ test("a UserStopped inside canUseTool ends the call with UserStopped", async () 
     yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
   })();
   const fake = await planner([script], ["q"]);
-  await assert.rejects(run(fake.planner.executing("implement the plan")), (e: unknown) => tag(e) === "UserStopped");
+  await assert.rejects(run(fake.planner.executing("implement the plan", noReporter)), (e: unknown) => tag(e) === "UserStopped");
 });
 
 test("a failure while recording usage aborts the SDK call, closes its stream, and fails the call with that error", async () => {
@@ -374,7 +377,7 @@ test("an SDK that fails to start is a call error: ClaudeCallFailed for planning,
   const planning = await planner([failing]);
   await assert.rejects(run(planning.planner.planning("write the plan", schema)), (e: unknown) => tag(e) === "ClaudeCallFailed" && /spawn claude ENOENT/.test(String((e as { message: string }).message)));
   const executing = await planner([failing]);
-  const outcome = await run(executing.planner.executing("implement the plan"));
+  const outcome = await run(executing.planner.executing("implement the plan", noReporter));
   assert.equal(outcome.status, "aborted");
   assert.match(outcome.question, /spawn claude ENOENT/);
 });
@@ -506,7 +509,7 @@ test("a relayed question says exactly the lines of relayedQuestionSays, right af
 
 test("an execution call notifies its start with the purpose execution", async () => {
   const fake = await planner([messages(init(), success({ status: "finished", summary: "s", question: "", remaining_work: "" }))]);
-  await run(fake.planner.executing("go"));
+  await run(fake.planner.executing("go", noReporter));
   assert.deepEqual(activity(fake.ui)[0], { _tag: "AgentCallStarted", agent: "claude", purpose: "execution" });
   assert.deepEqual(activity(fake.ui).at(-1), { _tag: "AgentCallEnded", agent: "claude", ok: true });
 });
@@ -539,8 +542,8 @@ test("each call carries its own capability: a read-only call and then a records 
   const fake = await planner([messages(init(), success({})), messages(init(), success({}))]);
   await run(fake.planner.planning("answer the review", schema, "planning", "readOnly"));
   await run(fake.planner.planning("write the plan", schema));
-  assert.equal(decision(await runHook(fake.sdk.calls[0].options, "Write", { file_path: path.join(fake.dir, "plan.md") })), "deny");
-  assert.equal(decision(await runHook(fake.sdk.calls[1].options, "Write", { file_path: path.join(fake.dir, "plan.md") })), undefined);
+  assert.equal(decision(await runHook(fake.sdk.calls[0].options, "Write", { file_path: path.join(fake.dir, "notes.md") })), "deny");
+  assert.equal(decision(await runHook(fake.sdk.calls[1].options, "Write", { file_path: path.join(fake.dir, "notes.md") })), undefined);
 });
 
 // Decision support, plan step 3.5: a relayed question with options and a permission request carry the offer.
@@ -585,7 +588,7 @@ test("an execution permission request offers Help me decide over Allow and Deny"
   })();
   const fake = await planner([script], ["/decide", "y"]);
   const { decider, requests } = recordingDecider();
-  await run(fake.planner.executing("implement the plan"), decider);
+  await run(fake.planner.executing("implement the plan", noReporter), decider);
   assert.deepEqual(results, ["allow"]);
   const request = requests[0] as { question: string; options: { label: string }[] };
   assert.match(request.question, /Bash/);
@@ -622,4 +625,74 @@ test("a blank answer to a relayed question presents it again before the retry, w
     await run(fake.planner.planning("write the plan", schema));
     assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionAsked").length, 2, `${options.length} option(s)`);
   }
+});
+
+// Issue #6 (Q2, Q3, P1-R1-4): an execution call offers report_step, answered by the reporter of its phase; the tool
+// needs no permission, is denied after a stop like every other tool, is absent from planning calls, and the plan's
+// files cannot be edited by a tool during execution.
+const report = { status: "finished", summary: "done", question: "", remaining_work: "" };
+/** Every PreToolUse hook of a call whose matcher admits the tool, in order; the first decision that is given. */
+const runHooks = async (options: Options, toolName: string, toolInput: Record<string, unknown> = {}): Promise<string | undefined> => {
+  for (const entry of options.hooks?.PreToolUse ?? []) {
+    if (entry.matcher !== undefined && !entry.matcher.split("|").includes(toolName)) continue;
+    for (const h of entry.hooks) {
+      const d = decision(await h({ hook_event_name: "PreToolUse", tool_name: toolName, tool_input: toolInput } as PreToolUseHookInput, undefined, { signal: new AbortController().signal }));
+      if (d !== undefined) return d;
+    }
+  }
+  return undefined;
+};
+
+test("an execution call offers report_step without a permission prompt, and each report reaches the reporter", async () => {
+  const reports: string[] = [];
+  const reporter = (id: string, status: "started" | "done") => Effect.sync(() => (reports.push(`${id}:${status}`), { text: `ok ${id}`, isError: id === "S9" }));
+  const answers: unknown[] = [];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    answers.push(await permission(call.options)(prompts.REPORT_STEP_TOOL_NAME, { id: "S1", status: "started" }, callContext()));
+    answers.push(await reportStep(call.options, "S1", "started"));
+    answers.push(await reportStep(call.options, "S9", "done"));
+    yield success(report);
+  })();
+  const fake = await planner([script]);
+  await run(fake.planner.executing("implement the plan", reporter));
+  const options = fake.sdk.calls[0].options;
+  assert.ok(options.allowedTools?.includes(prompts.REPORT_STEP_TOOL_NAME));
+  assert.deepEqual(answers, [{ behavior: "allow", updatedInput: { id: "S1", status: "started" } }, { text: "ok S1", isError: false }, { text: "ok S9", isError: true }]);
+  assert.deepEqual(reports, ["S1:started", "S9:done"]);
+  assert.deepEqual(fake.ui.asked, [], "report_step asked the user for permission");
+});
+
+test("report_step is denied after a stop, and a planning call offers no report_step", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }] }];
+  const seen: (string | undefined)[] = [];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    seen.push(await runHooks(call.options, prompts.REPORT_STEP_TOOL_NAME));
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    seen.push(await runHooks(call.options, prompts.REPORT_STEP_TOOL_NAME));
+    yield success({ ...report, status: "needs_input" });
+  })();
+  const fake = await planner([script, messages(init(), success({ questions_for_user: [] }))], ["A"]);
+  await run(fake.planner.executing("implement the plan", noReporter));
+  assert.deepEqual(seen, [undefined, "deny"]);
+  await run(fake.planner.planning("write the plan", schema));
+  assert.equal(fake.sdk.calls[1].options.mcpServers, undefined);
+});
+
+test("during execution an edit of plan.json or plan.md is denied; other edits are not", async () => {
+  const fake = await planner([messages(init(), success(report))]);
+  await run(fake.planner.executing("implement the plan", noReporter));
+  const options = fake.sdk.calls[0].options;
+  assert.equal(await runHooks(options, "Write", { file_path: path.join(fake.dir, "plan.json") }), "deny");
+  assert.equal(await runHooks(options, "Edit", { file_path: path.join("plan-review", "plan.md") }), "deny");
+  assert.equal(await runHooks(options, "Edit", { file_path: path.join(fake.project, "src", "x.ts") }), undefined);
+});
+
+// The seam of Q2: the prompt names the tool and the statuses exactly as the tool's constants define them.
+test("the execution prompt names report_step and its statuses as the tool defines them", () => {
+  assert.ok(prompts.executePrompt.includes(prompts.REPORT_STEP_TOOL));
+  for (const status of prompts.REPORT_STEP_STATUSES) assert.ok(prompts.executePrompt.includes(`'${status}'`), status);
+  assert.match(prompts.executePrompt, /plan-review\/plan\.json/);
+  assert.doesNotMatch(prompts.executePrompt, /marker/);
 });

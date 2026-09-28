@@ -397,3 +397,49 @@ test("(L16) a long analysis at 390 × 600 with the progress opened: the analysis
   await reachable(parts);
   await answerDismisses(page, parts);
 });
+
+// Issue #6: a step's long text scrolls inside its tooltip, which stays in the viewport, in a desktop window and, with the
+// progress opened, in a phone-sized one.
+for (const [width, height] of [[1280, 800], [390, 844]] as const) {
+  test(`(L17) a long step text at ${width} × ${height}: the tooltip stays in the viewport and scrolls inside itself`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await startTask(page, "Build the rail", "http://127.0.0.1:8115/");
+    if (width < 840) {
+      await page.locator("details.progress > summary, details.progress summary").first().click();
+      await expect(page.locator("details.progress")).toHaveAttribute("open", "");
+    }
+    const button = page.locator("[data-plan-step] button", { hasText: "The long step" });
+    await expect(button).toBeVisible();
+    await button.focus();
+    const tip = page.getByRole("tooltip");
+    await expect(tip).toBeVisible();
+    const b = await box(tip);
+    expect(b.x, "the tooltip's left edge").toBeGreaterThanOrEqual(0);
+    expect(b.y, "the tooltip's top edge").toBeGreaterThanOrEqual(0);
+    expect(b.x + b.width, "the tooltip's right edge").toBeLessThanOrEqual(width);
+    expect(b.y + b.height, "the tooltip's bottom edge").toBeLessThanOrEqual(height);
+    const scroll = await tip.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+      return { scrollHeight: el.scrollHeight, clientHeight: el.clientHeight, scrollTop: el.scrollTop };
+    });
+    expect(scroll.scrollHeight, "the text is longer than the tooltip").toBeGreaterThan(scroll.clientHeight);
+    expect(scroll.scrollTop, "the tooltip scrolls").toBeGreaterThan(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page overflows horizontally").toBe(true);
+  });
+}
+
+// W1-R1-1: with the mouse alone, a long step text can be read: the tooltip stays open while the pointer moves into it.
+test("(L18) a long step text at 1280 × 800: hovered, the tooltip stays open while the pointer moves into it and scrolls with the wheel", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await startTask(page, "Build the rail", "http://127.0.0.1:8115/");
+  const button = page.locator("[data-plan-step] button", { hasText: "The long step" });
+  await expect(button).toBeVisible();
+  await button.hover();
+  const tip = page.getByRole("tooltip");
+  await expect(tip).toBeVisible();
+  const b = await box(tip);
+  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 5 });
+  await page.mouse.wheel(0, 200);
+  await expect(tip).toBeVisible();
+  await expect.poll(() => tip.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+});

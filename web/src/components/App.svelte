@@ -14,7 +14,7 @@
   import type { ClientMessage } from "../../../src/protocol.ts";
   import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "../draft.ts";
   import { connect, type Connection } from "../socket.ts";
-  import { dismissUnsent, initialState, keepUnsent, notice, progressOf, protocolError, reduce, type ViewState } from "../state.ts";
+  import { callStartedAt, dismissUnsent, executing, initialState, keepUnsent, notice, progressOf, protocolError, reduce, type ViewState } from "../state.ts";
   import ActivityLine from "./ActivityLine.svelte";
   import ChatPanel from "./ChatPanel.svelte";
   import DecisionView from "./DecisionView.svelte";
@@ -130,7 +130,7 @@
       {#if compact}
         <details class="progress">
           <Button summary variant="text">{progressOf(run)}</Button>
-          <TimelineRail timeline={run.timeline} busy={run.busy} />
+          <TimelineRail timeline={run.timeline} busy={run.busy} executing={executing(run)} callStartedAt={callStartedAt(run)} />
         </details>
         <!-- While the analysis is shown both panels are hidden, so the buttons would select nothing; "Show the
              conversation" is the way back (W4-R1-1) [aesthetic and minimalist design]. -->
@@ -146,7 +146,7 @@
         <!-- The latest notice above the panels, whichever is shown (W2-R1-2) [visibility of system status]. -->
         {#if latestNotice !== null}<p class="notice m3-font-body-small" role="alert">{latestNotice}</p>{/if}
       {:else}
-        <TimelineRail timeline={run.timeline} busy={run.busy} />
+        <TimelineRail timeline={run.timeline} busy={run.busy} executing={executing(run)} callStartedAt={callStartedAt(run)} />
       {/if}
       {#if analysis !== null && deciding}
         <div class="decision-area">

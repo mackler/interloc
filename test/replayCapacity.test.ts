@@ -9,7 +9,7 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import { platformLayer } from "../src/platform.ts";
 import type { ServerMessage } from "../src/protocol.ts";
 import { makeRunManager } from "../src/runManager.ts";
-import { Planner, Reviewer, Ui } from "../src/services.ts";
+import { Planner, Reviewer, type StepReporter, Ui } from "../src/services.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { makeWebServer } from "../src/webServer.ts";
 import { finished, issue, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
@@ -48,7 +48,7 @@ test("measurement: a run of 10,000 events, its retained size, and the time to re
         return {
           ...probe.planner,
           sessionId: probe.planner.sessionId,
-          executing: () => probe.planner.executing(),
+          executing: (prompt: string, reporter: StepReporter) => probe.planner.executing(prompt, reporter),
           planning: (prompt: string, schema: Parameters<typeof probe.planner.planning>[1]) =>
             Effect.suspend(() => {
               if (!first) return probe.planner.planning(prompt, schema);

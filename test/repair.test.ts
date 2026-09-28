@@ -12,7 +12,7 @@ import { Planner, Reviewer, RunConfig, Sdk, type Services, Store, Ui } from "../
 import { platformLayer } from "../src/platform.ts";
 import { storeLayer } from "../src/store.ts";
 import { FakeSdk, init, messages, success, turn, type Script } from "./fakeSdk.ts";
-import { finished, pathsOf, type PlanningStep, runFails, runTask, ScriptedPlanner, ScriptedReviewer, ScriptedUi, tempRepo, testLayer, withDecider } from "./helpers.ts";
+import { finished, pathsOf, type PlanningStep, runFails, runTask, ScriptedPlanner, ScriptedReviewer, ScriptedUi, scriptedPlan, tempRepo, testLayer, withDecider } from "./helpers.ts";
 
 // Decision Q5: an invalid structured reply in a planning, interview or review call gets one repair
 // turn in the same session or thread; a second invalid reply stops the run, and both replies are kept.
@@ -113,9 +113,8 @@ test("a Codex reply without an issues array twice fails with AgentReplyInvalid",
   assert.equal(sdk.threads[0].calls.length, 2);
 });
 
-/** A Claude Code call that writes plan.md and ends without structured output. */
-const planWithoutOutput = (plan: string): Script => () => (async function* () {
-  fs.writeFileSync(plan, "v1");
+/** A Claude Code call that ends without structured output (issue #6: the plan is the output, so none is written). */
+const planWithoutOutput = (_plan: string): Script => () => (async function* () {
   yield init("s-1");
   yield success(null, "forgot the output");
 })();
@@ -130,7 +129,7 @@ const withClaude = (repo: string, sdk: FakeSdk, reviewer: ScriptedReviewer): Lay
 test("a Claude Code planning call without structured output gets one repair turn in the same session", async () => {
   const repo = tempRepo();
   const paths = pathsOf(repo);
-  const sdk = new FakeSdk([planWithoutOutput(paths.plan), messages(init("s-1"), success(noQuestions)), messages(init("s-1"), success(report))]);
+  const sdk = new FakeSdk([planWithoutOutput(paths.plan), messages(init("s-1"), success({ ...noQuestions, plan: scriptedPlan("v1") })), messages(init("s-1"), success(report))]);
   const layer = withClaude(repo, sdk, new ScriptedReviewer(paths, [{ issues: [] }, { issues: [] }]));
   assert.equal(await runTask(layer), 1);
   assert.equal(sdk.calls.length, 3);

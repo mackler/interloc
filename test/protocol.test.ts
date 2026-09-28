@@ -6,7 +6,7 @@ import { Schema } from "effect";
 import { type ClientMessage, decodeClient, decodeServer, inSnapshot, type RunEvent, type RunRecord, type ServerMessage, type Stamped } from "../src/protocol.ts";
 import type { SubjectId } from "../src/artifacts.ts";
 import type { Subject } from "../src/review.ts";
-import type { DecisionResponse, PlannerResponse, QuestionListResponse } from "../src/schema.ts";
+import type { DecisionResponse, PlannerResponse, PlanResponse, QuestionListResponse } from "../src/schema.ts";
 import { decisionSubject, planSubject, questionSubject, requirementsSubject, workSubject } from "../src/subjects.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { promptOf } from "../src/userPrompts.ts";
@@ -49,6 +49,19 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("InterviewOpened" as const), heading: text, stage: fc.constantFrom("clarification" as const, "followUp" as const, "conversation" as const), total: nat }),
   fc.record({ _tag: fc.constant("ClaudeSaid" as const), text }),
   fc.constant({ _tag: "AnswerRejected" as const }),
+  // Issue #6: the phases known of the run.
+  fc.record({ _tag: fc.constant("PhasesForeseen" as const), phases: fc.array(phase, { maxLength: 4 }) }),
+  // Issue #6: the plan with its statuses, after every write and every report of a step.
+  fc.record({
+    _tag: fc.constant("PlanChanged" as const),
+    phase: nat,
+    plan: fc.record({
+      stages: fc.array(
+        fc.record({ number: nat, title: text, steps: fc.array(fc.record({ id: text, number: nat, label: text, text, status: fc.constantFrom("pending" as const, "started" as const, "done" as const, "unfinished" as const) }), { maxLength: 2 }) }),
+        { maxLength: 2 },
+      ),
+    }),
+  }),
   fc.record({ _tag: fc.constant("OptionsPresented" as const), question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }) }),
   fc.record({
     _tag: fc.constant("DecisionAnalyzed" as const),
@@ -173,7 +186,8 @@ test("every subject's response, as its own schema decodes it, survives the round
   const subjects = [
     { subject: "questions" as SubjectId, schema: questionSubject("t").respond.schema, example: questionListResponse },
     { subject: "requirements" as const, schema: requirementsSubject().respond.schema, example: plannerResponse },
-    { subject: { plan: 1 }, schema: planSubject(1, true).respond.schema, example: plannerResponse },
+    // Issue #6: the plan's response carries the whole plan.
+    { subject: { plan: 1 }, schema: planSubject(1, true, null).respond.schema, example: { ...plannerResponse, plan: { stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "l", text: "x" }] }] } } },
     { subject: { work: 1 }, schema: workSubject(1, true).respond.schema, example: plannerResponse },
     // W2-R1-1: a decision's response carries the amended analysis.
     { subject: { decision: 1 }, schema: decisionResponseSchema, example: { ...plannerResponse, analysis: decisionAnalysis } },
@@ -191,7 +205,7 @@ test("every subject's response, as its own schema decodes it, survives the round
 // A subject added to src/subjects.ts is covered once it is added to this list.
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 type RespondOf<T> = T extends Subject<infer R, infer _D> ? R : never;
-type Carried<R> = Same<R, PlannerResponse> extends true ? true : Same<R, QuestionListResponse> extends true ? true : Same<R, DecisionResponse>;
+type Carried<R> = Same<R, PlannerResponse> extends true ? true : Same<R, QuestionListResponse> extends true ? true : Same<R, PlanResponse> extends true ? true : Same<R, DecisionResponse>;
 const holds = <_T extends true>(): void => undefined;
 const fails = <_T extends false>(): void => undefined;
 type Responses = [RespondOf<ReturnType<typeof questionSubject>>, RespondOf<ReturnType<typeof requirementsSubject>>, RespondOf<ReturnType<typeof planSubject>>, RespondOf<ReturnType<typeof workSubject>>, RespondOf<ReturnType<typeof decisionSubject>>];

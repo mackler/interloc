@@ -5,6 +5,7 @@ import type { CanUseTool, HookCallback, Options, PermissionResult, PreToolUseHoo
 import { Deferred, Effect, Exit, Layer, Ref, Result } from "effect";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
+import { pathOf } from "./artifacts.ts";
 import { type CallOutcome, decodeQuestions, decodeToolTarget, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
 import { ClaudeCallFailed, type RunError } from "./errors.ts";
 import { askOffering, numberedOptions, permissionOptions } from "./offer.ts";
@@ -94,6 +95,15 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     const allowed = (await realLocation(store.dir)) + path.sep;
     return (await realLocation(path.resolve(store.project, named))).startsWith(allowed);
   };
+  /** Whether an edit targets plan.json or plan.md, which the program writes (issue #6, F1), resolved like underRecords. */
+  const planFile = async (named: string): Promise<boolean> => {
+    const records = await realLocation(store.dir);
+    const target = await realLocation(path.resolve(store.project, named));
+    return [pathOf({ kind: "planFile" }), pathOf({ kind: "plan" })].some((file) => target === path.join(records, file));
+  };
+  const denyPlanFile = (pre: PreToolUseHookInput) => ({
+    hookSpecificOutput: { hookEventName: pre.hook_event_name, permissionDecision: "deny" as const, permissionDecisionReason: prompts.PLAN_FILES_DENIED },
+  });
 
   /** An ask with the offer of decision support (D2), run inside a callback: the services it needs are provided here. */
   const offering = (decider: DeciderShape, prompt: string, question: Parameters<typeof askOffering>[2], present: Effect.Effect<void>, acceptable?: (answer: string) => boolean): Effect.Effect<string, CallbackError> =>
@@ -136,6 +146,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   const restrictEdits: HookCallback = async (input) => {
     const pre = input as PreToolUseHookInput;
     const named = decodeToolTarget(pre.tool_input);
+    if (named !== null && (await planFile(named))) return denyPlanFile(pre);
     if (named !== null && (await underRecords(named))) return {};
     return {
       hookSpecificOutput: {
@@ -166,6 +177,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       };
     };
 
+  // Execution (issue #6, P1-R1-4): plan.json and plan.md are the program's; a tool may not edit them. report_step is
+  // how the steps are recorded.
+  const denyPlanFileEdits: HookCallback = async (input) => {
+    const pre = input as PreToolUseHookInput;
+    const named = decodeToolTarget(pre.tool_input);
+    return named !== null && (await planFile(named)) ? denyPlanFile(pre) : {};
+  };
+
   const planningPermission =
     (decider: DeciderShape) =>
     (inCallback: InCallback): CanUseTool =>
@@ -187,6 +206,8 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   const executionPermission =
     (stop: Ref.Ref<Stop | null>, decider: DeciderShape, inCallback: InCallback): CanUseTool =>
     async (toolName, input): Promise<PermissionResult> => {
+      // report_step (issue #6, Q2) needs no permission; after a stop, the hook denies it before this is asked.
+      if (toolName === prompts.REPORT_STEP_TOOL_NAME) return { behavior: "allow", updatedInput: input };
       if (toolName === "AskUserQuestion") {
         await inCallback(
           Effect.gen(function* () {
@@ -224,7 +245,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
    * callback still rejects the callback's Promise. The messages are shown and the usage recorded as
    * they arrive; the outcome is the pure reduction of the list at the end.
    */
-  const call = (session: Ref.Ref<string | null>, prompt: string, purpose: "planning" | "interview" | "execution", show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool): Effect.Effect<CallOutcome, CallbackError> =>
+  const call = (session: Ref.Ref<string | null>, prompt: string, purpose: "planning" | "interview" | "execution", show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool, callbacks: (inCallback: InCallback) => Options = () => ({})): Effect.Effect<CallOutcome, CallbackError> =>
     Effect.gen(function* () {
       yield* ui.notify({ _tag: "AgentCallStarted", agent: "claude", purpose });
       const controller = new AbortController();
@@ -241,7 +262,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           ),
           { signal: controller.signal },
         );
-      const full: Options = { ...options, cwd: store.project, abortController: controller, canUseTool: permission(inCallback) };
+      const full: Options = { ...options, ...callbacks(inCallback), cwd: store.project, abortController: controller, canUseTool: permission(inCallback) };
       const resumed = yield* Ref.get(session);
       if (resumed !== null) full.resume = resumed;
       if (config.claudeModel !== null) full.model = config.claudeModel;
@@ -324,7 +345,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         if (outcome.error !== null) return yield* Effect.fail(new ClaudeCallFailed({ message: outcome.error }));
         return { output: outcome.structured, resultText: outcome.resultText, costUsd: outcome.costUsd };
       }),
-    executing: (prompt) =>
+    executing: (prompt, reporter) =>
       Effect.gen(function* () {
         const decider = yield* Decider;
         const stop = yield* Ref.make<Stop | null>(null);
@@ -336,9 +357,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           {
             permissionMode: config.execPermissionMode,
             outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
-            hooks: { PreToolUse: [{ hooks: [denyAfterStop(stop)] }] },
+            hooks: { PreToolUse: [{ hooks: [denyAfterStop(stop)] }, { matcher: EDIT_TOOLS.join("|"), hooks: [denyPlanFileEdits] }] },
+            allowedTools: [prompts.REPORT_STEP_TOOL_NAME],
           },
           (inCallback) => executionPermission(stop, decider, inCallback),
+          // report_step (issue #6, Q2): each report runs the phase's reporter; a failure to write aborts the call.
+          (inCallback) => ({
+            mcpServers: { [prompts.REPORT_STEP_SERVER]: sdk.stepReporter((r) => inCallback(reporter(r.id, r.status), { text: prompts.STEP_NOT_RECORDED, isError: true })) },
+          }),
         );
         return interpretExecution(outcome, yield* Ref.get(stop));
       }),

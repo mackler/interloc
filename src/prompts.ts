@@ -157,47 +157,92 @@ Return an empty questions_for_user array.`;
 
 // ---- plan ---------------------------------------------------------------------------------------
 
+/**
+ * How every call that creates or changes the plan returns it (issue #6, F1): whole, as data; the program writes plan.json
+ * and plan.md from it.
+ */
+export const PLAN_FORMAT = `Return the complete plan in the field 'plan': its stages in order, each with its number and a title, and in each stage its steps in order, each with an id, its number within the stage, a short label of one line, and its full text in Markdown. Return the whole plan every time, including the parts that did not change. The program writes plan-review/plan.json and plan-review/plan.md from it; do not write either file.`;
+/** The rule of step identity (G-R1-1), which validatePlan in src/plan.ts enforces and the repair turn repeats. */
+export const PLAN_ID_RULE = `Every step has an id (S1, S2, …) that is unique across the plan. A step that stays in the plan keeps its id in every revision, and a new step gets an id not used before in this plan. A step whose status in plan-review/plan.json is 'done' stays in the plan, with its id, label and text unchanged; it may move to another stage. Stage and step numbers are for display only.`;
+/** The statuses of plan.json as the agents read them. */
+const PLAN_STATUSES = `Each step of plan-review/plan.json has a status that the program records: a step with status 'done' is implemented, a step with status 'unfinished' was begun and not completed, and a step with status 'pending' is not yet begun.`;
+
 export function initialPlanPrompt(task: string, withRequirements: boolean): string {
   const requirements = withRequirements
     ? "plan-review/requirements.md contains the user's confirmed answers and decisions from the interview. The plan must follow it.\n"
     : "";
   return `Produce an implementation plan for the task below. Investigate the codebase as needed.
-${requirements}Write the plan to plan-review/plan.md as numbered steps, each with a marker that shows whether the step is completed.
-Do not modify any other file. Do not implement anything.
+${requirements}${PLAN_FORMAT}
+${PLAN_ID_RULE}
+Do not modify any file. Do not implement anything.
 Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be written; otherwise return an empty array.
 ${QUESTION_OPTIONS_RULE}
 Task: ${task}`;
 }
 
 export const revisePlanPrompt = `Execution has stopped. The last entry of plan-review/user-decisions.md contains the user's input for this stop.
-Revise plan-review/plan.md for the remaining work: keep the completed steps and their markers, and change, add, or remove remaining steps as the user's input and the current state of the codebase require.
-If no change to the plan is required, leave the file unchanged. Do not modify any other file. Do not implement anything.
+Revise the plan in plan-review/plan.json for the remaining work: keep the steps with status 'done', and change, add, or remove the other steps as the user's input and the current state of the codebase require.
+${PLAN_STATUSES}
+${PLAN_FORMAT}
+${PLAN_ID_RULE}
+If no change to the plan is required, return it as it is. Do not modify any file. Do not implement anything.
 Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.
 ${QUESTION_OPTIONS_RULE}`;
 
-export const planApplyDecisionsPrompt = `plan-review/user-decisions.md has new entries. Read the file and amend plan-review/plan.md where a decision requires it. Do not modify any other file.
+export const planApplyDecisionsPrompt = `plan-review/user-decisions.md has new entries. Read the file and amend the plan in plan-review/plan.json where a decision requires it.
+${PLAN_FORMAT}
+${PLAN_ID_RULE}
+Do not modify any file.
 Return an empty questions_for_user array.`;
 
 export function planReviewPrompt(phase: number, round: number, withRequirements: boolean): string {
   const prefix = `P${phase}`;
-  if (round > 1) return laterRound(pathOf({ kind: "plan" }), pathOf({ kind: "log", subject: { plan: phase } }), prefix, round);
+  if (round > 1) return laterRound(pathOf({ kind: "planFile" }), pathOf({ kind: "log", subject: { plan: phase } }), prefix, round);
   const requirements = withRequirements
     ? "plan-review/requirements.md contains the user's confirmed answers and decisions. It must be followed; raise an issue when a plan step contradicts it or omits something it requires.\n"
     : "";
-  return `Review the implementation plan in plan-review/plan.md against the codebase. Do not modify any file.
-${requirements}Steps that the plan marks as completed are already implemented in the codebase; review the remaining steps, and review whether the remaining steps are consistent with the implemented state.
-Put the step number or the heading in the location field.
+  return `Review the implementation plan in plan-review/plan.json against the codebase. Do not modify any file.
+${requirements}${PLAN_STATUSES} Steps with status 'done' are already implemented in the codebase; review the remaining steps, and review whether the remaining steps are consistent with the implemented state.
+Put the step's id in the location field.
 ${logRules(pathOf({ kind: "log", subject: { plan: phase } }), prefix, round)}`;
 }
 
 export function planRespondPrompt(phase: number, round: number): string {
-  return `plan-review/planning-${phase}/review-${round}.json contains a review of plan-review/plan.md.
-${respondRules("you amend plan-review/plan.md for it")}
-Do not modify any file other than plan-review/plan.md.`;
+  return `plan-review/planning-${phase}/review-${round}.json contains a review of the plan in plan-review/plan.json.
+${respondRules("you amend the plan for it")}
+${PLAN_FORMAT}
+${PLAN_ID_RULE}
+Do not modify any file.`;
 }
 
-export const executePrompt = `The plan in plan-review/plan.md has been reviewed. Implement its remaining steps in order.
-After you complete a step, set its completion marker in plan-review/plan.md; do not change the content of the remaining steps.
+/** The in-process tool of an execution call (issue #6, Q2): its server, its name, its statuses and its description. */
+export const REPORT_STEP_SERVER = "interloq";
+export const REPORT_STEP_TOOL = "report_step";
+/** The name under which Claude Code calls the tool, and under which hooks and permissions see it. */
+export const REPORT_STEP_TOOL_NAME = `mcp__${REPORT_STEP_SERVER}__${REPORT_STEP_TOOL}`;
+export const REPORT_STEP_STATUSES = ["started", "done"] as const;
+export const REPORT_STEP_DESCRIPTION = `Report the progress of a step of the plan in plan-review/plan.json: call it with the step's id and ${REPORT_STEP_STATUSES.map((s) => `'${s}'`).join(" when you begin the step, and ")} when the step is complete and verified.`;
+/** report_step's answers: the step recorded, or an id that is not in the plan (Q3: nothing changes, the run goes on). */
+export function stepRecordedText(id: string, status: string): string {
+  return `Recorded: step ${id} is ${status}.`;
+}
+export function unknownStepText(id: string, ids: readonly string[]): string {
+  return `No step of the plan has the id ${JSON.stringify(id)}; nothing was recorded. The ids of the plan are: ${ids.join(", ") || "(none)"}.`;
+}
+/** report_step's answer when the report could not be written; the call is ended with the error. */
+export const STEP_NOT_RECORDED = "The report could not be recorded; the program ends this call.";
+/** The denial of an edit of plan.json or plan.md (issue #6, F1): the program writes both from the plan Claude Code returns. */
+export const PLAN_FILES_DENIED = "plan-review/plan.json and plan-review/plan.md are written by the program from the plan you return; do not edit them.";
+/** The validation repair turn of a plan (issue #6, G-R1-1): what was wrong, and the rule. */
+export function planRepairPrompt(problems: PlanProblems): string {
+  return `Your structured output matched the schema, but the program cannot accept the plan:
+${planProblemLines(problems).join("\n")}
+${PLAN_ID_RULE}
+Return the complete output again, corrected. Do not modify any file.`;
+}
+
+export const executePrompt = `The plan in plan-review/plan.json has been reviewed. Implement its remaining steps in order: the steps whose status is 'pending' or 'unfinished'. Steps with status 'done' are implemented; a step with status 'unfinished' was begun and not completed.
+Report your progress with the tool ${REPORT_STEP_TOOL}: when you begin a step, call it with the step's id and the status '${REPORT_STEP_STATUSES[0]}'; when the step is complete and verified, call it with the step's id and the status '${REPORT_STEP_STATUSES[1]}'. The program records the status in plan-review/plan.json; do not edit plan-review/plan.json or plan-review/plan.md, and do not change the plan.
 If you need information or a decision from the user, or if a remaining step proves to be wrong, do not continue on an assumption: ask with the AskUserQuestion tool. After you have asked, make no tool call other than the final structured output; end your turn with status 'needs_input'.
 If you cannot continue for another reason, for example a command that fails and that you cannot correct or a denied permission, stop and return status 'blocked' with the description in the question field.
 When every step is completed and verified, return status 'finished'.
@@ -244,12 +289,24 @@ export const startOrTalkPrompt = "\nClaude Code and Codex agree that no question
 
 /** The start of the question phase. */
 export const questionListLine = "Gather Requirements: Claude Code formulates the question list ...";
-/** The start and the end of execution phase k. */
-export function implementationBeganLine(k: number, permissionMode: string): string {
-  return `\nImplementation phase ${k}: Claude Code implements the plan (permission mode ${permissionMode}) ...`;
+/** The start and the end of an execution phase, under its label (issue #6: numbered only when the run holds two). */
+export function implementationBeganLine(label: string, permissionMode: string): string {
+  return `\n${label}: Claude Code implements the plan (permission mode ${permissionMode}) ...`;
 }
-export function implementationEndedLine(k: number, status: string): string {
-  return `\nImplementation phase ${k} ended with status: ${status}`;
+export function implementationEndedLine(label: string, status: string): string {
+  return `\n${label} ended with status: ${status}`;
+}
+/** The start of a planning phase: the first plan, or a revision. */
+export function planningBeganLine(label: string, first: boolean): string {
+  return first ? `${label}: requesting the initial plan from Claude Code ...` : `\n${label}: Claude Code revises the plan ...`;
+}
+/** The start of a work review. */
+export function workReviewBeganLine(label: string): string {
+  return `\n${label}: Codex reviews the changes to the project since the run began ...`;
+}
+/** The plan could not be written when an execution call ended by a failure or an interruption (issue #6, G-R1-2). */
+export function planNotEndedLine(reason: string): string {
+  return `\nThe plan's steps could not be recorded at the end of the implementation: ${reason}`;
 }
 /** The end of a finished run. */
 export function taskFinishedLine(phases: number): string {
@@ -304,6 +361,20 @@ export function cycleLimitStopText(heading: string): string {
 export function analysisInvalidText(parts: readonly string[]): string {
   return `the decision analysis is invalid: ${parts.join("; ")}`;
 }
+/** What the validation of a plan found (the fields of PlanInvalid in src/errors.ts, which imports this module). */
+export type PlanProblems = Readonly<{ duplicateIds: readonly string[]; emptyIds: number; removedDone: readonly string[]; changedDone: readonly string[] }>;
+/** The problems of an invalid plan, one sentence each, naming the offending ids (issue #6, G-R1-1). */
+export function planProblemLines(problems: PlanProblems): readonly string[] {
+  return [
+    ...(problems.duplicateIds.length === 0 ? [] : [`More than one step has the id ${problems.duplicateIds.join(", ")}; ids must be unique across the plan.`]),
+    ...(problems.emptyIds === 0 ? [] : [`${problems.emptyIds} step(s) have an empty id; every step needs an id.`]),
+    ...(problems.removedDone.length === 0 ? [] : [`The done step(s) ${problems.removedDone.join(", ")} are missing; a done step stays in the plan.`]),
+    ...(problems.changedDone.length === 0 ? [] : [`The label or text of the done step(s) ${problems.changedDone.join(", ")} changed; a done step keeps its label and text.`]),
+  ];
+}
+export function planInvalidText(problems: PlanProblems): string {
+  return `the plan is invalid: ${planProblemLines(problems).join(" ")}`;
+}
 export function decisionFormatUnreadableText(file: string, message: string): string {
   return `the decision-making format ${file} could not be read: ${message}`;
 }
@@ -327,7 +398,7 @@ ${laterRound(changes, log, prefix, round)}`;
     ? "plan-review/requirements.md contains the user's confirmed answers and decisions. Raise an issue when the work contradicts it or omits something it requires of a completed step.\n"
     : "";
   return `Review the work done in the project since the run began. plan-review/${changes} is the diff of the project against its state at the start of the run (new files in full, committed changes included); read it and the project itself. Do not modify any file.
-Review the work against plan-review/plan.md. Steps that the plan marks as completed are implemented; review their work against the plan. Steps not marked completed in plan-review/plan.md are not yet implemented, and missing work of those steps is not an issue.
+Review the work against the plan in plan-review/plan.json. ${PLAN_STATUSES} Steps with status 'done' are implemented; review their work against the plan. Missing work of a step with another status is not an issue.
 ${requirements}Raise an issue for work that does not implement a completed step, contradicts the plan or the requirements, or introduces a defect.
 Put the file path, with a line number where it helps, in the location field.
 ${logRules(log, prefix, round)}`;
@@ -368,8 +439,11 @@ export function revisePlanAfterExecutionPrompt(phase: number, end: Readonly<{ st
       ? `\nWork review ${phase} found no issue in the work so far.`
       : `\nWork review ${phase} ended in round ${end.workReview.revisedInRound} with accepted issues or a user decision: plan-review/${pathOf({ kind: "round", subject: { work: phase }, round: end.workReview.revisedInRound })}, plan-review/${pathOf({ kind: "log", subject: { work: phase } })} and the last entries of plan-review/user-decisions.md.`;
   return `Execution phase ${phase} has ended.${stop}${review}
-Revise plan-review/plan.md: keep the completed steps and their markers, add steps that correct the accepted issues and follow the decisions, and change, add, or remove remaining steps as the current state of the codebase requires.
-If no change to the plan is required, leave the file unchanged. Do not modify any other file. Do not implement anything.
+Revise the plan in plan-review/plan.json: keep the steps with status 'done', add steps that correct the accepted issues and follow the decisions, and change, add, or remove the other steps as the current state of the codebase requires.
+${PLAN_STATUSES} An unfinished step counts as remaining.
+${PLAN_FORMAT}
+${PLAN_ID_RULE}
+If no change to the plan is required, return it as it is. Do not modify any file. Do not implement anything.
 Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.
 ${QUESTION_OPTIONS_RULE}`;
 }
@@ -432,9 +506,9 @@ export function interviewHelp(heading: string, ui: "terminal" | "page"): string 
 // Texts that the web page shows the user besides the prompts: the answer field's hint, the notices, the compact
 // layout's progress line and badge. Field and button labels stay in the components.
 
-/** The opening line of the page's message about a plan written in a planning phase (issue #5: the page says "Claude"). */
-export function planWrittenHeading(phase: number): string {
-  return `Claude wrote the plan (planning phase ${phase}).`;
+/** The opening line of the page's message about a plan written in a planning phase (issue #5: the page says "Claude"), under the phase's label (issue #6). */
+export function planWrittenHeading(label: string): string {
+  return `Claude wrote the plan (${label}).`;
 }
 /** The heading of the summary Claude proposes at the end of an interview, in the page. */
 export const SUMMARY_PROPOSED_HEADING = "Summary proposed by Claude:";
@@ -449,18 +523,20 @@ export const START_FORM_DESCRIPTION: readonly Readonly<{ text: string; style: "p
 
 /**
  * The name of a phase as both interfaces show it (issue #14): the first phase gathers the requirements, and an
- * execution phase implements the plan. The records keep their own names (question-review/, execution-<k>/).
+ * execution phase implements the plan. The records keep their own names (question-review/, execution-<k>/). Issue #6:
+ * `count` is how many phases of the kind the run holds, begun or foreseen; with one, the phase carries no number.
  */
-export function phaseLabel(kind: "questions" | "planning" | "execution" | "work", n: number): string {
+export function phaseLabel(kind: "questions" | "planning" | "execution" | "work", n: number, count: number): string {
+  const numbered = (name: string) => (count === 1 ? name : `${name} ${n}`);
   switch (kind) {
     case "questions":
       return "Gather Requirements";
     case "planning":
-      return `Planning ${n}`;
+      return numbered("Planning");
     case "execution":
-      return `Implementation ${n}`;
+      return numbered("Implementation");
     case "work":
-      return `Work review ${n}`;
+      return numbered("Work review");
   }
 }
 /** The purpose of an agent call as the activity line names it: the events keep the program's words (issues #14, #21). */
@@ -531,23 +607,57 @@ export function cycleLine(n: number, raised: number | null, counted: number | nu
   return `cycle ${n}: ${count(raised, "issue", "issues")}${counted !== null && counted !== raised ? ` (${counted} counted)` : ""}`;
 }
 /**
- * The one line of a finished review loop (issue #14, Q2 and G-R1-1): the corrections of its cycles, resolved when the
+ * The one line of a finished review loop (issue #14, Q2 and G-R1-1; issue #28: "n issues resolved in m cycles"): the corrections of its cycles, resolved when the
  * loop converged or the user proceeded, due when it left for a revision (even 0, when a decision of the user ended it).
  */
 export function loopSummary(cycles: number, corrections: number, result: "converged" | "proceed" | "revise"): string {
   const n = count(cycles, "cycle", "cycles");
   switch (result) {
     case "converged":
-      return `${n} resolved ${count(corrections, "issue", "issues")}`;
+      return `${count(corrections, "issue", "issues")} resolved in ${n}`;
     case "proceed":
-      return `${n} resolved ${count(corrections, "issue", "issues")}, proceeded without convergence`;
+      return `${count(corrections, "issue", "issues")} resolved in ${n}, proceeded without convergence`;
     case "revise":
-      return `${n}: ${count(corrections, "correction", "corrections")} due`;
+      return `${count(corrections, "correction", "corrections")} due after ${n}`;
   }
 }
-/** The steps of Gather Requirements in the progress rail (issue #21, Q5 and Q7). */
+/** A stage of the plan as plan.md and the progress rail name it (issue #6): "Stage 1: the schema and its records". */
+export function stageHeading(n: number, title: string): string {
+  return `Stage ${n}: ${title}`;
+}
+/** A step of the plan as the progress rail names it (issue #6): "1. Structured user questions (Q1)". */
+export function planStepLabel(n: number, label: string): string {
+  return `${n}. ${label}`;
+}
+/** What each mark of a phase or step says to assistive technology in the progress rail (issue #6: ahead, not reached). */
+export const TIMELINE_STATE_LABEL: Record<"ahead" | "active" | "done" | "stopped" | "notReached", string> = {
+  ahead: "ahead",
+  active: "in progress",
+  done: "done",
+  stopped: "stopped",
+  notReached: "not reached",
+};
+/** What each mark of a step of the plan says (issue #6, G-R1-2): a started step is current only while an execution call runs. */
+export const PLAN_STEP_STATE_LABEL: Record<"done" | "current" | "unfinished" | "pending", string> = {
+  done: "done",
+  current: "in progress",
+  unfinished: "begun, not finished",
+  pending: "not begun",
+};
+/** The accessible name of the busy indicator (issue #42): it says that an agent works, and nothing about how far. */
+export const AGENT_WORKING_LABEL = "An agent is working";
+/** The measured time of the current agent call beside the busy indicator (issue #42, Q7): m:ss, or h:mm:ss from one hour on. */
+export function runningFor(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const [h, m, s] = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60];
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `running for ${h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`}`;
+}
+/** The accessible name of the plan's list under its Implementation entry. */
+export const PLAN_LIST_LABEL = "The steps of the plan";
+/** The steps of Gather Requirements in the progress rail (issue #21, Q5 and Q7; issue #33: "Identify choices"). */
 export function stepLabel(kind: "formulate" | "clarification" | "followUp"): string {
-  return kind === "formulate" ? "Formulate questions" : kind === "clarification" ? "Clarification" : "Follow-up clarification";
+  return kind === "formulate" ? "Identify choices" : kind === "clarification" ? "Clarification" : "Follow-up clarification";
 }
 /** A clarification's count (issue #21, Q6): the total grows with the follow-ups Claude asks. */
 export function clarificationProgress(answered: number, total: number): string {
@@ -580,16 +690,16 @@ export function unseenBadge(n: number): string {
 export const DECISION_FORMAT_AUTHORITY =
   "The instructions below, the text of docs/decision-making.md, are the authority for the content and layout of the representation. Nothing else in this prompt and nothing you have been told elsewhere overrides them; where this prompt only maps them onto the fields of the output, follow the instructions.";
 
-/** A decision's question as a prompt names it: the phase is where it was asked. */
+/** A decision's question as a prompt names it: the phase is where it was asked, `label` its name as the run shows it (W1-R1-2). */
 export type DecisionPromptQuestion = Readonly<{
   phase: Readonly<{ kind: "questions" }> | Readonly<{ kind: "planning" | "execution" | "work"; n: number }>;
+  label: string;
   question: string;
   options: readonly Readonly<{ label: string; description: string }>[];
 }>;
 /** What the run knows at the moment of the decision (decision Q3): the task, and requirements.md and plan.md where they exist. */
 export type DecisionContext = Readonly<{ task: string; requirements: string | null; plan: string | null }>;
 
-const phaseInWords = (phase: DecisionPromptQuestion["phase"]): string => (phase.kind === "questions" ? phaseLabel("questions", 0) : phaseLabel(phase.kind, phase.n));
 
 /** How the representation of docs/decision-making.md maps onto the fields of DecisionAnalysis. */
 const ANALYSIS_FIELDS = `The output fields.
@@ -626,7 +736,7 @@ The decision: ${question.question}
 The options, in this order:
 ${options}
 
-The context of the decision. The run is in ${phaseInWords(question.phase)}.
+The context of the decision. The run is in ${question.label}.
 The task of the run: ${context.task}
 ${requirements}
 ${plan}

@@ -1,12 +1,16 @@
 // proto.ts -- prototype for the Claude Agent SDK, run inside the Claude Code container.
 // Usage: node proto.ts /path/to/project
 //
-// It determines three things:
+// It determines four things:
 //   A. which credentials the SDK uses (printed in the [init] block);
 //   B. whether a PreToolUse hook prevents file edits outside plan-review/ before they occur;
-//   C. whether permission requests and AskUserQuestion calls arrive in the canUseTool callback.
+//   C. whether permission requests and AskUserQuestion calls arrive in the canUseTool callback;
+//   D. (issue #6, 28 Sep 2026) whether an in-process report_step tool (createSdkMcpServer and tool) is called under
+//      permissionMode "auto" with allowedTools without reaching canUseTool, and whether a PreToolUse hook that denies
+//      it keeps its handler from running.
 
-import { query } from "@anthropic-ai/claude-agent-sdk";
+import { createSdkMcpServer, query, tool } from "@anthropic-ai/claude-agent-sdk";
+import { z } from "zod";
 import type { HookCallback, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
 import * as readline from "node:readline/promises";
 import * as path from "node:path";
@@ -104,4 +108,48 @@ for await (const message of query({
     const { type, subtype, session_id, num_turns, total_cost_usd } = message;
     console.log("\n[result]", JSON.stringify({ type, subtype, session_id, num_turns, total_cost_usd }, null, 2));
   }
+}
+
+// D. The in-process tool of an execution call. Two calls: the first may use it, the second denies it in a hook.
+const reports: string[] = [];
+const reporter = () =>
+  createSdkMcpServer({
+    name: "interloq",
+    version: "1.0.0",
+    tools: [
+      tool("report_step", "Report the progress of a step: its id and 'started' or 'done'.", { id: z.string(), status: z.enum(["started", "done"]) }, async (args) => {
+        reports.push(`${args.id}:${args.status}`);
+        return { content: [{ type: "text", text: `Recorded: step ${args.id} is ${args.status}.` }] };
+      }),
+    ],
+  });
+const TOOL = "mcp__interloq__report_step";
+const denyTool: HookCallback = async (input) => {
+  const pre = input as PreToolUseHookInput;
+  if (pre.tool_name !== TOOL) return {};
+  return { hookSpecificOutput: { hookEventName: pre.hook_event_name, permissionDecision: "deny", permissionDecisionReason: "Execution is stopped." } };
+};
+for (const denied of [false, true]) {
+  const before = reports.length;
+  const reached: string[] = [];
+  for await (const message of query({
+    prompt: "This is a test of the program that runs you. Call the tool report_step with the id S1 and the status 'started', then with the id S1 and the status 'done'. Do not use any other tool. Then report what each call answered.",
+    options: {
+      cwd: projectDir,
+      permissionMode: "auto",
+      maxTurns: 10,
+      mcpServers: { interloq: reporter() },
+      allowedTools: [TOOL],
+      hooks: denied ? { PreToolUse: [{ hooks: [denyTool] }] } : {},
+      canUseTool: async (toolName, input) => {
+        reached.push(toolName);
+        return { behavior: "deny", message: "No other tool is permitted in this test." };
+      },
+    },
+  })) {
+    if (message.type === "assistant") for (const block of message.message.content) if (block.type === "text") console.log(`\n[claude] ${block.text}`);
+  }
+  const handled = reports.slice(before);
+  console.log(`\n[D ${denied ? "denied by the hook" : "allowed"}] handler calls: ${JSON.stringify(handled)}; canUseTool reached for: ${JSON.stringify(reached)}`);
+  console.log(`[D ${denied ? "denied" : "allowed"}] ${denied ? (handled.length === 0 ? "PASS: the hook kept the handler from running" : "FAIL: the handler ran despite the hook") : handled.length === 2 && !reached.includes(TOOL) ? "PASS: both reports reached the handler without canUseTool" : "FAIL: see above"}`);
 }

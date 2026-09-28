@@ -13,7 +13,7 @@ import * as S from "./schema.ts";
 import type { DecisionAnalysis } from "./schema.ts";
 import { Decider, type DecisionQuestion, type DeciderShape, Planner, type Reviewer, type RunConfig, type Services, Store, Ui } from "./services.ts";
 import { decisionSubject } from "./subjects.ts";
-import type { LoopResult } from "./uiEvents.ts";
+import { type LoopResult, phaseName } from "./uiEvents.ts";
 
 export type DecisionEnd = Readonly<{ decision: number; question: DecisionQuestion; analysis: DecisionAnalysis; result: LoopResult }>;
 
@@ -68,11 +68,11 @@ export type DeciderDeps = Ui | Planner | Reviewer | Store | RunConfig;
 export const makeDecider = (task: string, format: string): Effect.Effect<DeciderShape, never, DeciderDeps> =>
   Effect.gen(function* () {
     const context = yield* Effect.context<DeciderDeps>();
-    const at = (phase: DecisionQuestion["phase"]): DeciderShape => {
+    const at = (phase: DecisionQuestion["phase"], label: string): DeciderShape => {
       const self: DeciderShape = {
         at,
         decide: (request) =>
-          decisionLoop(format, task, { phase, ...request }).pipe(
+          decisionLoop(format, task, { phase, label, ...request }).pipe(
             Effect.map((end) => ({ decision: end.decision, analysis: end.analysis, result: end.result })),
             Effect.provideService(Decider, self),
             Effect.provideContext(context),
@@ -80,6 +80,6 @@ export const makeDecider = (task: string, format: string): Effect.Effect<Decider
       };
       return self;
     };
-    return at({ kind: "questions" });
+    return at({ kind: "questions" }, phaseName({ kind: "questions" }, 1));
   });
 export const deciderLayer = (task: string, format: string): Layer.Layer<Decider, never, DeciderDeps> => Layer.effect(Decider, makeDecider(task, format));

@@ -181,3 +181,21 @@ test("the decision analysis rejects a missing element, a missing part of the ext
   rejects(S.DecisionAnalysis, { ...analysis, columns: [{ kind: "unclear", option: "A", advantages: [], disadvantages: [] }] }, "an unclear column without its statement");
   rejects(S.DecisionAnalysis, { ...analysis, columns: [{ kind: "argued", option: "A", unclear: "u" }] }, "an argued column without entries");
 });
+
+// Issue #6 (Q1, F1): the plan is structured data. The agent returns stages and steps without statuses; the program
+// records a status per step in plan.json.
+const planStep = { id: "S1", number: 1, label: "Structured user questions (Q1)", text: "Add the **schema**." };
+const plan = { stages: [{ number: 1, title: "the schema and its records", steps: [planStep] }] };
+test("the plan's schemas: the reply without statuses, the record with them", () => {
+  assert.deepEqual(decode(S.Plan, plan), plan);
+  assert.deepEqual(decode(S.PlanWrite, { plan, questions_for_user: [userQuestion] }), { plan, questions_for_user: [userQuestion] });
+  assert.deepEqual(decode(S.PlanResponse, { ...plannerResponse, plan }), { ...plannerResponse, plan });
+  const recorded = { version: 2, plan: { stages: [{ ...plan.stages[0], steps: [{ ...planStep, status: "started" }] }] } };
+  assert.deepEqual(decode(S.PlanFile, recorded), recorded);
+  for (const status of ["pending", "started", "done", "unfinished"]) decode(S.StepStatus, status);
+  rejects(S.StepStatus, "current", "a status the program does not record");
+  rejects(S.Plan, { stages: [{ ...plan.stages[0], steps: [{ ...planStep, status: "done" }] }] }, "a reply step that carries a status");
+  rejects(S.Plan, { stages: [{ ...plan.stages[0], steps: [{ ...planStep, number: 1.5 }] }] }, "a step number that is not an integer");
+  rejects(S.PlanFile, { ...recorded, version: 1 }, "a plan file of another version");
+  rejects(S.PlanFile, { version: 2, plan }, "a recorded step without a status");
+});

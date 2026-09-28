@@ -7,7 +7,8 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createHash } from "node:crypto";
 import { type Artifact, guardedRecord, LOG_SUBJECTS, pathOf, recordPath, reviewedFile, type SubjectId } from "./artifacts.ts";
 import { FileSystemError, GitError } from "./errors.ts";
-import type { LogEntry, UsageRecord } from "./schema.ts";
+import { type LogEntry, PlanFile, type RecordedPlan, type UsageRecord } from "./schema.ts";
+import { renderPlanMarkdown } from "./plan.ts";
 import type { Platform } from "./platform.ts";
 import { AnalysisFile, Baseline, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
 import { renderDecision, renderFeedback, subjectHeading } from "./render.ts";
@@ -201,11 +202,6 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       // The readers accept the version-1 files of earlier runs as well (Q5's follow-up).
       loadQuestions: () => readText(questions).pipe(Effect.flatMap((text) => Effect.fromResult(readQuestions(questions, text)))),
       writeRequirements: (text) => writeText(requirements, text),
-      planExists: () =>
-        Effect.gen(function* () {
-          if (!(yield* exists(plan))) return false;
-          return (yield* io("read", plan, fs.stat(plan))).size > 0n;
-        }),
       loadLog: (subject) => {
         const k = decisionOf(subject);
         if (k !== null) return readLogFile(subject).pipe(Effect.map((entries) => entries.filter(ofDecision(k))));
@@ -302,10 +298,26 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
               Effect.catch((e) => (alreadyExists(e) ? Effect.succeed(false) : Effect.fail(new FileSystemError({ operation: "create directory", path: d, message: e.message })))),
             );
             if (!created) continue;
-            yield* saveRecord({ kind: "decisionQuestion", decision: k }, { version: VERSION, decision: k, phase: question.phase, question: question.question, options: question.options });
+            yield* saveRecord({ kind: "decisionQuestion", decision: k }, { version: VERSION, decision: k, phase: question.phase, label: question.label, question: question.question, options: question.options });
             return k;
           }
         }),
+      savePlan: (recorded: RecordedPlan) =>
+        Effect.gen(function* () {
+          yield* saveRecord({ kind: "planFile" }, { version: VERSION, plan: recorded });
+          // plan.md follows plan.json; a reader of plan.md never sees a plan that plan.json does not hold (F2).
+          const temporary = `${plan}.tmp-${process.pid}`;
+          yield* writeText(temporary, renderPlanMarkdown(recorded));
+          yield* io("rename", plan, fs.rename(temporary, plan));
+        }),
+      loadPlan: () => {
+        const file = at({ kind: "planFile" });
+        return exists(file).pipe(
+          Effect.flatMap((present) =>
+            present ? readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(decodeText(file, PlanFile, text))), Effect.map((f) => Option.some(f.plan))) : Effect.succeed(Option.none<RecordedPlan>()),
+          ),
+        );
+      },
       saveAnalysisWrite: (decision, output) => saveRecord({ kind: "analysisWrite", decision }, output),
       saveAnalysis: (decision, analysis) => saveRecord({ kind: "analysis", decision }, { version: VERSION, analysis }),
       loadAnalysis: (decision) => {
