@@ -677,3 +677,61 @@ describe("phase bands", () => {
     expect(liveView.run?.right.map((m) => [m.band?.key, m.showTime])).toEqual([["questions", false], ["planning-1", false]]);
   });
 });
+
+// Decision support, plan step 3.6.
+describe("decision support", () => {
+  const positions = [{ label: "Follow Codex", description: "the issue" }, { label: "Follow Claude", description: "the rationale" }];
+  const presented: UiEvent = { _tag: "OptionsPresented", question: "issue A", options: positions };
+  const analysis = { decision: "d", columns: [], recommendation: { option: "", reason: "" } };
+  const analyzed = (decision: number): UiEvent => ({ _tag: "DecisionAnalyzed", decision, question: "issue A", options: positions, analysis });
+
+  test("presented options become the cards of the next decision prompt; their terminal lines are absorbed; the offer is a choice", () => {
+    const s = fold(live([started, notified(presented), said("  1. Follow Codex - the issue"), said("  2. Follow Claude - the rationale"), asked(1, prompts.withOffer(prompts.decisionPrompt("issue A")))]));
+    expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["Follow Codex — the issue=1", "Follow Claude — the rationale=2"]);
+    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["No decision=", `${prompts.HELP_ME_DECIDE}=/decide`, "Quit=q"]);
+    expect(bodies(s)).toEqual(["program:Decision on: issue A"]);
+    const helped = fold([{ type: "event", run: 1, seq: 5, time: at(5), event: { _tag: "Answered", prompt: 1, text: "/decide" } }], s);
+    expect(bodies(helped).at(-1)).toBe(`user:${prompts.HELP_ME_DECIDE}`);
+  });
+
+  test("options never outlive their prompt: a pause without options after one with options shows no cards", () => {
+    const s = fold(live([started, notified(presented), asked(1, prompts.decisionPrompt("issue A")), { _tag: "Answered", prompt: 1, text: "1" }, asked(2, prompts.decisionPrompt("the idle cycles"))]));
+    expect(s.run?.pending?.options).toEqual([]);
+  });
+
+  test("after a nested decision the outer question's options are presented again (P1-R1-3)", () => {
+    const outer: UiEvent = { _tag: "QuestionAsked", question: "A or B?", options: [{ label: "A", description: "" }, { label: "B", description: "" }] };
+    const inner: UiEvent = { _tag: "QuestionAsked", question: "C or D?", options: [{ label: "C", description: "" }, { label: "D", description: "" }] };
+    const s = fold(live([
+      started,
+      notified(outer),
+      asked(1, prompts.withOffer(prompts.optionOrTextPrompt)),
+      { _tag: "Answered", prompt: 1, text: "/decide" },
+      notified(inner),
+      asked(2, prompts.withOffer(prompts.optionOrTextPrompt)),
+      { _tag: "Answered", prompt: 2, text: "1" },
+      notified(analyzed(1)),
+      notified(outer),
+      asked(3, prompts.withOffer(prompts.optionOrTextPrompt)),
+    ]));
+    expect(s.run?.pending?.options.map((c) => c.label)).toEqual(["A", "B"]);
+  });
+
+  test("an analysis is kept for the reasked prompt and cleared by its answer; a decision loop adds nothing to the rail", () => {
+    const loop: RunEvent[] = [
+      notified({ _tag: "RoundBegan", subject: { decision: 1 }, round: 1, limit: 5 }),
+      notified({ _tag: "ReviewReceived", subject: { decision: 1 }, round: 1, review: { issues: [] }, counted: 0 }),
+      notified({ _tag: "LoopFinished", subject: { decision: 1 }, result: "converged" }),
+    ];
+    const before = fold(live([started, notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }), asked(1, prompts.withOffer(prompts.decisionPrompt("issue A"))), { _tag: "Answered", prompt: 1, text: "/decide" }]));
+    const s = fold(live([started, notified({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }), asked(1, prompts.withOffer(prompts.decisionPrompt("issue A"))), { _tag: "Answered", prompt: 1, text: "/decide" }, ...loop, notified(analyzed(1)), asked(2, prompts.withOffer(prompts.decisionPrompt("issue A")))]));
+    expect(s.run?.timeline).toEqual(before.run?.timeline);
+    expect(progressOf(s.run!)).toBe(progressOf(before.run!));
+    expect(s.run?.analysis?.event.decision).toBe(1);
+    expect(s.run?.analysis?.prompt).toBe(2);
+    const answered = fold([{ type: "event", run: 1, seq: 9, time: at(9), event: { _tag: "Answered", prompt: 2, text: "1" } }], s);
+    expect(answered.run?.analysis).toBe(null);
+    // A replay folds alike.
+    expect(replayed([started, notified(analyzed(3)), asked(1, prompts.withOffer(prompts.decisionPrompt("x")))]).run?.analysis?.event.decision).toBe(3);
+  });
+});

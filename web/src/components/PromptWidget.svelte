@@ -8,7 +8,7 @@
   // alike, none filled, because the agent's first option is not a recommended default [consistency and standards];
   // the fixed choices keep the program's primary action filled. A card is a native button that sends only the number.
   import { Button, Card, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
-  import { answerHint, PROPOSED_ANSWERS_LABEL } from "../../../src/prompts.ts";
+  import { answerHint, HELP_ME_DECIDE, PROPOSED_ANSWERS_LABEL } from "../../../src/prompts.ts";
   import type { Widget } from "../state.ts";
 
   // The typed text is the page's draft of this prompt (../draft.ts, finding 5): App keeps it per (incarnation, run,
@@ -24,6 +24,9 @@
     onAnswer(widget.asked.prompt, value);
   };
   const isQuit = (label: string) => label === "Quit";
+  // "Help me Decide" is an offer beside the answer, never the answer itself: tonal wherever it stands (decision support)
+  // [consistency and standards: the filled button stays the program's primary action].
+  const variantOf = (label: string, i: number): "filled" | "tonal" | "outlined" => (isQuit(label) ? "outlined" : label === HELP_ME_DECIDE ? "tonal" : i === 0 ? "filled" : "tonal");
   // An input method uses Enter to accept a candidate; that Enter is not an answer (finding 6) [error prevention].
   const composing = (e: KeyboardEvent) => e.isComposing || e.keyCode === 229;
 </script>
@@ -39,7 +42,7 @@
     {/if}
     <div class="choices">
       {#each widget.choices as choice, i (i)}
-        <Button variant={isQuit(choice.label) ? "outlined" : i === 0 ? "filled" : "tonal"} type="button" onclick={() => send(choice.sends)}>{choice.label}</Button>
+        <Button variant={variantOf(choice.label, i)} type="button" onclick={() => send(choice.sends)}>{choice.label}</Button>
       {/each}
     </div>
     {#if widget.asked.free !== "none"}

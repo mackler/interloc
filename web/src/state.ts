@@ -4,7 +4,7 @@
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
 import { clarificationProgress, cycleHeading, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
-import { interviewSays, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
+import { interviewSays, optionLines, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { correctionCount } from "../../src/issueLog.ts";
 import { type LoopResult, type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
@@ -64,6 +64,11 @@ export type RunView = Readonly<{
   phase: Band | null;
   /** The last time each panel displays, a message's or a band label's: what the next message's time is measured from. */
   lastShown: Readonly<{ left: string | null; right: string | null }>;
+  /**
+   * The analysis of the last decision (decision support), shown until the prompt asked again after it is answered:
+   * `prompt` is that prompt's number, null until it is asked.
+   */
+  analysis: Readonly<{ event: Extract<UiEvent, { _tag: "DecisionAnalyzed" }>; prompt: number | null }> | null;
 }>;
 
 export type Listing = Readonly<{ path: string; parent: string | null; dirs: readonly string[]; error: string | null }>;
@@ -90,6 +95,7 @@ export const initialState: ViewState = { connection: "connecting", cwd: "", curr
 
 const AGENT: Record<"claude" | "codex", string> = { claude: "Claude", codex: "Codex" };
 const sameSubject = (a: SubjectId, b: SubjectId): boolean => JSON.stringify(a) === JSON.stringify(b);
+const isDecision = (subject: SubjectId): boolean => typeof subject === "object" && "decision" in subject;
 const samePhase = (a: Phase, b: Phase): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 export const emptyRun = (id: number): RunView => ({
@@ -111,6 +117,7 @@ export const emptyRun = (id: number): RunView => ({
   callLabel: "",
   phase: null,
   lastShown: { left: null, right: null },
+  analysis: null,
 });
 
 /**
@@ -212,7 +219,8 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     case "PhaseEnded":
       return { ...run, activity: "", busy: false, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done" }, "done") : e)) };
     case "RoundBegan":
-      return { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
+      // A decision loop is a loop inside a phase that the progress panel does not show (D12 of the decision-support plan).
+      return isDecision(event.subject) ? run : { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
     case "LoopFinished":
       return { ...run, timeline: openGroups(run.timeline, event.subject, (g) => ({ ...g, result: event.result, done: true })) };
     case "ReviewReceived": {
@@ -267,6 +275,11 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return { ...run, activity: `${run.callLabel || AGENT[event.agent]} — ${event.ok ? "done" : "failed"}`, busy: false };
     case "ExecutionEnded":
       return run;
+    case "OptionsPresented":
+      // The options of the next pause or plan writer's question are its cards; their terminal lines are absorbed.
+      return { ...run, absorb: optionLines(event.options), questionOptions: event.options.map((o, i) => ({ label: o.description === "" ? o.label : `${o.label} — ${o.description}`, sends: String(i + 1) })) };
+    case "DecisionAnalyzed":
+      return { ...run, analysis: { event, prompt: null } };
     case "ClaudeSaid":
       // Issue #5: Claude's prose is attributed as data, not by a prefix in its text.
       return withLeft(run, message(run, time, "claude", event.text, "markdown"));
@@ -286,11 +299,14 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
         return event.text.trim() === "" ? r : withLeft(r, message(r, time, "program", event.text, "text"));
       case "Asked": {
         const extra = event.extra === "questionOptions" ? r.questionOptions : event.extra === "numberedAnswers" ? r.interviewChoices : [];
-        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, options: extra, choices: event.choices } };
+        // Presented options belong to this prompt alone (P1-R1-2); an analysis waiting for its prompt gets this one.
+        const analysis = r.analysis !== null && r.analysis.prompt === null ? { ...r.analysis, prompt: event.prompt } : r.analysis;
+        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, options: extra, choices: event.choices }, questionOptions: [], analysis };
       }
       case "Answered": {
         const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? [...r.pending.options, ...r.pending.choices].find((c) => c.sends === event.text) : undefined;
-        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt] };
+        const analysis = r.analysis !== null && r.analysis.prompt === event.prompt ? null : r.analysis;
+        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt], analysis };
       }
       case "Notified":
         return notifiedEvent(r, event.event, time);

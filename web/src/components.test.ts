@@ -251,6 +251,20 @@ describe("PromptWidget", () => {
     expect(root.querySelector("input[name=answer]")).not.toBe(null);
   });
 
+  // Decision support, plan step 3.6: one "Help me Decide" per question, a tonal button that sends /decide.
+  test("Help me Decide is a tonal button that sends /decide, never the filled primary action", () => {
+    const sent: string[] = [];
+    const root = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.optionOrTextPrompt), [{ label: "A", sends: "1" }, { label: "B", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
+    expect(fixed.map((b) => b.textContent?.trim())).toEqual([prompts.HELP_ME_DECIDE, "Quit"]);
+    expect(fixed[0].classList.contains("tonal")).toBe(true);
+    expect(fixed[0].classList.contains("filled")).toBe(false);
+    fixed[0].click();
+    expect(sent).toEqual(["/decide"]);
+    const decision = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.decisionPrompt("issue A"))), onAnswer: () => undefined });
+    expect([...decision.querySelectorAll<HTMLButtonElement>(".choices button")].map((b) => `${b.textContent?.trim()}:${b.classList.contains("filled") ? "filled" : b.classList.contains("tonal") ? "tonal" : "outlined"}`)).toEqual(["No decision:filled", `${prompts.HELP_ME_DECIDE}:tonal`, "Quit:outlined"]);
+  });
+
   test("a prompt without options has no group of cards", () => {
     const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: () => undefined });
     expect(optionsGroup(root)).toBe(null);
