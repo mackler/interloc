@@ -121,8 +121,10 @@ test("a change of the project during the analysis call halts with ProjectChanged
 
 test("the initial analysis is validated (P1-R2-1): a missing column halts before any Codex turn; a dangling reference is dropped with a note", async () => {
   const oneColumn = { ...analysis(), columns: [analysis().columns[0]] };
-  const halted = await setUp({ steps: [{ output: oneColumn }] });
+  // Issue #37: the second invalid analysis halts, after the validation repair turn.
+  const halted = await setUp({ steps: [{ output: oneColumn }, { output: oneColumn }] });
   await fails(halted.layer, "AnalysisInvalid");
+  assert.equal(halted.probe.planner.prompts.length, 2);
   assert.equal(halted.probe.reviewer.prompts.length, 0);
 
   const dangling: DecisionAnalysis = { ...analysis(), columns: [{ option: "SQLite", advantages: [entry("E1", "t", [{ id: "A1", text: "But x.", equivalent_to: "E9", replies: [] }])], disadvantages: [] }, analysis().columns[1]] };
@@ -316,4 +318,56 @@ test("askOffering notifies AnswerRejected once per rejected answer, never for an
   const without = await setUp({ answers: ["/decide", ""], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
   await offering(without.layer, { question: question.question, options: offered });
   assert.equal(rejectedCount(without.probe), 0);
+});
+
+// Issue #37, decision Q1: an analysis that fails the validation beyond its schema gets one repair turn in the same
+// session, whose prompt lists the exact labels, on each of the three paths that yield an analysis.
+const misnamed = (): DecisionAnalysis => ({ ...analysis(), columns: [{ ...analysis().columns[0], option: "1. MySQL" }, analysis().columns[1]] });
+const repairListsLabels = (prompt: string) => {
+  for (const [i, o] of question.options.entries()) assert.ok(prompt.includes(prompts.optionLine(i, o)), prompt);
+};
+
+test("the first analysis with a column that names no option gets the validation repair turn, and the loop converges", async () => {
+  const { layer, probe } = await setUp({ steps: [{ output: misnamed() }, { output: analysis() }], reviews: [{ issues: [] }] });
+  const end = await Effect.runPromise(loop(layer));
+  assert.deepEqual([end.result, end.analysis], ["converged", analysis()]);
+  assert.equal(probe.planner.prompts.length, 2);
+  repairListsLabels(probe.planner.prompts[1]);
+  assert.equal(probe.planner.freshSessions, 1);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(probe.dir, "invalid-replies", "claude-1.json"), "utf8")), misnamed());
+});
+
+test("a review response with an invalid analysis gets the validation repair turn", async () => {
+  const { layer, probe } = await setUp({
+    steps: [{ output: analysis() }, { output: decisionResponse([["D1-R1-1", "accepted"]], misnamed()) }, { output: decisionResponse([["D1-R1-1", "accepted"]], analysis("second")) }],
+    reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
+  });
+  const end = await Effect.runPromise(loop(layer));
+  assert.deepEqual([end.result, end.analysis.columns[0].advantages[0].title], ["converged", "second"]);
+  repairListsLabels(probe.planner.prompts[2]);
+  assert.deepEqual((await probe.loadLog({ decision: 1 })).map((e) => [e.id, e.action]), [["D1-R1-1", "accepted"]]);
+});
+
+test("the application of the user's decisions with an invalid analysis gets the validation repair turn", async () => {
+  const withQuestion = { ...decisionResponse([["D1-R1-1", "accepted"]], analysis("second")), questions_for_user: [{ question: "Which one?", options: [] }] };
+  const { layer, probe } = await setUp({
+    answers: ["the first"],
+    steps: [{ output: analysis() }, { output: withQuestion }, { output: { analysis: misnamed() } }, { output: { analysis: analysis("third") } }],
+    reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
+  });
+  const end = await Effect.runPromise(loop(layer));
+  assert.deepEqual([end.result, end.analysis.columns[0].advantages[0].title], ["converged", "third"]);
+  assert.match(probe.planner.prompts[2], /user-decisions\.md/);
+  repairListsLabels(probe.planner.prompts[3]);
+});
+
+test("a numbered label that matches its option after normalization is accepted without a repair turn, with a note", async () => {
+  const numbered: DecisionAnalysis = { ...analysis(), columns: [{ ...analysis().columns[0], option: "1. SQLite" }, analysis().columns[1]], recommendation: { option: "2) PostgreSQL", reason: "r" } };
+  const { layer, probe } = await setUp({ steps: [{ output: numbered }], reviews: [{ issues: [] }] });
+  const end = await Effect.runPromise(loop(layer));
+  assert.deepEqual([end.analysis.columns.map((c) => c.option), end.analysis.recommendation.option], [["SQLite", "PostgreSQL"], "PostgreSQL"]);
+  assert.equal(probe.planner.prompts.length, 1);
+  const conversation = fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8");
+  assert.match(conversation, /\*\*Option label corrected:\*\* the analysis named "1\. SQLite", which the program read as the option "SQLite"/);
+  assert.match(conversation, /named "2\) PostgreSQL"/);
 });

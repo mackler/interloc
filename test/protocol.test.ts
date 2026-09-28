@@ -8,7 +8,6 @@ import type { SubjectId } from "../src/artifacts.ts";
 import type { Subject } from "../src/review.ts";
 import type { DecisionResponse, PlannerResponse, QuestionListResponse } from "../src/schema.ts";
 import { decisionSubject, planSubject, questionSubject, requirementsSubject, workSubject } from "../src/subjects.ts";
-import { Effect } from "effect";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { promptOf } from "../src/userPrompts.ts";
 import * as prompts from "../src/prompts.ts";
@@ -167,7 +166,7 @@ test("a question review's ResponseReceived survives the round trip, live and in 
 });
 
 const decisionAnalysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
-const decisionResponseSchema = decisionSubject(1, 1, "format", () => Effect.void).respond.schema;
+const decisionResponseSchema = decisionSubject(1, 1, "format", (a) => Result.succeed({ value: a, notes: [] })).respond.schema;
 
 test("every subject's response, as its own schema decodes it, survives the round trip inside a ResponseReceived", () => {
   const { questions: _questions, ...plannerResponse } = questionListResponse;

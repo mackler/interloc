@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Schema } from "effect";
 import fc from "fast-check";
+import { normalizeLabel } from "../src/analysis.ts";
 import * as S from "../src/schema.ts";
 
 // Row 5 of the table in recommendation E of docs/functional-design-review.md: the program's own record schemas.
@@ -102,6 +103,21 @@ test("property: partial configs merge right-biased per key, and any unknown key 
   fc.assert(
     fc.property(arbPartial, fc.stringMatching(/^[a-z][A-Za-z]{2,12}$/).filter((k) => !(k in S.defaultConfig)), fc.anything(), (partial, key, value) => {
       assert.throws(() => decodePartial({ ...partial, [key]: value }), `unknown key ${key} was accepted`);
+    }),
+    RUNS,
+  );
+});
+
+// Row 5, domain validation (issue #37): the tolerant comparison of an analysis's option labels.
+const collapse = (s: string): string => s.split(/\s+/).filter((w) => w !== "").join(" ");
+const ORDINAL = /^\s*\d+[.)]/;
+test("normalizeLabel: one leading ordinal is dropped, whitespace collapsed; a result without an ordinal is a fixed point", () => {
+  fc.assert(
+    fc.property(fc.nat(999), fc.constantFrom(".", ")"), fc.string(), (n, mark, label) => {
+      fc.pre(!ORDINAL.test(label));
+      assert.equal(normalizeLabel(`${n}${mark} ${label}`), collapse(label));
+      assert.equal(normalizeLabel(label), collapse(label));
+      assert.equal(normalizeLabel(normalizeLabel(label)), normalizeLabel(label));
     }),
     RUNS,
   );

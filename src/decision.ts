@@ -3,12 +3,12 @@
 // Claude Code session (decision Q3). Decisions are numbered across the run; the loop sits inside the phase in which
 // the question was asked and changes nothing about the phases.
 
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Result } from "effect";
 import { validateAnalysis } from "./analysis.ts";
 import type { RunError } from "./errors.ts";
-import { decisionAnalysisPrompt, decisionBeganLine } from "./prompts.ts";
-import { renderDecisionOpened, renderReferenceDropped } from "./render.ts";
-import { planningCall, reviewLoop } from "./review.ts";
+import { analysisRepairPrompt, decisionAnalysisPrompt, decisionBeganLine } from "./prompts.ts";
+import { renderDecisionOpened, renderLabelCorrected, renderReferenceDropped } from "./render.ts";
+import { planningCall, reviewLoop, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
 import type { DecisionAnalysis } from "./schema.ts";
 import { Decider, type DecisionQuestion, type DeciderShape, Planner, type Reviewer, type RunConfig, type Services, Store, Ui } from "./services.ts";
@@ -21,18 +21,18 @@ export type DecisionEnd = Readonly<{ decision: number; question: DecisionQuestio
 export const phaseNumber = (phase: DecisionQuestion["phase"]): number => (phase.kind === "questions" ? 0 : phase.n);
 
 /**
- * An analysis of decision k as the program accepts it, from the analysis call, a response or the application of the
- * user's decisions alike (P1-R2-1): validated against the question (an invalid one halts with AnalysisInvalid), each
- * dropped reference noted in conversation.md, and the normalized analysis written as the reviewed file.
+ * The validation of an analysis against the question's options (issue #37, decision Q1), for the analysis call, a
+ * response and the application of the user's decisions alike (P1-R2-1): the normalized analysis with a note in
+ * conversation.md for each correction, or the repair turn whose prompt lists the exact option labels.
  */
-export const acceptAnalysis = (k: number, question: DecisionQuestion, analysis: DecisionAnalysis): Effect.Effect<void, RunError, Store> =>
-  Effect.gen(function* () {
-    const store = yield* Store;
-    const validated = yield* Effect.fromResult(validateAnalysis(question.options, analysis));
-    for (const note of validated.notes) yield* store.converse(renderReferenceDropped(note.argument, note.named));
-    yield* store.saveAnalysis(k, validated.analysis);
-  });
-
+export const analysisValidation =
+  (options: DecisionQuestion["options"]): Validation<DecisionAnalysis> =>
+  (analysis) => {
+    const validated = validateAnalysis(options, analysis);
+    if (Result.isFailure(validated)) return Result.fail({ error: validated.failure, repair: analysisRepairPrompt(validated.failure, options) });
+    const notes = validated.success.notes.map((note) => (note.kind === "reference" ? renderReferenceDropped(note.argument, note.named) : renderLabelCorrected(note.given, note.exact)));
+    return Result.succeed({ value: validated.success.analysis, notes });
+  };
 /** One decision loop: the analysis, its review to convergence (or the user's proceed), and the analysis as it stands. */
 export const decisionLoop = (format: string, task: string, question: DecisionQuestion): Effect.Effect<DecisionEnd, RunError, Services> =>
   Effect.gen(function* () {
@@ -44,12 +44,12 @@ export const decisionLoop = (format: string, task: string, question: DecisionQue
     yield* store.converse(renderDecisionOpened(k, question.question, question.options));
     yield* ui.say(decisionBeganLine(k));
     const context = { task, ...(yield* store.readContext()) };
-    const accept = (analysis: DecisionAnalysis) => acceptAnalysis(k, question, analysis);
+    const validate = analysisValidation(question.options);
     const loop = Effect.gen(function* () {
-      const written = yield* planningCall(decisionAnalysisPrompt(format, question, context), S.DecisionAnalysis);
-      yield* store.saveAnalysisWrite(k, written.output);
-      yield* accept(written.output);
-      return yield* reviewLoop(decisionSubject(k, phaseNumber(question.phase), format, accept));
+      const written = yield* planningCall(decisionAnalysisPrompt(format, question, context), S.DecisionAnalysis, "planning", "records", validate);
+      yield* store.saveAnalysisWrite(k, written.reply);
+      yield* store.saveAnalysis(k, written.output);
+      return yield* reviewLoop(decisionSubject(k, phaseNumber(question.phase), format, validate));
     }).pipe(Effect.provideService(Planner, planner));
     const end = yield* loop;
     return { decision: k, question, analysis: yield* store.loadAnalysis(k), result: end.result };

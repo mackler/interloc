@@ -2,7 +2,7 @@
 // rounds end when a review contains no counted issue or when the user chooses to proceed.
 // The procedure is applied to three subjects: the question list, the requirements, and the plan.
 
-import { Effect, Ref, Schema } from "effect";
+import { Effect, Ref, Result, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
@@ -27,6 +27,8 @@ export type Operation<T> = Readonly<{
   after: ((output: T) => Effect.Effect<void, RunError, Store>) | null;
   /** What the call may do (finding 1 of docs/gui-review.md): "readOnly" for a work response, "records" otherwise. */
   capability: PlanningCapability;
+  /** The validation beyond the schema, with its repair turn (issue #37); null when there is none. */
+  validate: Validation<T> | null;
 }>;
 
 /** What the review procedure is applied to. `R` is the response to a review, `D` the output of applying decisions (finding 12). */
@@ -43,7 +45,7 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
   /** Claude Code's response to a review. */
   respond: Operation<R>;
   /** The call that applies the user's decisions; its prompt does not depend on the round. */
-  applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError, Store>) | null }>;
+  applyDecisions: Readonly<{ prompt: string; schema: Schema.Decoder<D>; after: ((output: D) => Effect.Effect<void, RunError, Store>) | null; validate: Validation<D> | null }>;
   /** After the response of a round, an amendment that requires the user (the requirements); null otherwise. */
   amend: ((review: Review, response: R, round: number) => Effect.Effect<void, RunError, Services>) | null;
   /** Text of the "p" choice at the round limit; null: no such choice (the work review, Q13). */
@@ -102,7 +104,22 @@ export const decodeWithRepair = <Out extends Schema.Decoder<unknown>, E, R>(
   schema: Out,
   reply: unknown,
   repair: (prompt: string) => Effect.Effect<unknown, E, R>,
-): Effect.Effect<Out["Type"], E | AgentReplyInvalid | StoreError, R | Store> =>
+): Effect.Effect<Out["Type"], E | RunError, R | Store> => decodeValidating(agent, schema, reply, repair, null).pipe(Effect.map((r) => r.value));
+
+/**
+ * Decodes a reply and, when a validation is given, validates it (issue #37, decision Q1). Each kind of failure has its
+ * own budget of one repair turn in the same session or thread: a schema mismatch gets repairReplyPrompt, a validation
+ * failure the validation's own prompt; every rejected reply is kept on disk. A second schema mismatch fails with
+ * AgentReplyInvalid naming both kept files, a second validation failure with the validation's error. The notes of the
+ * accepted value are returned, not recorded.
+ */
+export const decodeValidating = <Out extends Schema.Decoder<unknown>, E, R>(
+  agent: keyof typeof AGENT_LABEL,
+  schema: Out,
+  reply: unknown,
+  repair: (prompt: string) => Effect.Effect<unknown, E, R>,
+  validate: Validation<Out["Type"]> | null,
+): Effect.Effect<Readonly<{ value: Out["Type"]; notes: readonly string[] }>, E | RunError, R | Store> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const decode = (value: unknown): { ok: true; value: Out["Type"] } | { ok: false; issue: string } => {
@@ -114,26 +131,40 @@ export const decodeWithRepair = <Out extends Schema.Decoder<unknown>, E, R>(
       }
     };
     const keep = (value: unknown): Effect.Effect<string, StoreError> => store.saveInvalidReply(agent, serializeReply(value));
-
-    const first = decode(reply);
-    if (first.ok) return first.value;
-    const firstFile = yield* keep(reply);
-    const secondReply = yield* repair(repairReplyPrompt(first.issue));
-    const second = decode(secondReply);
-    if (second.ok) return second.value;
-    const secondFile = yield* keep(secondReply);
-    return yield* Effect.fail(new AgentReplyInvalid({ agent: AGENT_LABEL[agent], issue: second.issue, files: [firstFile, secondFile] }));
+    // At most three steps: the reply, one schema repair and one validation repair.
+    const step = (value: unknown, schemaFile: string | null, validationUsed: boolean): Effect.Effect<Readonly<{ value: Out["Type"]; notes: readonly string[] }>, E | RunError, R | Store> =>
+      Effect.gen(function* () {
+        const decoded = decode(value);
+        if (!decoded.ok) {
+          const file = yield* keep(value);
+          if (schemaFile !== null) return yield* Effect.fail(new AgentReplyInvalid({ agent: AGENT_LABEL[agent], issue: decoded.issue, files: [schemaFile, file] }));
+          return yield* step(yield* repair(repairReplyPrompt(decoded.issue)), file, validationUsed);
+        }
+        if (validate === null) return { value: decoded.value, notes: [] };
+        const validated = validate(decoded.value);
+        if (Result.isSuccess(validated)) return validated.success;
+        yield* keep(value);
+        if (validationUsed) return yield* Effect.fail(validated.failure.error);
+        return yield* step(yield* repair(validated.failure.repair), schemaFile, true);
+      });
+    return yield* step(reply, null, false);
   });
 
+/**
+ * The program's validation of a decoded reply beyond its schema (issue #37, decision Q1): the value to use with the notes
+ * to record in conversation.md, or the error that ends the run and the prompt of the repair turn.
+ */
+export type Validation<T> = (output: T) => Result.Result<Readonly<{ value: T; notes: readonly string[] }>, Readonly<{ error: RunError; repair: string }>>;
+
 /** The decoded output of a planning call, the free text and cost of the call that produced it, and whether a repair turn was needed. */
-export type PlanningCall<Out> = Readonly<{ output: Out; resultText: string; costUsd: number | null; repaired: boolean }>;
+export type PlanningCall<Out> = Readonly<{ output: Out; reply: unknown; resultText: string; costUsd: number | null; repaired: boolean }>;
 
 /**
  * A call in which Claude Code may write only under plan-review/ ("records"), or change nothing ("readOnly", a work
  * response). Halts if the project changed; a read-only call, its repair turn included, also halts if a guarded record
  * under plan-review/ changed (RecordsChanged; the program's own writes are not guarded, src/artifacts.ts).
  */
-export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records"): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider> =>
+export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records", validate: Validation<Out["Type"]> | null = null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const planner = yield* Planner;
@@ -153,15 +184,16 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
     const first = yield* call(prompt);
     const repairCall = yield* Ref.make<PlanningResult | null>(null);
     const repair = (text: string) => call(text).pipe(Effect.tap((result) => Ref.set(repairCall, result)), Effect.map((result) => result.output));
-    const output = yield* decodeWithRepair("claude", schema, first.output, repair);
+    const { value: output, notes } = yield* decodeValidating("claude", schema, first.output, repair, validate);
+    for (const note of notes) yield* store.converse(note);
     const second = yield* Ref.get(repairCall);
     const used = second ?? first;
-    return { output, resultText: used.resultText, costUsd: used.costUsd, repaired: second !== null };
+    return { output, reply: used.output, resultText: used.resultText, costUsd: used.costUsd, repaired: second !== null };
   });
 
 export const applyDecisions = <D>(subject: Subject<PlannerResponse, D>): Effect.Effect<void, RunError, Services> =>
   Effect.gen(function* () {
-    const call = yield* planningCall(subject.applyDecisions.prompt, subject.applyDecisions.schema);
+    const call = yield* planningCall(subject.applyDecisions.prompt, subject.applyDecisions.schema, "planning", "records", subject.applyDecisions.validate);
     if (subject.applyDecisions.after !== null) yield* subject.applyDecisions.after(call.output);
   });
 
@@ -264,7 +296,7 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             // A read-only response cannot read the records, so they are in its prompt (decision Q1 of the stage-A task).
             const changes = typeof id === "object" && "work" in id && subject.respond.capability === "readOnly" ? yield* store.readChangeRecord(id.work) : null;
             const context: RespondContext = { review: state.current.review!, log: state.log, changes };
-            const call = yield* planningCall(subject.respond.prompt(command.round, context), subject.respond.schema, "planning", subject.respond.capability);
+            const call = yield* planningCall(subject.respond.prompt(command.round, context), subject.respond.schema, "planning", subject.respond.capability, subject.respond.validate);
             return { kind: "ResponseDecoded", response: call.output, resultText: call.resultText, costUsd: call.costUsd };
           }
           case "ApplyDecisions":

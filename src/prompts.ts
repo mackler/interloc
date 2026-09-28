@@ -583,16 +583,24 @@ const phaseInWords = (phase: DecisionPromptQuestion["phase"]): string => (phase.
 /** How the representation of docs/decision-making.md maps onto the fields of DecisionAnalysis. */
 const ANALYSIS_FIELDS = `The output fields.
 decision: the decision to be made, in one sentence.
-columns: exactly one column per option, in the order of the options above; option is the option's label exactly as given.
+columns: exactly one column per option, in the order of the options above. Each option above is listed as its number, a colon and its label in quotation marks; option is the text inside the quotation marks, verbatim, without the quotation marks and without the number.
 advantages and disadvantages: the entries of the option's column. Each entry has an id that is unique in the whole representation (E1, E2, and so on), a title (one complete sentence that states the outcome and its effect on persons), and one field per element: comparative_condition, starting_cause, intermediate_steps, threshold, effect_on_persons, reason_the_effect_matters, and extent with its four parts per_person, persons_affected, likelihood and timing. Each element has text, its sentences, and counterarguments, the arguments that dispute that element, in order.
 Each argument has an id that is unique in the whole representation (A1, A2, and so on), text, equivalent_to and replies. The replies of a counterargument are its defenses, and the replies of a defense are the further counterarguments to it, without limit. Begin the text of a counterargument with "But", of a defense with "On the other hand,", and of a counterargument to a defense with "Then again,".
 equivalent_to: when an argument is equivalent to an entry of any column, or is a reversal that is listed in full as an entry, write in text the one sentence that states the argument and its effect on persons and set equivalent_to to that entry's id; otherwise set it to an empty string.
 Do not write the heading "Disadvantages:" or any equivalence symbol (*, †, ‡, §, ‖, ¶) into any text: the program places the heading above each column's disadvantages and assigns the symbols from equivalent_to.
-recommendation: an option and a reason. To recommend no option, set both to empty strings. To recommend one, set option to its label exactly as given and state in reason the comparison that the instructions require under "Recommendation".`;
+recommendation: an option and a reason. To recommend no option, set both to empty strings. To recommend one, set option to the text inside the quotation marks of that option's label, verbatim, without the number, and state in reason the comparison that the instructions require under "Recommendation".`;
+
+/**
+ * One option as the prompts of a decision present it (issue #37): its number outside the label, and the label as a JSON
+ * string, so that neither the number nor surrounding text can be taken for part of the label.
+ */
+export function optionLine(i: number, option: Readonly<{ label: string; description: string }>): string {
+  return `${i + 1}: ${JSON.stringify(option.label)}${option.description === "" ? "" : ` — ${option.description}`}`;
+}
 
 /** The call that produces the analysis of a decision (a planning call: plan-review/ only, behavior 3). */
 export function decisionAnalysisPrompt(format: string, question: DecisionPromptQuestion, context: DecisionContext): string {
-  const options = question.options.map((o, i) => `${i + 1}. ${o.label}${o.description === "" ? "" : ` — ${o.description}`}`).join("\n");
+  const options = question.options.map((o, i) => optionLine(i, o)).join("\n");
   const requirements = context.requirements === null ? "plan-review/requirements.md does not exist yet." : `plan-review/requirements.md:\n${context.requirements}`;
   const plan = context.plan === null ? "plan-review/plan.md does not exist yet." : `plan-review/plan.md:\n${context.plan}`;
   return `The user must answer a question that offers a choice between options, and has asked for a representation of the arguments for and against each option before choosing. Produce that representation as the structured output.
@@ -612,6 +620,35 @@ ${requirements}
 ${plan}
 
 ${ANALYSIS_FIELDS}`;
+}
+
+/** What the validation of an analysis found (the fields of AnalysisInvalid in src/errors.ts, which imports this module). */
+export type AnalysisProblems = Readonly<{
+  columns: Readonly<{ expected: readonly string[]; got: readonly string[] }> | null;
+  duplicateIds: readonly string[];
+  emptyIds: number;
+  recommendation: Readonly<{ given: string; matches: readonly string[] }> | null;
+}>;
+/** The validation repair turn of an analysis (issue #37, decision Q1): what was wrong, and the exact option labels. */
+export function analysisRepairPrompt(problems: AnalysisProblems, options: readonly Readonly<{ label: string; description: string }>[]): string {
+  const found = [
+    ...(problems.columns === null ? [] : [`The columns name the options ${problems.columns.got.map((g) => JSON.stringify(g)).join(", ") || "(none)"}; exactly one column per option is required, in the order below.`]),
+    ...(problems.duplicateIds.length === 0 ? [] : [`More than one entry or argument has the id ${problems.duplicateIds.join(", ")}; every id must be unique in the whole representation.`]),
+    ...(problems.emptyIds === 0 ? [] : [`${problems.emptyIds} empty id(s); every entry and argument id must be non-empty.`]),
+    ...(problems.recommendation === null
+      ? []
+      : [
+          problems.recommendation.matches.length > 1
+            ? `The recommendation names ${JSON.stringify(problems.recommendation.given)}, which matches more than one option; name exactly one.`
+            : `The recommendation names ${JSON.stringify(problems.recommendation.given)}, which is not an option.`,
+        ]),
+  ];
+  return `Your structured output matched the schema, but the program cannot accept it:
+${found.join("\n")}
+The options, in this order, each as its number, a colon and its label in quotation marks:
+${options.map((o, i) => optionLine(i, o)).join("\n")}
+The option of each column, in this order, and the option of a recommendation must be the text inside the quotation marks, verbatim, without the quotation marks and without the number.
+Return the complete output again, corrected. Do not modify any file.`;
 }
 
 /** Codex's review of decision k's analysis, against the format and the question. */

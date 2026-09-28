@@ -98,6 +98,9 @@ export const renderDecisionOpened = (k: number, question: string, options: reado
 /** A reference of a decision analysis that named no entry and was dropped (D9). */
 export const renderReferenceDropped = (argument: string, named: string): string =>
   `**Reference dropped:** argument ${argument} names ${named}, which is no entry of the analysis; treated as no reference.\n\n`;
+/** An option label of an analysis that matched only after normalization, rewritten to the exact label (issue #37, decision Q4). */
+export const renderLabelCorrected = (given: string, exact: string): string =>
+  `**Option label corrected:** the analysis named ${JSON.stringify(given)}, which the program read as the option ${JSON.stringify(exact)}.\n\n`;
 /** The user's answer after decision k (decision Q4), in conversation.md. */
 export const renderChoice = (k: number, answer: string, option: string | null): string =>
   `**User choice** after decision ${k}: ${answer === "" ? "(none)" : answer}${option === null ? "" : ` (${option})`}\n\n`;

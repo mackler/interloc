@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
-import { Layer } from "effect";
+import { Cause, Effect, Exit, Layer, Option, Result, Schema } from "effect";
+import { UserStopped, type RunError } from "../src/errors.ts";
+import { planningCall, type Validation } from "../src/review.ts";
 import { claudePlannerLayer } from "../src/claude.ts";
 import { codexReviewerLayer } from "../src/codex.ts";
 import { defaultConfig } from "../src/schema.ts";
@@ -10,7 +12,7 @@ import { Planner, Reviewer, RunConfig, Sdk, type Services, Store, Ui } from "../
 import { platformLayer } from "../src/platform.ts";
 import { storeLayer } from "../src/store.ts";
 import { FakeSdk, init, messages, success, turn, type Script } from "./fakeSdk.ts";
-import { finished, pathsOf, runFails, runTask, ScriptedPlanner, ScriptedReviewer, ScriptedUi, tempRepo, testLayer, withDecider } from "./helpers.ts";
+import { finished, pathsOf, type PlanningStep, runFails, runTask, ScriptedPlanner, ScriptedReviewer, ScriptedUi, tempRepo, testLayer, withDecider } from "./helpers.ts";
 
 // Decision Q5: an invalid structured reply in a planning, interview or review call gets one repair
 // turn in the same session or thread; a second invalid reply stops the run, and both replies are kept.
@@ -144,4 +146,73 @@ test("a Claude Code planning call without structured output twice fails with Age
   const layer = withClaude(repo, sdk, new ScriptedReviewer(paths, []));
   await runFails(layer, "AgentReplyInvalid", /Claude Code/, /claude-1\.json/, /claude-2\.json/);
   assert.equal(sdk.calls.length, 2);
+});
+
+// Issue #37, decision Q1: a reply that decodes but fails the program's validation gets one validation repair turn,
+// besides the one schema repair; the budgets are separate, and a second failure of the same kind halts.
+const Toy = Schema.Struct({ n: Schema.Number });
+const VALIDATION_REPAIR = "n must be even; return it again.";
+const even: Validation<{ readonly n: number }> = (output) =>
+  output.n % 2 === 0 ? Result.succeed({ value: { n: output.n * 10 }, notes: [`**Note:** ${output.n} accepted.\n\n`] }) : Result.fail({ error: new UserStopped({ where: `odd ${output.n}` }), repair: VALIDATION_REPAIR });
+const call = async (steps: PlanningStep[], touch = false) => {
+  const repo = tempRepo();
+  const { layer, probe } = testLayer(repo, { steps: steps.map((s, i) => (touch && i === 1 ? { ...s, touchProject: true } : s)) });
+  const exit = await Effect.runPromiseExit(
+    Effect.gen(function* () {
+      yield* (yield* Store).init("the task");
+      return yield* planningCall("prompt", Toy, "planning", "records", even);
+    }).pipe(Effect.provide(layer)),
+  );
+  return { exit, probe };
+};
+const succeeded = <A>(exit: Exit.Exit<A, unknown>): A => {
+  assert.ok(Exit.isSuccess(exit), Exit.isFailure(exit) ? Cause.pretty(exit.cause) : "");
+  return exit.value;
+};
+const failedWith = (exit: Exit.Exit<unknown, RunError>): RunError => {
+  assert.ok(Exit.isFailure(exit), "the call succeeded");
+  const error = Cause.findErrorOption(exit.cause);
+  assert.ok(Option.isSome(error), Cause.pretty(exit.cause));
+  return error.value;
+};
+
+test("a reply that fails validation gets the validation repair turn, and the valid reply is used with its notes", async () => {
+  const { exit, probe } = await call([{ output: { n: 1 } }, { output: { n: 2 } }]);
+  const result = succeeded(exit);
+  assert.deepEqual([result.output, result.repaired], [{ n: 20 }, true]);
+  assert.deepEqual(probe.planner.prompts, ["prompt", VALIDATION_REPAIR]);
+  assert.deepEqual(JSON.parse(kept(probe.dir, "claude-1.json")), { n: 1 });
+  assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /\*\*Note:\*\* 2 accepted\./);
+});
+
+test("a schema failure, then a validation failure, then a valid reply: two repair turns", async () => {
+  const { exit, probe } = await call([{ output: { n: "x" } }, { output: { n: 3 } }, { output: { n: 4 } }]);
+  assert.deepEqual(succeeded(exit).output, { n: 40 });
+  assert.match(probe.planner.prompts[1], REPAIR);
+  assert.equal(probe.planner.prompts[2], VALIDATION_REPAIR);
+  assert.deepEqual([JSON.parse(kept(probe.dir, "claude-1.json")), JSON.parse(kept(probe.dir, "claude-2.json"))], [{ n: "x" }, { n: 3 }]);
+});
+
+test("a validation failure, then a schema failure, then a valid reply: two repair turns", async () => {
+  const { exit, probe } = await call([{ output: { n: 3 } }, { output: { n: "x" } }, { output: { n: 6 } }]);
+  assert.deepEqual(succeeded(exit).output, { n: 60 });
+  assert.deepEqual([probe.planner.prompts[1], REPAIR.test(probe.planner.prompts[2])], [VALIDATION_REPAIR, true]);
+});
+
+test("two validation failures halt with the validation's error, both replies kept", async () => {
+  const { exit, probe } = await call([{ output: { n: 1 } }, { output: { n: 3 } }, { output: { n: 4 } }]);
+  const error = failedWith(exit);
+  assert.deepEqual([error._tag, (error as UserStopped).where], ["UserStopped", "odd 3"]);
+  assert.equal(probe.planner.prompts.length, 2);
+  assert.deepEqual(JSON.parse(kept(probe.dir, "claude-2.json")), { n: 3 });
+});
+
+test("two schema failures halt with AgentReplyInvalid, even when the validation repair is unused", async () => {
+  const { exit } = await call([{ output: { n: "x" } }, { output: { n: "y" } }, { output: { n: 2 } }]);
+  assert.equal(failedWith(exit)._tag, "AgentReplyInvalid");
+});
+
+test("the validation repair turn is guarded like the first call", async () => {
+  const { exit } = await call([{ output: { n: 1 } }, { output: { n: 2 } }], true);
+  assert.equal(failedWith(exit)._tag, "ProjectChanged");
 });

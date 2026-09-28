@@ -1,12 +1,12 @@
 // The three subjects of the review procedure.
 
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import { phaseOf, recordPath, type SubjectId } from "./artifacts.ts";
 import { interview } from "./conversation.ts";
 import type { RunError } from "./errors.ts";
 import * as prompts from "./prompts.ts";
 import { subjectHeading } from "./render.ts";
-import type { Subject } from "./review.ts";
+import type { Subject, Validation } from "./review.ts";
 import * as S from "./schema.ts";
 import type { DecisionAnalysis, DecisionApplied, DecisionResponse, PlannerResponse, PlanWriteResult, QuestionList, QuestionListResponse } from "./schema.ts";
 import { normalizeQuestionList } from "./schemaNormalize.ts";
@@ -30,8 +30,8 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     heading: subjectHeading(id),
     fileLabel: "questions.json",
     reviewPrompt: prompts.questionReviewPrompt,
-    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records" },
-    applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output) },
+    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records", validate: null },
+    applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output), validate: null },
     amend: null,
     proceed: prompts.PROCEED_TO_CLARIFICATION,
     leaveOnAcceptance: false,
@@ -49,8 +49,8 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
     heading: subjectHeading(id),
     fileLabel: "requirements.md",
     reviewPrompt: prompts.requirementsReviewPrompt,
-    respond: { prompt: prompts.requirementsRespondPrompt, schema: S.PlannerResponse, after: null, capability: "records" },
-    applyDecisions: { prompt: prompts.requirementsApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
+    respond: { prompt: prompts.requirementsRespondPrompt, schema: S.PlannerResponse, after: null, capability: "records", validate: null },
+    applyDecisions: { prompt: prompts.requirementsApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null, validate: null },
     amend: (_review, response, round) => {
       const ids = response.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
       if (ids.length === 0) return Effect.succeed(undefined);
@@ -71,8 +71,8 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
     heading: subjectHeading(id),
     fileLabel: "plan.md",
     reviewPrompt: (round) => prompts.planReviewPrompt(phase, round, withRequirements),
-    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlannerResponse, after: null, capability: "records" },
-    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
+    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlannerResponse, after: null, capability: "records", validate: null },
+    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null, validate: null },
     amend: null,
     proceed: prompts.PROCEED_TO_IMPLEMENTATION,
     leaveOnAcceptance: false,
@@ -86,7 +86,17 @@ export function planSubject(phase: number, withRequirements: boolean): Subject<P
  * returns the complete amended analysis with every response, which the program validates and writes (D5). The phase is
  * where the decision took place.
  */
-export function decisionSubject(k: number, phase: number, format: string, accept: (analysis: DecisionAnalysis) => Effect.Effect<void, RunError, Store>): Subject<DecisionResponse, DecisionApplied> {
+/** An analysis's validation for an output that carries the analysis in its field `analysis` (a response, an application). */
+export const validatingField =
+  <T extends Readonly<{ analysis: DecisionAnalysis }>>(validate: Validation<DecisionAnalysis>): Validation<T> =>
+  (output) =>
+    Result.map(validate(output.analysis), ({ value, notes }) => ({ value: { ...output, analysis: value }, notes }));
+
+export function decisionSubject(k: number, phase: number, format: string, validate: Validation<DecisionAnalysis>): Subject<DecisionResponse, DecisionApplied> {
+  const save = (analysis: DecisionAnalysis) =>
+    Effect.gen(function* () {
+      yield* (yield* Store).saveAnalysis(k, analysis);
+    });
   const id: SubjectId = { decision: k };
   return {
     id,
@@ -94,8 +104,8 @@ export function decisionSubject(k: number, phase: number, format: string, accept
     heading: subjectHeading(id),
     fileLabel: "analysis.json",
     reviewPrompt: (round) => prompts.decisionReviewPrompt(format, k, round),
-    respond: { prompt: (round) => prompts.decisionRespondPrompt(k, round), schema: S.DecisionResponse, after: (output) => accept(output.analysis), capability: "records" },
-    applyDecisions: { prompt: prompts.decisionApplyDecisionsPrompt(k), schema: S.DecisionApplied, after: (output) => accept(output.analysis) },
+    respond: { prompt: (round) => prompts.decisionRespondPrompt(k, round), schema: S.DecisionResponse, after: (output) => save(output.analysis), capability: "records", validate: validatingField(validate) },
+    applyDecisions: { prompt: prompts.decisionApplyDecisionsPrompt(k), schema: S.DecisionApplied, after: (output) => save(output.analysis), validate: validatingField(validate) },
     amend: null,
     proceed: prompts.PROCEED_TO_CHOICE,
     leaveOnAcceptance: false,
@@ -117,9 +127,9 @@ export function workSubject(phase: number, withRequirements: boolean): Subject<P
     heading: subjectHeading(id),
     fileLabel: "changes.diff",
     reviewPrompt: (round) => prompts.workReviewPrompt(phase, round, withRequirements),
-    respond: { prompt: (round, context) => prompts.workRespondPrompt(phase, round, context), schema: S.PlannerResponse, after: null, capability: "readOnly" },
+    respond: { prompt: (round, context) => prompts.workRespondPrompt(phase, round, context), schema: S.PlannerResponse, after: null, capability: "readOnly", validate: null },
     // Never issued: leaveOnDecision ends the loop instead of a planning call (G-R1-1); typed as the plan's.
-    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null },
+    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null, validate: null },
     amend: null,
     proceed: null,
     leaveOnAcceptance: true,

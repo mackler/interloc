@@ -37,7 +37,8 @@ export class AnalysisInvalid extends Data.TaggedError("AnalysisInvalid")<{
   readonly columns: Readonly<{ expected: readonly string[]; got: readonly string[] }> | null;
   readonly duplicateIds: readonly string[];
   readonly emptyIds: number;
-  readonly recommendation: string | null;
+  /** The recommended option that names no option, with the options it matches after normalization (none, or more than one). */
+  readonly recommendation: Readonly<{ given: string; matches: readonly string[] }> | null;
 }> {}
 /** docs/decision-making.md of the program could not be read before the run (decision support, D7). */
 export class DecisionFormatUnreadable extends Data.TaggedError("DecisionFormatUnreadable")<{ readonly file: string; readonly message: string }> {}
@@ -122,7 +123,12 @@ export const describe = (error: RunErrorFields): string => {
       if (error.columns !== null) parts.push(`columns ${error.columns.expected.join(", ")} expected, ${error.columns.got.join(", ") || "none"} given`);
       if (error.duplicateIds.length > 0) parts.push(`more than one entry or argument with the id: ${error.duplicateIds.join(", ")}`);
       if (error.emptyIds > 0) parts.push(`${error.emptyIds} empty id(s)`);
-      if (error.recommendation !== null) parts.push(`the analysis recommends ${error.recommendation}, which is not an option`);
+      if (error.recommendation !== null)
+        parts.push(
+          error.recommendation.matches.length > 1
+            ? `the analysis recommends ${error.recommendation.given}, which matches more than one option: ${error.recommendation.matches.join(", ")}`
+            : `the analysis recommends ${error.recommendation.given}, which is not an option`,
+        );
       return analysisInvalidText(parts);
     }
     case "Interrupted":
@@ -172,7 +178,7 @@ const RunErrorData = Schema.Union([
     columns: Schema.NullOr(Schema.Struct({ expected: Strings, got: Strings })),
     duplicateIds: Strings,
     emptyIds: Schema.Number,
-    recommendation: Schema.NullOr(Schema.String),
+    recommendation: Schema.NullOr(Schema.Struct({ given: Schema.String, matches: Strings })),
   }),
   Schema.Struct({ _tag: Schema.Literal("Interrupted"), where: Schema.String }),
 ]);

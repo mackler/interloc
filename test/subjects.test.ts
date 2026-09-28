@@ -18,9 +18,9 @@ test("the type of a subject's handler follows the type of its schema (compile-ti
     phase: 0,
     heading: "h",
     fileLabel: "f",
-    respond: { prompt: () => "p", schema: S.PlannerResponse, after: null, capability: "records" },
+    respond: { prompt: () => "p", schema: S.PlannerResponse, after: null, capability: "records", validate: null },
     // @ts-expect-error the handler must take the decoded type of the operation's schema
-    applyDecisions: { prompt: "p", schema: S.QuestionList, after: (output: S.ExecOutcome) => Effect.sync(() => void output) },
+    applyDecisions: { prompt: "p", schema: S.QuestionList, after: (output: S.ExecOutcome) => Effect.sync(() => void output), validate: null },
     amend: null,
     proceed: "go",
     leaveOnAcceptance: false,
