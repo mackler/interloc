@@ -234,3 +234,48 @@ for (const [width, height] of [
     await page.locator("button[name=stop]").click();
   });
 }
+
+// Decision support (decision Q5): one column per option at every allowed width, side by side when they fit, scrolling
+// sideways when they do not; below 390 px a message instead.
+const DECIDE_URL = "http://127.0.0.1:8111/";
+const openAnalysis = async (page: Page) => {
+  await startTask(page, "Add a database", DECIDE_URL);
+  await page.getByRole("button", { name: "Help me Decide" }).click();
+  const analysis = page.getByRole("region", { name: /^Decision 1: / });
+  await expect(analysis).toBeVisible();
+  return analysis;
+};
+test("(L10) the analysis at 1280 × 800: both columns side by side", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const analysis = await openAnalysis(page);
+  const [a, b] = [await box(analysis.locator(".column").nth(0)), await box(analysis.locator(".column").nth(1))];
+  expect(Math.abs(a.y - b.y)).toBeLessThanOrEqual(1);
+  expect(b.x).toBeGreaterThanOrEqual(a.x + a.width);
+  expect(a.width).toBeGreaterThanOrEqual(320);
+  await expect(analysis.getByText("Scroll sideways to see every option.")).toBeHidden();
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
+  await expect(analysis).toBeHidden();
+});
+test("(L11) the analysis at 390 × 844: one column in view, the other reached by scrolling sideways, no page overflow", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const analysis = await openAnalysis(page);
+  await expect(analysis.getByText("Scroll sideways to see every option.")).toBeVisible();
+  const first = await box(analysis.locator(".column").nth(0));
+  expect(first.width).toBeGreaterThanOrEqual(320);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page overflows horizontally").toBe(true);
+  const second = analysis.locator(".column").nth(1);
+  await second.scrollIntoViewIfNeeded();
+  const shown = await box(second);
+  expect(shown.x).toBeGreaterThanOrEqual(0);
+  expect(shown.x + shown.width).toBeLessThanOrEqual(390 + 1);
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
+  await expect(analysis).toBeHidden();
+});
+test("(L12) the analysis at 360 × 640: a message asks for a wider window, and the question can be answered", async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 640 });
+  const analysis = await openAnalysis(page);
+  await expect(analysis.getByRole("alert")).toHaveText(/at least 390 pixels wide/);
+  await expect(analysis.locator(".column")).toHaveCount(0);
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
+  await expect(analysis).toBeHidden();
+});

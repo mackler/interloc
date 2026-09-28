@@ -633,3 +633,59 @@ describe("App and the draft", () => {
     expect(kept()).toEqual(["answer C"]);
   });
 });
+
+// Decision support, plan step 4.2: the analysis over both chat columns.
+describe("DecisionView", () => {
+  const el = (text: string, counterarguments: unknown[] = []) => ({ text, counterarguments });
+  const entry = (id: string, counter: unknown[] = []) => ({
+    id,
+    title: `Title ${id}.`,
+    comparative_condition: el(`c ${id}`, counter),
+    starting_cause: el(`s ${id}`),
+    intermediate_steps: el(`i ${id}`),
+    threshold: el(`t ${id}`),
+    effect_on_persons: el(`e ${id}`),
+    reason_the_effect_matters: el(`r ${id}`),
+    extent: { per_person: el(`pp ${id}`), persons_affected: el(`pa ${id}`), likelihood: el(`l ${id}`), timing: el(`w ${id}`) },
+  });
+  const arg = (id: string, equivalent_to = "", replies: unknown[] = []) => ({ id, text: `But ${id}.`, equivalent_to, replies });
+  const event = {
+    _tag: "DecisionAnalyzed" as const,
+    decision: 2,
+    question: "Which database?",
+    options: [{ label: "SQLite", description: "" }, { label: "PostgreSQL", description: "" }],
+    analysis: {
+      decision: "Which database?",
+      columns: [
+        { option: "SQLite", advantages: [entry("E1", [arg("A1", "", [arg("A2", "E2")])])], disadvantages: [] },
+        { option: "PostgreSQL", advantages: [], disadvantages: [entry("E2")] },
+      ],
+      recommendation: { option: "SQLite", reason: "It serves every user sooner." },
+    },
+  } as never;
+
+  test("one column per option in order, the heading Disadvantages: in each, arguments offset by level, symbols, the recommendation", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const shown: string[] = [];
+    const root = show(DecisionView, { event, narrow: false, onShowConversation: () => void shown.push("conversation") });
+    const columns = [...root.querySelectorAll<HTMLElement>(".column")];
+    expect(columns.map((c) => c.querySelector("h3")?.textContent?.trim())).toEqual(["SQLite", "PostgreSQL"]);
+    expect(columns.map((c) => c.querySelector(".disadvantages-heading")?.textContent?.trim())).toEqual(["Disadvantages:", "Disadvantages:"]);
+    const args = [...columns[0].querySelectorAll<HTMLElement>(".argument")];
+    expect(args.map((a) => [a.textContent?.trim(), a.dataset.level])).toEqual([["But A1.", "1"], ["But A2. *", "2"]]);
+    expect(columns[1].querySelector(".entry .title")?.textContent?.trim()).toBe("Title E2. *");
+    expect(columns[0].querySelector(".entry .title")?.textContent?.trim()).toBe("Title E1.");
+    expect(root.querySelector(".recommendation")?.textContent).toMatch(/SQLite/);
+    expect(root.querySelector(".recommendation")?.textContent).toMatch(/It serves every user sooner\./);
+    one(root, "button[name=conversation]").click();
+    expect(shown).toEqual(["conversation"]);
+  });
+
+  test("below 390 px the analysis is not laid out; a message asks for a wider window", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const root = show(DecisionView, { event, narrow: true, onShowConversation: () => undefined });
+    expect(root.querySelector(".column")).toBe(null);
+    expect(one(root, "[role=alert]").textContent).toBe(prompts.ENLARGE_WINDOW_NOTICE);
+    expect(prompts.ENLARGE_WINDOW_NOTICE).toMatch(/390/);
+  });
+});

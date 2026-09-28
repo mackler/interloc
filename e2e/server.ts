@@ -4,7 +4,8 @@
 // "stop" (a planning call that waits until it is interrupted), and those of finding 10 of docs/gui-review.md:
 // "interview", "workCorrection", "tabs", "drop", "long"; and "questionReview", the question phase whose review raises
 // an issue, so that Claude Code's response carries the amended list (defect A of docs/page-question-phase-defects.md);
-// "longChoices", an interview turn whose numbered answers are paragraphs (issue #12).
+// "longChoices", an interview turn whose numbered answers are paragraphs (issue #12); "decide", a plan writer's question
+// with two options on which the user takes "Help me Decide" (decision support).
 // PORT is the port.
 
 import { Effect } from "effect";
@@ -23,6 +24,31 @@ const noQuestions = { questions_for_user: [] };
 /** A scripted interview turn; `asked` and `answered` are the ids Claude reports (issue #21). */
 const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, asked_ids: asked, answered_ids: answered, complete, summary });
 const LONG = 60;
+/** An analysis of the "decide" scenario: two columns, a counterargument with a defense, one equivalence, a recommendation. */
+const element = (text: string, counterarguments: unknown[] = []) => ({ text, counterarguments });
+const entry = (id: string, title: string, counterarguments: unknown[] = []) => ({
+  id,
+  title,
+  comparative_condition: element(`The comparative condition of ${id}.`, counterarguments),
+  starting_cause: element(`The starting cause of ${id}.`),
+  intermediate_steps: element(`The intermediate steps of ${id}.`),
+  threshold: element(`The threshold of ${id}.`),
+  effect_on_persons: element(`The effect on persons of ${id}.`),
+  reason_the_effect_matters: element(`Why the effect of ${id} matters.`),
+  extent: { per_person: element("Per person."), persons_affected: element("Persons affected."), likelihood: element("Likelihood."), timing: element("Timing.") },
+});
+const DECIDE_ANALYSIS = {
+  decision: "Which database should the service use?",
+  columns: [
+    {
+      option: "SQLite",
+      advantages: [entry("E1", "Developers set up the service sooner, because no database server is needed.", [{ id: "A1", text: "But the container already runs a database server.", equivalent_to: "", replies: [{ id: "A2", text: "On the other hand, the server needs its own configuration.", equivalent_to: "E2", replies: [] }] }])],
+      disadvantages: [],
+    },
+    { option: "PostgreSQL", advantages: [], disadvantages: [entry("E2", "Operators maintain one more server, so outages are more likely.")] },
+  ],
+  recommendation: { option: "", reason: "" },
+};
 export const SCENARIOS: Record<string, TestOptions> = {
   converge: {
     steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "1. [ ] the step, amended\n" }],
@@ -101,6 +127,16 @@ export const SCENARIOS: Record<string, TestOptions> = {
   drop: {
     steps: [{ output: { questions_for_user: [{ question: "Which database should the service use?", options: [] }] }, plan: "1. [ ] the step\n" }],
     reviews: [{ issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // Decision support: a question with two options, one analysis that converges in its first cycle, then the answer.
+  decide: {
+    steps: [
+      { output: { questions_for_user: [{ question: "Which database should the service use?", options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
+      { output: DECIDE_ANALYSIS },
+      { output: noQuestions },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   },
   // A long transcript: 60 accepted rounds, then two rounds without an acceptance and the idle pause, which waits.

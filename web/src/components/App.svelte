@@ -9,7 +9,7 @@
   // Interloq", selects it].
   import { Button, ConnectedButtons } from "m3-svelte";
   import { untrack } from "svelte";
-  import { CONNECTION_FAILED_NOTICE, notSentNotice, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
+  import { CONNECTION_FAILED_NOTICE, notSentNotice, SHOW_ANALYSIS, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
   import { EXPANDED_MIN_WIDTH, initialLayout, type Layout, observe, type Pane, select } from "../layout.ts";
   import type { ClientMessage } from "../../../src/protocol.ts";
   import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "../draft.ts";
@@ -17,6 +17,7 @@
   import { dismissUnsent, initialState, keepUnsent, notice, progressOf, protocolError, reduce, type ViewState } from "../state.ts";
   import ActivityLine from "./ActivityLine.svelte";
   import ChatPanel from "./ChatPanel.svelte";
+  import DecisionView from "./DecisionView.svelte";
   import DirectoryDialog from "./DirectoryDialog.svelte";
   import PromptWidget from "./PromptWidget.svelte";
   import StartForm from "./StartForm.svelte";
@@ -79,6 +80,13 @@
   const latestNotice = $derived(view.notices.length > noticesSeen ? view.notices[view.notices.length - 1] : null);
   const refused = $derived(showForm ? latestNotice : null);
   const offline = $derived(view.connection === "failed");
+  // Decision support: a decision's analysis covers both chat columns until its question is answered; the user may
+  // look at the conversation meanwhile and come back [user control and freedom]. The rail, the prompt and the activity
+  // line stay in view [visibility of system status]. Below 390 px the analysis is not laid out (decided 28 Sep 2026).
+  let conversationFor = $state<number | null>(null);
+  const analysis = $derived(run?.analysis ?? null);
+  const deciding = $derived(analysis !== null && conversationFor !== analysis.event.decision);
+  const NARROW_WIDTH = 390;
 </script>
 
 <svelte:window bind:innerWidth={width} />
@@ -116,7 +124,7 @@
   {:else if run !== null}
     <!-- One tree for both layouts (W2-R1-3): the columns stay mounted, and CSS alone shows or hides them, so a switch
          of panels or a resize across 840 px keeps each panel's reading position [user control and freedom]. -->
-    <main class="run" class:compact>
+    <main class="run" class:compact class:deciding class:paused={analysis !== null && !deciding}>
       {#if compact}
         <details class="progress">
           <Button summary variant="text">{progressOf(run)}</Button>
@@ -134,8 +142,19 @@
       {:else}
         <TimelineRail timeline={run.timeline} busy={run.busy} />
       {/if}
-      <div class="left" class:hidden={!shown("left")}>
-        <ChatPanel title={TITLES.left} messages={run.left} empty="The run has started." visible={shown("left")} />
+      {#if analysis !== null && deciding}
+        <div class="decision-area">
+          <DecisionView event={analysis.event} narrow={width < NARROW_WIDTH} onShowConversation={() => (conversationFor = analysis.event.decision)} />
+        </div>
+      {:else if analysis !== null}
+        <div class="decision-area back">
+          <Button variant="tonal" type="button" name="analysis" onclick={() => (conversationFor = null)}>{SHOW_ANALYSIS}</Button>
+        </div>
+      {/if}
+      <div class="left" class:hidden={!deciding && !shown("left")}>
+        <div class="chat" class:hidden={deciding}>
+          <ChatPanel title={TITLES.left} messages={run.left} empty="The run has started." visible={shown("left") && !deciding} />
+        </div>
         <PromptWidget
           widget={run.pending}
           {offline}
@@ -149,8 +168,10 @@
           </div>
         {/if}
       </div>
-      <div class="right" class:hidden={!shown("right")}>
-        <ChatPanel title={TITLES.right} messages={run.right} empty="No review yet." visible={shown("right")} />
+      <div class="right" class:hidden={!deciding && !shown("right")}>
+        <div class="chat" class:hidden={deciding}>
+          <ChatPanel title={TITLES.right} messages={run.right} empty="No review yet." visible={shown("right") && !deciding} />
+        </div>
         <ActivityLine text={run.activity} />
       </div>
     </main>
@@ -164,6 +185,15 @@
   .run { flex: 1; min-height: 0; display: grid; grid-template-columns: 14rem 1fr 1fr; gap: 0.75rem; padding: 0.75rem; }
   .left, .right { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
   .left :global(.panel), .right :global(.panel) { flex: 1; }
+  .chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* The analysis spans both chat columns in the first row; the prompt and the activity line stay below it. */
+  .run.deciding { grid-template-rows: minmax(0, 1fr) auto; }
+  .run.deciding > :global(.rail) { grid-row: 1 / 3; }
+  .decision-area { grid-column: 2 / 4; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+  .run.paused { grid-template-rows: auto minmax(0, 1fr); }
+  .run.paused > :global(.rail) { grid-row: 1 / 3; }
+  .decision-area.back { flex-direction: row; }
+  .run.compact .decision-area { flex: 1 0 auto; }
   .run.compact { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
   .run.compact > :global(*) { flex-shrink: 0; }
   .hidden { display: none; }

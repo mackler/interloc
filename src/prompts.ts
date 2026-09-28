@@ -687,3 +687,22 @@ export function permissionQuestion(tool: string, input: string): string {
 /** The two positions at a disputed pause (decision Q1): what Codex asks for, and what Claude Code holds. */
 export const REVIEWER_POSITION = "Follow Codex (the reviewer)";
 export const PLANNER_POSITION = "Follow Claude Code (the planner)";
+
+// ---- decision support: the representation as the page and the terminal show it ---------------------
+
+/** The heading above a column's disadvantages (docs/decision-making.md, "Layout and wording"); the renderer places it. */
+export const DISADVANTAGES_HEADING = "Disadvantages:";
+/** The page's heading of a decision's analysis. */
+export function decisionViewHeading(k: number, question: string): string {
+  return `Decision ${k}: ${question}`;
+}
+export const RECOMMENDATION_HEADING = "Recommendation";
+export function recommendedOption(option: string): string {
+  return `Recommended option: ${option}`;
+}
+/** Below 390 px the analysis is not laid out (decided 28 Sep 2026). */
+export const ENLARGE_WINDOW_NOTICE = "The analysis needs a window at least 390 pixels wide. Widen the window to read it; you can answer the question below without it.";
+/** Shown when the columns do not fit side by side (decision Q5). */
+export const SCROLL_SIDEWAYS_HINT = "Scroll sideways to see every option.";
+export const SHOW_CONVERSATION = "Show the conversation";
+export const SHOW_ANALYSIS = "Show the analysis";

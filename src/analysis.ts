@@ -4,29 +4,14 @@
 
 import { Result } from "effect";
 import { AnalysisInvalid } from "./errors.ts";
+import { elementsOf, entriesOf, flatten } from "./analysisView.ts";
 import type { Argument, DecisionAnalysis, Element, Entry } from "./schema.ts";
 
 /** A reference (equivalent_to) that named no entry, dropped and treated as no reference. */
 export type ReferenceNote = Readonly<{ argument: string; named: string }>;
 export type ValidatedAnalysis = Readonly<{ analysis: DecisionAnalysis; notes: readonly ReferenceNote[] }>;
 
-/** The elements of an entry, in the order of docs/decision-making.md. */
-export const elementsOf = (entry: Entry): readonly Element[] => [
-  entry.comparative_condition,
-  entry.starting_cause,
-  entry.intermediate_steps,
-  entry.threshold,
-  entry.effect_on_persons,
-  entry.reason_the_effect_matters,
-  entry.extent.per_person,
-  entry.extent.persons_affected,
-  entry.extent.likelihood,
-  entry.extent.timing,
-];
-/** Every entry of the representation, column by column, advantages before disadvantages. */
-export const entriesOf = (analysis: DecisionAnalysis): readonly Entry[] => analysis.columns.flatMap((c) => [...c.advantages, ...c.disadvantages]);
-// The depth of the replies is that of a value JSON.parse has already built, so plain recursion is as deep as the parse was.
-const argumentsOf = (args: readonly Argument[]): readonly Argument[] => args.flatMap((a) => [a, ...argumentsOf(a.replies)]);
+const argumentsOf = (args: readonly Argument[]): readonly Argument[] => flatten(args);
 
 const duplicates = (ids: readonly string[]): string[] => [...new Set(ids.filter((id, i) => id !== "" && ids.indexOf(id) !== i))];
 

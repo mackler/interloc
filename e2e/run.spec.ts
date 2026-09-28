@@ -3,7 +3,7 @@ import { expect, test } from "./fixtures.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
 // fails on an uncaught error or a console error in any of its pages (e2e/fixtures.ts, finding 10 of docs/gui-review.md).
-const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110 } as const;
+const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111 } as const;
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
@@ -268,5 +268,27 @@ test("(12) a question phase through the page: the list's review and response, on
   await expect(left(page).getByText("The service uses PostgreSQL on port 8080.")).toBeVisible();
   await page.getByRole("button", { name: "Confirm" }).click();
   await expect(right(page).getByText(/Requirements review, cycle 1/)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+});
+
+// Decision support: "Help me Decide" on a question with options, the analysis over both chat columns, then the answer.
+test("(13) Help me Decide: the analysis covers the chat columns until the question is answered", async ({ page }) => {
+  await startTask(page, "decide", "Add a database");
+  await expect(left(page).getByText("Decision on: question from Claude Code: Which database should the service use?")).toBeVisible();
+  await page.getByRole("button", { name: "Help me Decide" }).click();
+  const analysis = page.getByRole("region", { name: /^Decision 1: / });
+  await expect(analysis).toBeVisible();
+  await expect(analysis.locator(".column h3")).toHaveText(["SQLite", "PostgreSQL"]);
+  await expect(analysis.getByText("Disadvantages:").first()).toBeVisible();
+  await expect(analysis.getByText("On the other hand, the server needs its own configuration. *")).toBeVisible();
+  await expect(left(page)).toBeHidden();
+  // The conversation is one click away, and the analysis one click back.
+  await page.getByRole("button", { name: "Show the conversation" }).click();
+  await expect(left(page)).toBeVisible();
+  await page.getByRole("button", { name: "Show the analysis" }).click();
+  await expect(analysis).toBeVisible();
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /PostgreSQL/ }).click();
+  await expect(analysis).toBeHidden();
+  await expect(left(page).locator("[data-author=user]").getByText("PostgreSQL — a database server")).toBeVisible();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
