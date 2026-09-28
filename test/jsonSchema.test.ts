@@ -127,3 +127,10 @@ test("the decision analysis generates an object root, a $defs cycle, and closed 
     assert.equal(strictResult.failure.reason, "cyclic_ref");
   }
 });
+
+// Decision support, plan step 6.2: the files the prototype sends for the recursive schemas are what src/schema.ts generates.
+test("the decision schemas' raw files in prototypes/proto-schema-output/ are what the program sends", () => {
+  for (const [name, schema] of [["decisionAnalysis", S.DecisionAnalysis], ["decisionResponse", S.DecisionResponse], ["decisionApplied", S.DecisionApplied]] as const) {
+    assert.deepEqual(agentJsonSchema(schema), proven(name, "raw"), name);
+  }
+});

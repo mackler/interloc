@@ -7,7 +7,7 @@ stop or accepted work issue leads to a plan revision and a new review before wor
 The user follows and answers in the terminal (`src/main.ts`) or in a web page (`src/web.ts`). The orchestrator contains no model calls of its own; it
 starts both agents through their SDKs, passes text between them, keeps the records, and asks the
 user for a decision at defined points. It is written with the Effect library (v4): the procedure
-is one Effect program over five services, and the edges (files, git, terminal, SDKs) are layers.
+is one Effect program over six services (the sixth, `Decider`, runs the decision loops of decision support), and the edges (files, git, terminal, SDKs) are layers.
 
 ## Commands
 
@@ -111,8 +111,9 @@ recommendations of `docs/functional-design-review.md` are the reference for what
 | `docs/decision-support-design.md` | The agreed design of decision support ("Help me Decide"): the rule, the prompts it applies to, the loop, the records, the schema, the context, the presentation and the cost |
 | `test/store.test.ts` | The work review's records in the store over a temporary repository: the baseline tree, `changes.diff`, the two hashes of the work subject |
 | `test/replayCapacity.test.ts` | The measurement of finding 13: a run of 10,000 events through the manager and its replay to one client over the real server, bounded by the criterion of decision Q4 (1 s, 50 MB) |
+| `test/decision.test.ts`, `test/analysis.test.ts`, `test/analysisView.test.ts` | Decision support: the decision loop's scenarios (records, convergence, pauses, the limit, repair, the guards, the initial validation), the Decider and `askOffering` (the choice recorded per option mapping), the offer at a pause, a nested decision, the cycle limit; the validation of an analysis; the view model and its symbols |
 | `test/workReview.test.ts` | Scenario tests of the work review: convergence, revise after an accepted issue or a self-correction, the three decision exits with `readCheckpoint`, the round limit without "p", the guards, stops before the work review |
-| `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer` (the services, scripted), `testLayer`, `testWiring`, temporary git repository |
+| `test/helpers.ts` | `ScriptedUi`, `ScriptedPlanner`, `ScriptedReviewer` (the services, scripted), `testLayer` (with the Decider built over them, `withDecider`), `testWiring`, `noDecider`, temporary git repository |
 | `test/fakeSdk.ts` | A fake of the two SDKs for the adapter tests |
 | `test/*.property.test.ts` | Property-based tests with `fast-check`, for the rows of the table in `docs/functional-design-review.md`, recommendation E |
 | `docs/effect-v4-api.md` | The API ledger: every Effect name used, with its declaration and the facts observed about it |
@@ -238,7 +239,7 @@ Dates: 21 Sep 2026 (SDKs), 24 Sep 2026 (Effect), 26 Sep 2026 (the web GUI and th
   suite was made to pass on a machine at load 20–30 (27 Sep 2026); whether that holds on a shared
   runner is also settled by the first run.
 - The interview turn's schema with `asked_ids` (issue #21, 27 Sep 2026) is not proven by the prototype. Its two files in `prototypes/proto-schema-output/` (`interviewTurn.raw.json`, `interviewTurn.strict.json`) were regenerated from `src/schema.ts` in the container, not written by an accepted run, so the fact above about the seven agent schemas does not yet cover this one. The proof is the developer's run of `node prototypes/proto-schema.ts <project> --only=:interviewTurn` in a project container.
-- The schemas of decision support are not yet proved by the schema acceptance prototype. The changed `plannerResponse`, `planWrite` and `questionListResponse` files in `prototypes/proto-schema-output/` (structured `questions_for_user`, 28 Sep 2026) were regenerated from `src/schema.ts` in the container, not written by an accepted run; the recursive `DecisionAnalysis` has the shape that `prototypes/proto-recursive-schema.ts` proved, but not its exact fields. The proof is the developer's run of `prototypes/proto-schema.ts` in a project container.
+- The schemas of decision support are not yet proved by the schema acceptance prototype. The changed `plannerResponse`, `planWrite` and `questionListResponse` files in `prototypes/proto-schema-output/` (structured `questions_for_user`, 28 Sep 2026) and the raw files of `decisionAnalysis`, `decisionResponse` and `decisionApplied` (which have no strict variant: a cycle of `$ref` cannot be inlined) were generated from `src/schema.ts` in the container, not written by an accepted run; the recursive `DecisionAnalysis` has the shape that `prototypes/proto-recursive-schema.ts` proved, but not its exact fields. The proof is the developer's run of `node prototypes/proto-schema.ts <project>` in a project container (`--only=:decisionAnalysis` and the others for one schema each).
 - Threads that the orchestrator starts are stored in the same `~/.codex` volume as the developer's interactive Codex sessions; the effect on `codex resume --last` is unverified.
 
 ## Pinned versions

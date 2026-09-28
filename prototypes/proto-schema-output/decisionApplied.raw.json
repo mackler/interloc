@@ -1,0 +1,541 @@
+{
+  "type": "object",
+  "properties": {
+    "analysis": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "type": "string"
+        },
+        "columns": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "option": {
+                "type": "string"
+              },
+              "advantages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "comparative_condition": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "starting_cause": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "intermediate_steps": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "threshold": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "effect_on_persons": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "reason_the_effect_matters": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "extent": {
+                      "type": "object",
+                      "properties": {
+                        "per_person": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "persons_affected": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "likelihood": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "timing": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "per_person",
+                        "persons_affected",
+                        "likelihood",
+                        "timing"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "comparative_condition",
+                    "starting_cause",
+                    "intermediate_steps",
+                    "threshold",
+                    "effect_on_persons",
+                    "reason_the_effect_matters",
+                    "extent"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "disadvantages": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "comparative_condition": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "starting_cause": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "intermediate_steps": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "threshold": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "effect_on_persons": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "reason_the_effect_matters": {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string"
+                        },
+                        "counterarguments": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/Objects_"
+                          }
+                        }
+                      },
+                      "required": [
+                        "text",
+                        "counterarguments"
+                      ],
+                      "additionalProperties": false
+                    },
+                    "extent": {
+                      "type": "object",
+                      "properties": {
+                        "per_person": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "persons_affected": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "likelihood": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "timing": {
+                          "type": "object",
+                          "properties": {
+                            "text": {
+                              "type": "string"
+                            },
+                            "counterarguments": {
+                              "type": "array",
+                              "items": {
+                                "$ref": "#/$defs/Objects_"
+                              }
+                            }
+                          },
+                          "required": [
+                            "text",
+                            "counterarguments"
+                          ],
+                          "additionalProperties": false
+                        }
+                      },
+                      "required": [
+                        "per_person",
+                        "persons_affected",
+                        "likelihood",
+                        "timing"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "comparative_condition",
+                    "starting_cause",
+                    "intermediate_steps",
+                    "threshold",
+                    "effect_on_persons",
+                    "reason_the_effect_matters",
+                    "extent"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            },
+            "required": [
+              "option",
+              "advantages",
+              "disadvantages"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "recommendation": {
+          "type": "object",
+          "properties": {
+            "option": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "option",
+            "reason"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "decision",
+        "columns",
+        "recommendation"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "analysis"
+  ],
+  "additionalProperties": false,
+  "$defs": {
+    "Objects_": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "equivalent_to": {
+          "type": "string"
+        },
+        "replies": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Objects_"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "text",
+        "equivalent_to",
+        "replies"
+      ],
+      "additionalProperties": false
+    }
+  }
+}
