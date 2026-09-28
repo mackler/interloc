@@ -7,7 +7,8 @@
 // "longChoices", an interview turn whose numbered answers are paragraphs (issue #12); "decide", a plan writer's question
 // with two options on which the user takes "Help me Decide" (decision support); "decideLong", the same with a
 // recommendation of several paragraphs (W1-R1-3); "decideRevise", an analysis whose first review raises an issue that
-// Claude accepts with an amended analysis (W2-R1-1).
+// Claude accepts with an amended analysis (W2-R1-1); "decideBlank", an interview turn with numbered answers on which the
+// user takes "Help me Decide" and then sends an empty message, which the run rejects (W3-R1-1).
 // PORT is the port.
 
 import { Effect } from "effect";
@@ -80,6 +81,19 @@ export const SCENARIOS: Record<string, TestOptions> = {
       { output: noQuestions, plan: "1. [ ] the step\n" },
     ],
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // W3-R1-1: an empty message after the analysis is rejected and asked again; the analysis stays shown.
+  decideBlank: {
+    config: { questionPhase: true },
+    steps: [
+      { output: { questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "", ["Q1"]) },
+      { output: { ...DECIDE_ANALYSIS, columns: [{ ...DECIDE_ANALYSIS.columns[1], option: "PostgreSQL" }, { ...DECIDE_ANALYSIS.columns[0], option: "SQLite" }] } },
+      { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.", ["Q1"], ["Q1"]) },
+      { output: noQuestions, plan: "1. [ ] the step\n" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
   },
   // Issue #12: the interview's numbered answers are paragraphs.

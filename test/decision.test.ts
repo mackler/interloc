@@ -297,3 +297,23 @@ test("with a predicate, a rejected answer is asked again and not recorded; witho
   assert.equal(await offering(empty.layer, { question: question.question, options: offered }), "");
   assert.deepEqual(json(empty.probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "", option: null });
 });
+
+// W3-R1-1: the page learns that a reply was rejected, so that it keeps the analysis for the question asked again.
+test("askOffering notifies AnswerRejected once per rejected answer, never for an accepted one, and never without a predicate", async () => {
+  const rejectedCount = (probe: { ui: { notified: { _tag: string }[] } }) => probe.ui.notified.filter((e) => e._tag === "AnswerRejected").length;
+  const withPredicate = await setUp({ answers: ["/decide", "", "2"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  await Effect.runPromise(Effect.gen(function* () {
+    const ui = yield* Ui;
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: question.question, options: offered }, Effect.void, (a) => a !== "");
+  }).pipe(Effect.provide(withPredicate.layer)));
+  assert.equal(rejectedCount(withPredicate.probe), 1);
+  const fewOptions = await setUp({ answers: ["", "x"] });
+  await Effect.runPromise(Effect.gen(function* () {
+    const ui = yield* Ui;
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: "q", options: offered.slice(0, 1) }, Effect.void, (a) => a !== "");
+  }).pipe(Effect.provide(fewOptions.layer)));
+  assert.equal(rejectedCount(fewOptions.probe), 1);
+  const without = await setUp({ answers: ["/decide", ""], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  await offering(without.layer, { question: question.question, options: offered });
+  assert.equal(rejectedCount(without.probe), 0);
+});

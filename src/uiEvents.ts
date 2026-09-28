@@ -35,7 +35,9 @@ export type UiEvent =
   /** The options of the next prompt (a pause, a plan writer's question): the page shows them as cards (decision support). */
   | Readonly<{ _tag: "OptionsPresented"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
   /** A decision loop has ended: its analysis, shown before the question is asked again (decision support). */
-  | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>;
+  | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>
+  /** The last answer was rejected (a blank reply where one is required) and the question is asked again (W3-R1-1); for the page. */
+  | Readonly<{ _tag: "AnswerRejected" }>;
 
 const AGENT_LABEL: Record<Agent, string> = { claude: "Claude Code", codex: "Codex" };
 /** The name of a phase as the progress display shows it. */
@@ -79,5 +81,7 @@ export const describeEvent = (event: UiEvent): string => {
       return `options: ${event.question} (${plural(event.options.length, "option")})`;
     case "DecisionAnalyzed":
       return `decision ${event.decision} analyzed: ${event.question} (${plural(event.analysis.columns.length, "column")})`;
+    case "AnswerRejected":
+      return "answer rejected, asked again";
   }
 };

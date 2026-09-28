@@ -69,6 +69,8 @@ export type RunView = Readonly<{
    * `prompt` is that prompt's number, null until it is asked.
    */
   analysis: Readonly<{ event: Extract<UiEvent, { _tag: "DecisionAnalyzed" }>; prompt: number | null }> | null;
+  /** The analysis the last answer dismissed, until the next prompt: restored if the run rejects that answer (W3-R1-1). */
+  dismissed: Readonly<{ event: Extract<UiEvent, { _tag: "DecisionAnalyzed" }>; prompt: number | null }> | null;
 }>;
 
 export type Listing = Readonly<{ path: string; parent: string | null; dirs: readonly string[]; error: string | null }>;
@@ -118,6 +120,7 @@ export const emptyRun = (id: number): RunView => ({
   phase: null,
   lastShown: { left: null, right: null },
   analysis: null,
+  dismissed: null,
 });
 
 /**
@@ -280,6 +283,9 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return { ...run, absorb: optionLines(event.options), questionOptions: event.options.map((o, i) => ({ label: o.description === "" ? o.label : `${o.label} — ${o.description}`, sends: String(i + 1) })) };
     case "DecisionAnalyzed":
       return { ...run, analysis: { event, prompt: null } };
+    case "AnswerRejected":
+      // The question is asked again: the analysis its rejected answer dismissed goes to the next prompt.
+      return run.dismissed === null ? run : { ...run, analysis: { ...run.dismissed, prompt: null }, dismissed: null };
     case "ClaudeSaid":
       // Issue #5: Claude's prose is attributed as data, not by a prefix in its text.
       return withLeft(run, message(run, time, "claude", event.text, "markdown"));
@@ -301,12 +307,14 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
         const extra = event.extra === "questionOptions" ? r.questionOptions : event.extra === "numberedAnswers" ? r.interviewChoices : [];
         // Presented options belong to this prompt alone (P1-R1-2); an analysis waiting for its prompt gets this one.
         const analysis = r.analysis !== null && r.analysis.prompt === null ? { ...r.analysis, prompt: event.prompt } : r.analysis;
-        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, options: extra, choices: event.choices }, questionOptions: [], analysis };
+        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, options: extra, choices: event.choices }, questionOptions: [], analysis, dismissed: null };
       }
       case "Answered": {
         const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? [...r.pending.options, ...r.pending.choices].find((c) => c.sends === event.text) : undefined;
-        const analysis = r.analysis !== null && r.analysis.prompt === event.prompt ? null : r.analysis;
-        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt], analysis };
+        const dismisses = r.analysis !== null && r.analysis.prompt === event.prompt;
+        const analysis = dismisses ? null : r.analysis;
+        const dismissed = dismisses ? r.analysis : r.dismissed;
+        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt], analysis, dismissed };
       }
       case "Notified":
         return notifiedEvent(r, event.event, time);

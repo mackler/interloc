@@ -760,3 +760,24 @@ test("a decision's ResponseReceived is one Claude message in the right panel, li
   const wire: ServerMessage = { type: "event", run: 1, seq: 2, time: at(2), event: events[2] };
   expect(decodeServer(JSON.stringify(wire))._tag).toBe("Success");
 });
+
+// W3-R1-1: a reply the run rejects (a blank answer where one is required) keeps the analysis for the prompt asked again.
+test("a rejected blank reply keeps the analysis for the retry; an accepted empty answer and the retry's answer dismiss it", () => {
+  const options = [{ label: "A", description: "" }, { label: "B", description: "" }];
+  const analyzedEvent: UiEvent = { _tag: "DecisionAnalyzed", decision: 1, question: "A or B?", options, analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } };
+  const question: UiEvent = { _tag: "QuestionAsked", question: "A or B?", options };
+  const rejected: RunEvent[] = [
+    started,
+    notified(analyzedEvent),
+    asked(2, prompts.withOffer(prompts.optionOrTextPrompt)),
+    { _tag: "Answered", prompt: 2, text: "" },
+    notified({ _tag: "AnswerRejected" }),
+    notified(question),
+    asked(3, prompts.withOffer(prompts.optionOrTextPrompt)),
+  ];
+  for (const s of [fold(live(rejected)), replayed(rejected)]) expect(s.run?.analysis?.prompt).toBe(3);
+  const answered = fold(live([...rejected, { _tag: "Answered", prompt: 3, text: "1" }]));
+  expect(answered.run?.analysis).toBe(null);
+  const accepted = fold(live([started, notified(analyzedEvent), asked(2, prompts.withOffer(prompts.decisionPrompt("x"))), { _tag: "Answered", prompt: 2, text: "" }, asked(3, prompts.decisionPrompt("y"))]));
+  expect(accepted.run?.analysis).toBe(null);
+});

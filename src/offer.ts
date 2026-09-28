@@ -54,16 +54,18 @@ export const askOffering = <E>(
   acceptable: (answer: string) => boolean = () => true,
 ): Effect.Effect<string, E | RunError, Decider | Store | Ui> =>
   Effect.gen(function* () {
+    const ui = yield* Ui;
+    // The page keeps a decision's analysis for the question asked again (W3-R1-1).
+    const rejected = ui.notify({ _tag: "AnswerRejected" }).pipe(Effect.andThen(present));
     if (question.options.length < 2) {
       for (;;) {
         const answer = yield* ask(prompt);
         if (acceptable(answer)) return answer;
-        yield* present;
+        yield* rejected;
       }
     }
     const decider = yield* Decider;
     const store = yield* Store;
-    const ui = yield* Ui;
     const options = question.options.map((o) => ({ label: o.label, description: o.description }));
     const decisions: number[] = [];
     for (;;) {
@@ -76,7 +78,7 @@ export const askOffering = <E>(
         continue;
       }
       if (!acceptable(answer)) {
-        yield* present;
+        yield* rejected;
         continue;
       }
       const option = question.options.find((o) => o.matches(answer))?.label ?? null;

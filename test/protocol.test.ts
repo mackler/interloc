@@ -49,6 +49,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("InterviewTurn" as const), heading: text, message: text, summary: fc.option(text, { nil: null }), answered: nat, total: nat }),
   fc.record({ _tag: fc.constant("InterviewOpened" as const), heading: text, stage: fc.constantFrom("clarification" as const, "followUp" as const, "conversation" as const), total: nat }),
   fc.record({ _tag: fc.constant("ClaudeSaid" as const), text }),
+  fc.constant({ _tag: "AnswerRejected" as const }),
   fc.record({ _tag: fc.constant("OptionsPresented" as const), question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }) }),
   fc.record({
     _tag: fc.constant("DecisionAnalyzed" as const),

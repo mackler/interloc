@@ -156,3 +156,10 @@ test("notify prints a decision's analysis in the terminal", async () => {
   await withUi(io, (ui) => ui.notify({ _tag: "DecisionAnalyzed", decision: 1, question: "A or B?", options: [], analysis }));
   assert.equal(io.written(), ["", "Decision 1: A or B?", "", "Option 1: A", "", "  Disadvantages:", "", "Option 2: B", "", "  Disadvantages:", ""].join("\n") + "\n");
 });
+
+// W3-R1-1: the rejection of a reply is for the page; the terminal prints nothing for it.
+test("notify prints nothing for AnswerRejected", async () => {
+  const io = streams();
+  await withUi(io, (ui) => ui.notify({ _tag: "AnswerRejected" }));
+  assert.equal(io.written(), "");
+});

@@ -71,6 +71,7 @@ export const UiEventSchema = Schema.Union([
   tagged("InterviewOpened", { heading: Str, stage: Schema.Literals(["clarification", "followUp", "conversation"]), total: Int }),
   tagged("ClaudeSaid", { text: Str }),
   tagged("OptionsPresented", { question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) }),
+  tagged("AnswerRejected", {}),
   tagged("DecisionAnalyzed", { decision: Int, question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })), analysis: S.DecisionAnalysis }),
 ]);
 

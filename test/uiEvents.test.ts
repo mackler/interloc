@@ -25,6 +25,7 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   ClaudeSaid: [{ _tag: "ClaudeSaid", text: "done" }, /Claude Code said: done/],
   OptionsPresented: [{ _tag: "OptionsPresented", question: "Which?", options: [{ label: "A", description: "" }, { label: "B", description: "" }] }, /options: Which\? \(2 options\)/],
   DecisionAnalyzed: [{ _tag: "DecisionAnalyzed", decision: 2, question: "Which?", options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } }, /decision 2 analyzed: Which\? \(0 columns\)/],
+  AnswerRejected: [{ _tag: "AnswerRejected" }, /answer rejected, asked again/],
 };
 
 for (const [tag, [event, expected]] of Object.entries(examples)) {

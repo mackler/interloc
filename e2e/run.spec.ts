@@ -3,7 +3,7 @@ import { expect, test } from "./fixtures.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
 // fails on an uncaught error or a console error in any of its pages (e2e/fixtures.ts, finding 10 of docs/gui-review.md).
-const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113 } as const;
+const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113, decideBlank: 8114 } as const;
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
@@ -305,5 +305,22 @@ test("(14) a revised analysis: the decision's response reaches the page, which s
   await page.getByRole("button", { name: "Show the conversation" }).click();
   await expect(right(page).getByText(/D1-R1-1/).first()).toBeVisible();
   await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+});
+
+// W3-R1-1: an empty message after the analysis is rejected and asked again; the analysis stays until the answer.
+test("(15) a rejected empty reply keeps the analysis shown; the answer that follows dismisses it", async ({ page }) => {
+  await startTask(page, "decideBlank", "Add a service");
+  await page.getByRole("button", { name: "Help me Decide" }).click();
+  const analysis = page.getByRole("region", { name: /^Decision 1: / });
+  await expect(analysis).toBeVisible();
+  await page.locator("textarea[name=answer]").press("Enter");
+  // The Help me Decide answer and the empty one.
+  await expect(page.locator("[data-author=user]")).toHaveCount(2);
+  await expect(analysis).toBeVisible();
+  await expect(analysis.locator(".column h3")).toHaveText(["PostgreSQL", "SQLite"]);
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: "1. PostgreSQL" }).click();
+  await expect(analysis).toBeHidden();
+  await page.getByRole("button", { name: "Confirm" }).click();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
