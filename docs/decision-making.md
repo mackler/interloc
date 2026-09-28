@@ -16,6 +16,8 @@ The input contains the following information:
 
 If an argument depends on information that the input does not contain, state in the argument which information is missing and how its value affects the argument. Do not assume a value.
 
+If the meaning of an option is unclear, so that the option could be read in two ways that differ in their consequences, do not argue from either reading. State in place of that option's arguments what is unclear about it and which readings are possible, and stop. An argument made from one reading of an ambiguous option is worthless, because it may be answering a question that was not asked. The requester resolves the ambiguity, and the arguments are made afterward.
+
 ## Equal standing of the options
 
 No option is preferred in the absence of arguments. If one of the options is to retain the current state of the system, that option has advantages and disadvantages in the same manner as the other options, and it receives no preference because it is the current state.
@@ -66,7 +68,7 @@ The representation contains one column for each option. Each column lists the ad
 
 Each advantage and each disadvantage begins with a title. The title is one complete sentence that states the outcome and its effect on persons.
 
-The representation is written for persons who have no knowledge of formal argument or of the terms defined in this prompt. Write every item as complete sentences. Write so that each sentence reads naturally when read aloud. When a sentence has the same grammatical subject as the preceding sentence, refer to the subject with a pronoun instead of repeating the noun, unless the pronoun could refer to more than one noun in the preceding sentence. This rule applies across consecutive bullet items. Do not use abbreviations, labels, or names of categories of argument. Do not use the words "counterargument," "defense," "reversal," or "rebuttal" in the representation. Introduce the disadvantages of an option, which are the arguments against choosing that option, with the heading "Disadvantages:".
+The representation is written for persons who have no knowledge of formal argument or of the terms defined in this prompt. Write every item as complete sentences. Write so that each sentence reads naturally when read aloud. When a sentence has the same grammatical subject as the preceding sentence, refer to the subject with a pronoun instead of repeating the noun, unless the pronoun could refer to more than one noun in the preceding sentence. This rule applies across consecutive bullet items. Do not use abbreviations, labels, or names of categories of argument. Do not use the words "counterargument," "defense," "reversal," or "rebuttal" in the representation. Introduce the advantages of an option, which are the arguments for choosing that option, with the heading "Advantages:", and the disadvantages of an option, which are the arguments against choosing it, with the heading "Disadvantages:". Number the entries under each heading and label them: "Advantage 1:", "Advantage 2:", "Disadvantage 1:", and so on, numbered from one within each heading of each column, so that a reader can see which elements belong to which entry. Where a person is referred to in the singular and the person's identity is not known, use "he" and "his".
 
 ## Placement of advantages and disadvantages
 
@@ -92,7 +94,7 @@ The following kinds of counterargument exist. The names of the kinds are for you
 
 Under each counterargument, list the defenses of the argument against it. Under each defense, list the further counterarguments to that defense. Continue until no further counterargument or defense exists.
 
-Place each counterargument immediately after the element of the advantage or disadvantage that it disputes, begin it with the word "But," and offset it visually from the element, for example by indentation or by parentheses. Begin each defense with the words "On the other hand," and begin each counterargument to a defense with the words "Then again,".
+Place each counterargument immediately after the element of the advantage or disadvantage that it disputes, begin it with the word "But," and offset it visually from the element, for example by indentation or by parentheses. Begin each defense with the words "On the other hand," and begin each counterargument to a defense with the words "Then again,". Where two or more counterarguments stand together at the same position, only the first begins with "But," and each of the others begins with "Also,". The same applies to defenses: only the first begins with "On the other hand," and each of the others begins with "Also,". The same applies to counterarguments to a defense, of which only the first begins with "Then again,".
 
 ## Reversals
 
