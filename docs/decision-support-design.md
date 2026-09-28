@@ -205,9 +205,21 @@ Two consequences the developer should weigh:
 
 ## 10. What is still open
 
-1. Whether a recursive schema survives the JSON Schema generation both agents accept — to be proved
-   in `prototypes/` before the work starts, as every other schema was. This is a prototype run, not a
-   question for the developer, but if it fails the shape of the feature changes.
+Nothing. The last item — whether a recursive schema survives the JSON Schema generation and both
+agents — was proved on 28 Sep 2026 by `prototypes/proto-recursive-schema.ts`, run in the development
+container against Opus 5.5 and gpt-6-astra. It carries one constraint into the work:
+
+- **The representation's root must be a concrete object, never a bare `$ref`.** Codex accepted every
+  schema tried, but the Agent SDK rejected the one whose root was `{"$ref": "#/$defs/..."}` with an
+  "API Error:" after three seconds, twice, while accepting the two whose root was an object. All
+  three were equally recursive, so the recursion is not the cause. `Schema.Struct` at the top gives
+  the required shape at no cost.
+- `Schema.suspend` generates a `$ref`/`$defs` cycle carrying `additionalProperties: false` and a
+  complete `required` list — the shape the program already sends. Replies decoded with
+  counterarguments nested three and four levels deep.
+- `strictJsonSchema` rejects a recursive schema as `cyclic_ref`, by construction: it inlines every
+  `$ref`, and a cycle cannot be inlined. The program sends the raw variant, so this costs nothing
+  today, but the fallback that `src/jsonSchema.ts` documents does not exist for this schema.
 
 Settled on 28 Sep 2026: behavior 8 may gain a fifth log and loop directory; the representation covers
 both chat columns, or a separate window later, with a message to enlarge below 390 px; the terminal
