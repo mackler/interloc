@@ -39,7 +39,12 @@ export type RoundGroup = Readonly<{ subject: SubjectId; heading: string; rounds:
  * because the run ended before it.
  */
 export type TimelineState = "ahead" | "active" | "done" | "stopped" | "notReached";
-export type TimelineStep = Readonly<{ kind: "formulate" | "clarification" | "followUp"; label: string; state: TimelineState; count: Readonly<{ answered: number; total: number }> | null; groups: readonly RoundGroup[] }>;
+/**
+ * The state of a step: a phase's states, or "skipped", a step foreseen whose phase ended without needing it (the empty
+ * agreed question list without a conversation). Not "notReached", which a halt gives a step the run still needed.
+ */
+export type StepState = TimelineState | "skipped";
+export type TimelineStep = Readonly<{ kind: "formulate" | "clarification" | "followUp"; label: string; state: StepState; count: Readonly<{ answered: number; total: number }> | null; groups: readonly RoundGroup[] }>;
 /**
  * A phase of the run in the timeline. `label` is numbered by the count of its kind in the timeline (issue #6), and is
  * renumbered when that count changes; `plan` is the current plan, on the Implementation entry that carries it out (Q5, Q9).
@@ -219,7 +224,7 @@ const currentIndex = (timeline: readonly TimelineEntry[]): number => {
 /** The step that an entry is in: the active one, else the last one begun. */
 const currentStepIndex = (steps: readonly TimelineStep[]): number => {
   const active = lastIndex(steps, (st) => st.state === "active");
-  return active >= 0 ? active : lastIndex(steps, (st) => st.state !== "ahead" && st.state !== "notReached");
+  return active >= 0 ? active : lastIndex(steps, (st) => st.state !== "ahead" && st.state !== "notReached" && st.state !== "skipped");
 };
 /**
  * How a step of the plan shows in the rail (issue #6, G-R1-2): current only while its Implementation entry is active and
@@ -267,16 +272,19 @@ const openGroups = (timeline: readonly TimelineEntry[], subject: SubjectId, f: (
   const each = (groups: readonly RoundGroup[]) => groups.map((g) => (sameSubject(g.subject, subject) && !g.done ? f(g) : g));
   return timeline.map((e) => ({ ...e, groups: each(e.groups), steps: e.steps.map((st) => ({ ...st, groups: each(st.groups) })) }));
 };
-const newStep = (kind: TimelineStep["kind"], count: TimelineStep["count"], state: TimelineState = "active"): TimelineStep => ({ kind, label: stepLabel(kind), state, count, groups: [] });
-/** An entry when the run ends with `code`: the active one done or stopped; after a halt, what is ahead not reached (issue #6). */
+const newStep = (kind: TimelineStep["kind"], count: TimelineStep["count"], state: StepState = "active"): TimelineStep => ({ kind, label: stepLabel(kind), state, count, groups: [] });
+/**
+ * An entry when the run ends with `code`: the active one done or stopped; after a halt, what is ahead not reached (issue #6);
+ * after success, the active one's steps never begun skipped (`endSteps`).
+ */
 const endEntry = (e: TimelineEntry, code: number): TimelineEntry => {
   const end = code === 0 ? "done" : "stopped";
   const unreached = (st: TimelineStep): TimelineStep => (code !== 0 && st.state === "ahead" ? { ...st, state: "notReached" } : st);
   if (e.state === "active") return endSteps({ ...e, state: end, steps: e.steps.map(unreached) }, end);
   return code !== 0 && e.state === "ahead" ? { ...e, state: "notReached", steps: e.steps.map(unreached) } : e;
 };
-/** The entry with its active steps ended in `state`. */
-const endSteps = (e: TimelineEntry, state: "done" | "stopped"): TimelineEntry => ({ ...e, steps: e.steps.map((st) => (st.state === "active" ? { ...st, state } : st)) });
+/** The entry with its active steps ended in `state`, and the steps it never began skipped: its phase is over. */
+const endSteps = (e: TimelineEntry, state: "done" | "stopped"): TimelineEntry => ({ ...e, steps: e.steps.map((st) => (st.state === "active" ? { ...st, state } : st.state === "ahead" ? { ...st, state: "skipped" } : st)) });
 /** The timeline with the last entry's steps changed by `f`, when it is the question phase. */
 const inQuestionPhase = (timeline: readonly TimelineEntry[], f: (steps: readonly TimelineStep[]) => readonly TimelineStep[]): readonly TimelineEntry[] =>
   // P1-R1-1: Gather Requirements wherever it stands, while it runs.

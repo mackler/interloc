@@ -6,7 +6,7 @@
   // under the Implementation that carries it out the plan's stages and steps, each step's full text in a rich tooltip.
   import { AGENT_WORKING_LABEL, clarificationProgress, cycleLine, loopSummary, NO_PHASE_YET, PLAN_LIST_LABEL, PLAN_STEP_STATE_LABEL, planStepLabel, PROGRESS_HEADING, runningFor, stageHeading, TIMELINE_STATE_LABEL } from "../../../src/prompts.ts";
   import { elapsedMs } from "../time.ts";
-  import { planStepState, type RoundGroup, type TimelineEntry } from "../state.ts";
+  import { planStepState, type RoundGroup, type StepState, type TimelineEntry } from "../state.ts";
   import StepTooltip from "./StepTooltip.svelte";
 
   /**
@@ -23,8 +23,9 @@
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(timer);
   });
-  // Text glyphs, not an icon set (docs/ui-review.md): ahead and not reached are hollow, not reached muted.
-  const MARK: Record<TimelineEntry["state"], string> = { done: "✓", active: "●", stopped: "■", ahead: "○", notReached: "○" };
+  // Text glyphs, not an icon set (docs/ui-review.md): ahead and not reached are hollow, not reached muted; skipped is a
+  // dash: the phase ended without needing the step.
+  const MARK: Record<StepState, string> = { done: "✓", active: "●", stopped: "■", ahead: "○", notReached: "○", skipped: "–" };
   const LABEL = TIMELINE_STATE_LABEL;
   const STEP_MARK: Record<ReturnType<typeof planStepState>, string> = { done: "✓", current: "●", unfinished: "◐", pending: "○" };
 </script>
@@ -119,6 +120,7 @@
   .step .mark { left: 0.25rem; }
   .step.done { opacity: 0.8; }
   .step.stopped { color: var(--m3c-error); }
+  .step.skipped { color: var(--m3c-on-surface-variant); }
   .count { display: block; }
   .group { margin: 0.25rem 0 0 0.25rem; }
   .group.done { opacity: 0.8; }

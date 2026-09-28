@@ -629,13 +629,17 @@ export function stageHeading(n: number, title: string): string {
 export function planStepLabel(n: number, label: string): string {
   return `${n}. ${label}`;
 }
-/** What each mark of a phase or step says to assistive technology in the progress rail (issue #6: ahead, not reached). */
-export const TIMELINE_STATE_LABEL: Record<"ahead" | "active" | "done" | "stopped" | "notReached", string> = {
+/**
+ * What each mark of a phase or step says to assistive technology in the progress rail (issue #6: ahead, not reached;
+ * skipped: a step whose phase ended without needing it).
+ */
+export const TIMELINE_STATE_LABEL: Record<"ahead" | "active" | "done" | "stopped" | "notReached" | "skipped", string> = {
   ahead: "ahead",
   active: "in progress",
   done: "done",
   stopped: "stopped",
   notReached: "not reached",
+  skipped: "not needed",
 };
 /** What each mark of a step of the plan says (issue #6, G-R1-2): a started step is current only while an execution call runs. */
 export const PLAN_STEP_STATE_LABEL: Record<"done" | "current" | "unfinished" | "pending", string> = {

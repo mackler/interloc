@@ -405,7 +405,11 @@ describe("runs, replay and gaps", () => {
         expect(replay.run).toEqual(incremental.run);
         expect(replay.last).toEqual(incremental.last);
         expect(incremental.needsReconnect).toBe(false);
+        // Every phase that began has ended by Ended(0), and has retired the steps it never began.
+        expect(incremental.last?.timeline.filter((e) => e.state !== "ahead").flatMap((e) => e.steps.filter((st) => st.state === "ahead"))).toEqual([]);
       }),
+      // A phase that began and a step of it that never did, always among the cases rather than only when drawn.
+      { examples: [[[notified({ _tag: "PhasesForeseen", phases: foreseenPhases(true, 1) }), notified({ _tag: "PhaseBegan", phase: { kind: "questions" } })], [], Array(14).fill(0), Array(14).fill(0)]] },
     );
   });
 });
@@ -832,6 +836,44 @@ describe("the whole run in the timeline", () => {
     expect(entries(s)).toEqual([["Planning", "stopped"], ["Implementation", "notReached"], ["Work review", "notReached"]]);
     const finished = fold(live([started, foreseen(false, 1), began({ kind: "planning", n: 1 }), { _tag: "Ended", code: 0 }]));
     expect(entries(finished)[1]).toEqual(["Implementation", "ahead"]);
+  });
+
+  // A foreseen step that never began is retired when its phase ends: "skipped", not "ahead", and not "notReached",
+  // which a halt gives. The states are compared as strings.
+  const stepStates = (s: ViewState) => s.run?.timeline.map((e) => e.steps.map((st) => [st.kind, st.state as string])) ?? [];
+  const noStepAhead = (s: ViewState) => s.run?.timeline.every((e) => e.steps.every((st) => (st.state as string) !== "ahead")) ?? false;
+  const q = { kind: "questions" as const };
+  const phaseDone = (phase: Parameters<typeof phaseName>[0]): RunEvent[] => [began(phase), notified({ _tag: "PhaseEnded", phase, result: "converged" })];
+
+  test("an empty agreed question list without a conversation: Clarification is retired when Gather Requirements ends, and no step is ahead after the run", () => {
+    const questionPhase: RunEvent[] = [
+      started,
+      foreseen(true, 1),
+      began(q),
+      notified({ _tag: "RoundBegan", subject: "questions", round: 1, limit: 5 }),
+      notified({ _tag: "LoopFinished", subject: "questions", result: "converged" }),
+      notified({ _tag: "PhaseEnded", phase: q, result: "no conversation" }),
+    ];
+    const afterPhase = fold(live(questionPhase));
+    expect(stepStates(afterPhase)[0]).toEqual([["formulate", "done"], ["clarification", "skipped"]]);
+    const events: RunEvent[] = [...questionPhase, ...phaseDone({ kind: "planning", n: 1 }), ...phaseDone({ kind: "execution", n: 1 }), ...phaseDone({ kind: "work", n: 1 }), { _tag: "Ended", code: 0 }];
+    for (const s of [fold(live(events)), replayed(events)]) {
+      expect(noStepAhead(s)).toBe(true);
+      expect(stepStates(s)[0]).toEqual([["formulate", "done"], ["clarification", "skipped"]]);
+    }
+  });
+
+  test("a phase that ends while a later step of it never began retires that step; a halt still leaves it not reached", () => {
+    const prefix: RunEvent[] = [started, foreseen(true, 1), began(q)];
+    const ended = fold(live([...prefix, notified({ _tag: "PhaseEnded", phase: q, result: "converged" })]));
+    expect(ended.run?.timeline[0].steps.every((st) => (st.state as string) !== "ahead")).toBe(true);
+    expect(stepStates(ended)[0]).toEqual([["formulate", "done"], ["clarification", "skipped"]]);
+    const finished = fold(live([...prefix, { _tag: "Ended", code: 0 }]));
+    expect(stepStates(finished)[0]).toEqual([["formulate", "done"], ["clarification", "skipped"]]);
+    const halted = fold(live([...prefix, { _tag: "Ended", code: 1 }]));
+    expect(stepStates(halted)[0]).toEqual([["formulate", "stopped"], ["clarification", "notReached"]]);
+    const skippedThenHalted = fold(live([...prefix, notified({ _tag: "PhaseEnded", phase: q, result: "converged" }), { _tag: "Ended", code: 1 }]));
+    expect(stepStates(skippedThenHalted)[0]).toEqual([["formulate", "done"], ["clarification", "skipped"]]);
   });
 
   test("the plan hangs under the Implementation of its phase, and a revision moves it there (Q5, Q9)", () => {

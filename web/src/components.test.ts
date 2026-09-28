@@ -789,6 +789,19 @@ describe("TimelineRail: the plan", () => {
     expect(marks).toEqual([["stopped", prompts.TIMELINE_STATE_LABEL.stopped], ["notReached", prompts.TIMELINE_STATE_LABEL.notReached], ["ahead", prompts.TIMELINE_STATE_LABEL.ahead]]);
   });
 
+  test("a step its phase ended without has a mark and a name of its own, apart from ahead and not reached", () => {
+    const step = (kind: TimelineStep["kind"], state: TimelineStep["state"]): TimelineStep => ({ kind, label: prompts.stepLabel(kind), state, count: null, groups: [] });
+    const questions: TimelineEntry = { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [], steps: [step("formulate", "done"), step("clarification", "skipped")], plan: null };
+    const root = show(TimelineRail, { busy: false, executing: false, timeline: [questions, { ...entry("notReached", null), steps: [step("formulate", "notReached")] }, { ...ahead("work", "ahead"), steps: [step("formulate", "ahead")] }] });
+    const mark = (state: string) => root.querySelector(`[data-step=${state}] .mark`);
+    expect(mark("skipped")?.getAttribute("aria-label")).toBe(prompts.TIMELINE_STATE_LABEL.skipped);
+    expect(typeof prompts.TIMELINE_STATE_LABEL.skipped).toBe("string");
+    expect(prompts.TIMELINE_STATE_LABEL.skipped).not.toBe(prompts.TIMELINE_STATE_LABEL.notReached);
+    const glyph = mark("skipped")?.textContent?.trim();
+    expect(glyph).toBeTruthy();
+    expect([mark("notReached")?.textContent?.trim(), mark("ahead")?.textContent?.trim()]).not.toContain(glyph);
+  });
+
   test("focus opens the step's full text as a tooltip described by the step, and Escape closes it", () => {
     const root = show(TimelineRail, { busy: false, executing: false, timeline: [entry("active", recorded())] });
     const button = one(root, "[data-plan-step] button");
