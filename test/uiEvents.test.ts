@@ -14,7 +14,7 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   ReviewReceived: [{ _tag: "ReviewReceived", subject: "questions", round: 1, review, counted: 0 }, /review of question-review, round 1: 0 issues, 0 counted/],
   ResponseReceived: [{ _tag: "ResponseReceived", subject: "requirements", round: 2, response, resultText: "" }, /response in requirements-review, round 2/],
   LoopFinished: [{ _tag: "LoopFinished", subject: { plan: 1 }, result: "converged" }, /planning-1 finished: converged/],
-  PlanWritten: [{ _tag: "PlanWritten", phase: 1, questions: ["a?"], resultText: "" }, /plan written in phase 1, 1 question/],
+  PlanWritten: [{ _tag: "PlanWritten", phase: 1, questions: [{ question: "a?", options: [] }], resultText: "" }, /plan written in phase 1, 1 question/],
   ExecutionEnded: [{ _tag: "ExecutionEnded", phase: 1, outcome }, /execution 1 ended: finished/],
   AgentCallStarted: [{ _tag: "AgentCallStarted", agent: "codex", purpose: "review" }, /Codex call started: review/],
   ToolUsed: [{ _tag: "ToolUsed", agent: "claude", tool: "Read", target: "src/run.ts" }, /Claude Code used Read src\/run\.ts/],

@@ -3,7 +3,7 @@
 
 import { Result } from "effect";
 import { RoundInvalid } from "./errors.ts";
-import type { Action, LogEntry, PlannerResponse, Review } from "./schema.ts";
+import type { Action, LogEntry, PlannerResponse, Review, UserQuestion } from "./schema.ts";
 
 import type { IssueId } from "./schema.ts";
 export type { IssueId };
@@ -23,7 +23,7 @@ export type ValidatedRound = Readonly<{
   selfCorrections: readonly ValidatedSelfCorrection[];
   notes: readonly ReferenceNote[];
   reviewerFeedback: string;
-  questionsForUser: readonly string[];
+  questionsForUser: readonly UserQuestion[];
 }>;
 
 const ACCEPTED = new Set(["accepted", "partially_accepted"]);

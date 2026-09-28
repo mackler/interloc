@@ -99,7 +99,7 @@ test("accepted without a change of the file halts", () => {
 test("the pauses ask in the decided order and a decision leads to ApplyDecisions before the log", () => {
   const log = [entry("C", "accepted"), entry("O", "rejected")];
   const dispositions = respond([["A", "clarification_requested"], ["B", "rejected"], ["N", "rejected"]]).dispositions.map((d) => (d.id === "B" ? { ...d, reverses: "C" } : d.id === "N" ? { ...d, duplicate_of: "O" } : d));
-  const resp = { ...respond([]), dispositions, self_corrections: [{ id: "C", new_action: "rejected" as const, explanation: "x" }], questions_for_user: ["Which?"] };
+  const resp = { ...respond([]), dispositions, self_corrections: [{ id: "C", new_action: "rejected" as const, explanation: "x" }], questions_for_user: [{ question: "Which?", options: [] }] };
   const t = run(afterReview([...log, entry("A", "clarification_requested")], [issue("A"), issue("B"), issue("N")]), { kind: "ResponseDecoded", response: resp, resultText: "", costUsd: null });
   const subjects: string[] = [];
   let step = t;

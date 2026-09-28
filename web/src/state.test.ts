@@ -65,7 +65,7 @@ describe("ordering and the panels", () => {
   });
 
   test("a plan write is one program message with its result text and questions, live and after a replay", () => {
-    const events: RunEvent[] = [started, notified({ _tag: "PlanWritten", phase: 1, questions: ["Which?"], resultText: "I wrote the plan." })];
+    const events: RunEvent[] = [started, notified({ _tag: "PlanWritten", phase: 1, questions: [{ question: "Which?", options: [] }], resultText: "I wrote the plan." })];
     for (const s of [fold(live(events)), replayed(events)]) {
       const m = s.run?.left.at(-1);
       expect(m?.format).toBe("markdown");

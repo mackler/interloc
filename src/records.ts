@@ -31,7 +31,7 @@ export const ValidatedResponseRecord = Schema.Struct({
   dispositions: Schema.Array(DispositionRecord),
   selfCorrections: Schema.Array(SelfCorrectionRecord),
   reviewerFeedback: Schema.String,
-  questionsForUser: Strings,
+  questionsForUser: Schema.Array(S.UserQuestion),
 });
 const ProblemsRecord = Schema.Struct({ duplicateIssues: Strings, missing: Strings, duplicateDispositions: Strings, unknownDispositions: Strings, emptyIds: Strings, collidingIds: Strings });
 /** `subject` is the subject directory (question-review, requirements-review, planning-<k>). `reconstructed` is always false now: it marked records rebuilt from files of the shape before Q5. */

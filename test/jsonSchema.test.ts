@@ -7,13 +7,25 @@ import * as S from "../src/schema.ts";
 import * as legacy from "./fixtures/legacy-schemas.ts";
 
 // The seven schemas that an agent call passes as its output schema.
+// Decision Q1 of the decision-support task: questions_for_user is a list of structured questions; the legacy schemas stay frozen.
+const userQuestions = {
+  type: "array",
+  items: {
+    type: "object",
+    properties: {
+      question: { type: "string" },
+      options: { type: "array", items: { type: "object", properties: { label: { type: "string" }, description: { type: "string" } } } },
+    },
+  },
+};
+const withQuestions = <T extends { properties: object }>(schema: T): T => ({ ...schema, properties: { ...schema.properties, questions_for_user: userQuestions } });
 const agentSchemas = {
   review: { effect: S.Review, legacy: legacy.reviewSchema },
-  plannerResponse: { effect: S.PlannerResponse, legacy: legacy.plannerResponseSchema },
-  planWrite: { effect: S.PlanWriteResult, legacy: legacy.planWriteSchema },
+  plannerResponse: { effect: S.PlannerResponse, legacy: withQuestions(legacy.plannerResponseSchema) },
+  planWrite: { effect: S.PlanWriteResult, legacy: withQuestions(legacy.planWriteSchema) },
   execReport: { effect: S.ExecReport, legacy: legacy.execReportSchema },
   questionList: { effect: S.QuestionList, legacy: legacy.questionListSchema },
-  questionListResponse: { effect: S.QuestionListResponse, legacy: legacy.questionListResponseSchema },
+  questionListResponse: { effect: S.QuestionListResponse, legacy: withQuestions(legacy.questionListResponseSchema) },
   // Issue #21 (Q6 follow-up): the interview turn has asked_ids beyond the frozen legacy schema, which stays frozen.
   interviewTurn: {
     effect: S.InterviewTurn,

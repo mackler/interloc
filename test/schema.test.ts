@@ -22,7 +22,11 @@ const rejects = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown, what: s
 const issue: legacy.Issue = { id: "P1-R1-1", severity: "major", location: "step 3", problem: "p", evidence: "e" };
 const disposition: legacy.Disposition = { id: "P1-R1-1", action: "accepted", rationale: "r", duplicate_of: "", reverses: "" };
 const selfCorrection: legacy.SelfCorrection = { id: "A", new_action: "plan_error", explanation: "x" };
-const plannerResponse: legacy.PlannerResponse = { dispositions: [disposition], self_corrections: [selfCorrection], reviewer_feedback: "", questions_for_user: ["q?"] };
+// Decision Q1 of the decision-support task: a question for the user is structured, with an optional list of options.
+type UserQuestion = { question: string; options: { label: string; description: string }[] };
+type WithQuestions<T> = Omit<T, "questions_for_user"> & { questions_for_user: UserQuestion[] };
+const userQuestion: UserQuestion = { question: "q?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
+const plannerResponse: WithQuestions<legacy.PlannerResponse> = { dispositions: [disposition], self_corrections: [selfCorrection], reviewer_feedback: "", questions_for_user: [userQuestion] };
 const questionEntry: legacy.QuestionEntry = { id: "Q1", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: "A" };
 // Issue #21 (Q6 follow-up): the one field the interview turn has beyond the frozen legacy shape.
 const interviewTurn: legacy.InterviewTurn & { asked_ids: string[] } = { message_to_user: "m", asked_ids: ["Q1", "F1"], answered_ids: ["Q1"], complete: false, summary: "" };
@@ -60,11 +64,11 @@ test("each schema decodes a valid sample and its type matches the legacy type", 
   sameType<Equals<DeepMutable<typeof S.Review.Type>, DeepMutable<legacy.Review>>>();
   sameType<Equals<DeepMutable<typeof S.Disposition.Type>, DeepMutable<legacy.Disposition>>>();
   sameType<Equals<DeepMutable<typeof S.SelfCorrection.Type>, DeepMutable<legacy.SelfCorrection>>>();
-  sameType<Equals<DeepMutable<typeof S.PlannerResponse.Type>, DeepMutable<legacy.PlannerResponse>>>();
-  sameType<Equals<DeepMutable<typeof S.PlanWriteResult.Type>, DeepMutable<legacy.PlanWriteResult>>>();
+  sameType<Equals<DeepMutable<typeof S.PlannerResponse.Type>, DeepMutable<WithQuestions<legacy.PlannerResponse>>>>();
+  sameType<Equals<DeepMutable<typeof S.PlanWriteResult.Type>, DeepMutable<WithQuestions<legacy.PlanWriteResult>>>>();
   sameType<Equals<DeepMutable<typeof S.QuestionEntry.Type>, DeepMutable<legacy.QuestionEntry>>>();
   sameType<Equals<DeepMutable<typeof S.QuestionList.Type>, DeepMutable<legacy.QuestionList>>>();
-  sameType<Equals<DeepMutable<typeof S.QuestionListResponse.Type>, DeepMutable<legacy.QuestionListResponse>>>();
+  sameType<Equals<DeepMutable<typeof S.QuestionListResponse.Type>, DeepMutable<WithQuestions<legacy.QuestionListResponse>>>>();
   sameType<Equals<DeepMutable<typeof S.InterviewTurn.Type>, DeepMutable<legacy.InterviewTurn & { asked_ids: readonly string[] }>>>();
   sameType<Equals<DeepMutable<typeof S.ExecReport.Type>, DeepMutable<legacy.ExecReport>>>();
   sameType<Equals<DeepMutable<typeof S.ExecOutcome.Type>, DeepMutable<legacy.ExecOutcome>>>();
@@ -95,6 +99,15 @@ test("each schema rejects a wrong enum value, a missing field and a wrong type",
   rejects(S.Config, { ...config, execPermissionMode: "yolo" }, "execPermissionMode yolo");
   rejects(S.QuestionsFile, { version: 2, questions: [questionEntry] }, "a questions file without a task");
   rejects(S.QuestionsFile, { task: "t", questions: [questionEntry] }, "a questions file without the version marker");
+});
+
+test("a question for the user is structured: with options, without options, never a bare string (decision Q1)", () => {
+  assert.deepEqual(decode(S.UserQuestion, userQuestion), userQuestion);
+  assert.deepEqual(decode(S.PlanWriteResult, { questions_for_user: [{ question: "Which?", options: [] }] }), { questions_for_user: [{ question: "Which?", options: [] }] });
+  rejects(S.PlanWriteResult, { questions_for_user: ["Which?"] }, "a bare string question");
+  rejects(S.PlannerResponse, { ...plannerResponse, questions_for_user: ["Which?"] }, "a bare string question in a response");
+  rejects(S.UserQuestion, { question: "Which?" }, "a question without options");
+  rejects(S.UserQuestion, { question: "Which?", options: [{ label: "A" }] }, "an option without a description");
 });
 
 test("Config rejects an unknown key", () => {

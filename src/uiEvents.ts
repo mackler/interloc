@@ -3,7 +3,7 @@
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { cycleHeading, phaseLabel } from "./prompts.ts";
-import type { ExecOutcome, PlannerResponse, QuestionListResponse, Review } from "./schema.ts";
+import type { ExecOutcome, PlannerResponse, QuestionListResponse, Review, UserQuestion } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
 export type Phase = Readonly<{ kind: "questions" }> | Readonly<{ kind: "planning" | "execution" | "work"; n: number }>;
@@ -20,7 +20,7 @@ export type UiEvent =
   /** The question subject answers with its amended list besides (defect A of docs/page-question-phase-defects.md). */
   | Readonly<{ _tag: "ResponseReceived"; subject: SubjectId; round: number; response: PlannerResponse | QuestionListResponse; resultText: string }>
   | Readonly<{ _tag: "LoopFinished"; subject: SubjectId; result: LoopResult }>
-  | Readonly<{ _tag: "PlanWritten"; phase: number; questions: readonly string[]; resultText: string }>
+  | Readonly<{ _tag: "PlanWritten"; phase: number; questions: readonly UserQuestion[]; resultText: string }>
   | Readonly<{ _tag: "ExecutionEnded"; phase: number; outcome: ExecOutcome }>
   | Readonly<{ _tag: "AgentCallStarted"; agent: Agent; purpose: string }>
   | Readonly<{ _tag: "ToolUsed"; agent: Agent; tool: string; target: string }>

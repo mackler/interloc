@@ -60,7 +60,7 @@ export const UiEventSchema = Schema.Union([
   // The question subject's response is the planner's plus `questions` (defect A of docs/page-question-phase-defects.md).
   tagged("ResponseReceived", { ...round, response: Schema.Union([S.QuestionListResponse, S.PlannerResponse]), resultText: Str }),
   tagged("LoopFinished", { subject: SubjectIdSchema, result: Schema.Literals(["converged", "proceed", "revise"]) }),
-  tagged("PlanWritten", { phase: Int, questions: Schema.Array(Str), resultText: Str }),
+  tagged("PlanWritten", { phase: Int, questions: Schema.Array(S.UserQuestion), resultText: Str }),
   tagged("ExecutionEnded", { phase: Int, outcome: S.ExecOutcome }),
   tagged("AgentCallStarted", { agent: AgentSchema, purpose: Str }),
   tagged("ToolUsed", { agent: AgentSchema, tool: Str, target: Str }),

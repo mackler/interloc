@@ -40,7 +40,8 @@ const Disposition = Schema.Struct({
   reverses: Str,
 });
 const SelfCorrection = Schema.Struct({ id: Str, new_action: Schema.Literals(["accepted", "rejected", "plan_error"]), explanation: Str });
-const plannerFields = { dispositions: Schema.Array(Disposition), self_corrections: Schema.Array(SelfCorrection), reviewer_feedback: Str, questions_for_user: Strings };
+const UserQuestion = Schema.Struct({ question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) });
+const plannerFields = { dispositions: Schema.Array(Disposition), self_corrections: Schema.Array(SelfCorrection), reviewer_feedback: Str, questions_for_user: Schema.Array(UserQuestion) };
 const QuestionEntry = Schema.Struct({
   id: Str,
   question: Str,
@@ -52,7 +53,7 @@ const QuestionEntry = Schema.Struct({
 const schemas: Record<string, Schema.Top> = {
   review: Schema.Struct({ issues: Schema.Array(Issue) }),
   plannerResponse: Schema.Struct(plannerFields),
-  planWrite: Schema.Struct({ questions_for_user: Strings }),
+  planWrite: Schema.Struct({ questions_for_user: Schema.Array(UserQuestion) }),
   execReport: Schema.Struct({ status: Schema.Literals(["finished", "needs_input", "blocked"]), summary: Str, question: Str, remaining_work: Str }),
   questionList: Schema.Struct({ questions: Schema.Array(QuestionEntry) }),
   questionListResponse: Schema.Struct({ ...plannerFields, questions: Schema.Array(QuestionEntry) }),

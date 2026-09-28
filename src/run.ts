@@ -40,7 +40,7 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
       let answered = false;
       for (const question of written.output.questions_for_user) {
         yield* ui.say("");
-        if ((yield* askDecision(`question from Claude Code: ${question.replace(/\s+/g, " ")}`, k, 0)) !== "") answered = true;
+        if ((yield* askDecision(`question from Claude Code: ${question.question.replace(/\s+/g, " ")}`, k, 0)) !== "") answered = true;
       }
       if (answered) yield* applyDecisions(subject);
 

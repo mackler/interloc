@@ -38,17 +38,27 @@ export const SelfCorrection = Schema.Struct({
   explanation: Schema.String,
 });
 
+/**
+ * A question for the user (decision Q1 of the decision-support task): its text and, when it is a choice, its options
+ * (two or more mutually exclusive options; an empty list otherwise). A question with two or more options carries the
+ * offer of decision support.
+ */
+export const UserQuestion = Schema.Struct({
+  question: Schema.String,
+  options: Schema.Array(Schema.Struct({ label: Schema.String, description: Schema.String })),
+});
+
 /** The fields that every response to a review has. Spread into the question-list response. */
 const plannerResponseFields = {
   dispositions: Schema.Array(Disposition),
   self_corrections: Schema.Array(SelfCorrection),
   reviewer_feedback: Schema.String,
-  questions_for_user: Schema.Array(Schema.String),
+  questions_for_user: Schema.Array(UserQuestion),
 };
 
 export const PlannerResponse = Schema.Struct(plannerResponseFields);
 
-export const PlanWriteResult = Schema.Struct({ questions_for_user: Schema.Array(Schema.String) });
+export const PlanWriteResult = Schema.Struct({ questions_for_user: Schema.Array(UserQuestion) });
 
 /** One entry of the question list that Claude Code and Codex agree on before the interview. */
 export const QuestionEntry = Schema.Struct({
@@ -178,6 +188,7 @@ export type Review = typeof Review.Type;
 export type Action = typeof Action.Type;
 export type Disposition = typeof Disposition.Type;
 export type SelfCorrection = typeof SelfCorrection.Type;
+export type UserQuestion = typeof UserQuestion.Type;
 export type PlannerResponse = typeof PlannerResponse.Type;
 export type PlanWriteResult = typeof PlanWriteResult.Type;
 export type QuestionEntry = typeof QuestionEntry.Type;

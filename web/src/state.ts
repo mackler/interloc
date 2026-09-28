@@ -230,7 +230,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return withRight({ ...run, timeline: openGroups(run.timeline, event.subject, corrected) }, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
     }
     case "PlanWritten": {
-      const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q}`).join("\n")}`;
+      const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q.question}`).join("\n")}`;
       const body = `**${planWrittenHeading(event.phase)}**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;
       return withLeft(run, message(run, time, "program", body, "markdown"));
     }

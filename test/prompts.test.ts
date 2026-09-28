@@ -166,3 +166,21 @@ test("the texts of an invalid cycle and of the stop at the cycle limit", () => {
   assert.equal(prompts.cycleInvalidText(["a", "b"]), "the cycle is invalid: a; b");
   assert.equal(prompts.cycleLimitStopText("Planning phase 1"), "stopped by the user at the cycle limit of Planning phase 1");
 });
+
+// Decision Q1 of the decision-support task: every prompt that may put a question to the user says how to fill its options.
+test("every prompt that may return questions_for_user says how to fill a question's options", () => {
+  const texts = [
+    prompts.planRespondPrompt(1, 1),
+    prompts.requirementsRespondPrompt(1),
+    prompts.questionRespondPrompt(1),
+    prompts.workRespondPrompt(1, 1, { review: { issues: [] }, log: [], changes: null }),
+    prompts.initialPlanPrompt("t", false),
+    prompts.revisePlanPrompt,
+    prompts.revisePlanAfterExecutionPrompt(1, { stopped: false, workReview: "converged" }),
+  ];
+  for (const text of texts) {
+    assert.ok(text.includes(prompts.QUESTION_OPTIONS_RULE), text.slice(0, 80));
+    assert.match(prompts.QUESTION_OPTIONS_RULE, /two or more mutually exclusive options/);
+    assert.match(prompts.QUESTION_OPTIONS_RULE, /empty options array/);
+  }
+});

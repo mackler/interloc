@@ -37,12 +37,12 @@ test("planningCall reports whether a repair turn was needed", async () => {
   const repo = tempRepo();
   const s = await Effect.runPromise(makeStore(repo, []).pipe(Effect.provide(platformLayer)));
   await Effect.runPromise(s.init("task"));
-  const planner = new ScriptedPlanner(pathsOf(repo), [{ output: { questions_for_user: "x" } }, { output: { questions_for_user: [] } }, { output: { questions_for_user: ["q"] } }], []);
+  const planner = new ScriptedPlanner(pathsOf(repo), [{ output: { questions_for_user: "x" } }, { output: { questions_for_user: [] } }, { output: { questions_for_user: [{ question: "q", options: [] }] } }], []);
   const layer = Layer.mergeAll(Layer.succeed(Store, s), Layer.succeed(Planner, planner));
   const repaired = await Effect.runPromise(planningCall("first", S.PlanWriteResult).pipe(Effect.provide(layer)));
   assert.equal(repaired.repaired, true);
   assert.deepEqual(repaired.output, { questions_for_user: [] });
   const direct = await Effect.runPromise(planningCall("second", S.PlanWriteResult).pipe(Effect.provide(layer)));
   assert.equal(direct.repaired, false);
-  assert.deepEqual(direct.output, { questions_for_user: ["q"] });
+  assert.deepEqual(direct.output, { questions_for_user: [{ question: "q", options: [] }] });
 });

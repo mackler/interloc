@@ -20,12 +20,13 @@ const phase = fc.oneof(fc.constant({ kind: "questions" as const }), fc.record({ 
 const agent = fc.constantFrom("claude" as const, "codex" as const);
 const reviewIssue = fc.record({ id: fc.string({ minLength: 1, maxLength: 8 }), severity: fc.constantFrom("blocking" as const, "major" as const, "minor" as const), location: text, problem: text, evidence: text });
 const review = fc.record({ issues: fc.array(reviewIssue, { maxLength: 3 }) });
+const userQuestion = fc.record({ question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 2 }) });
 const disposition = fc.record({ id: text, action: fc.constantFrom("accepted" as const, "rejected" as const, "partially_accepted" as const, "no_change_needed" as const, "clarification_requested" as const), rationale: text, duplicate_of: text, reverses: text });
 const plannerResponse = fc.record({
   dispositions: fc.array(disposition, { maxLength: 3 }),
   self_corrections: fc.array(fc.record({ id: text, new_action: fc.constantFrom("accepted" as const, "rejected" as const, "plan_error" as const), explanation: text }), { maxLength: 2 }),
   reviewer_feedback: text,
-  questions_for_user: fc.array(text, { maxLength: 2 }),
+  questions_for_user: fc.array(userQuestion, { maxLength: 2 }),
 });
 const questionEntry = fc.record({ id: text, question: text, reason: text, proposed_answers: fc.array(fc.record({ label: text, description: text }), { maxLength: 2 }), default_answer: text });
 // Defect A of docs/page-question-phase-defects.md: the question subject's response carries the amended list too.
@@ -38,7 +39,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("ReviewReceived" as const), subject, round: nat, review, counted: nat }),
   fc.record({ _tag: fc.constant("ResponseReceived" as const), subject, round: nat, response, resultText: text }),
   fc.record({ _tag: fc.constant("LoopFinished" as const), subject, result: fc.constantFrom("converged" as const, "proceed" as const, "revise" as const) }),
-  fc.record({ _tag: fc.constant("PlanWritten" as const), phase: nat, questions: fc.array(text, { maxLength: 2 }), resultText: text }),
+  fc.record({ _tag: fc.constant("PlanWritten" as const), phase: nat, questions: fc.array(userQuestion, { maxLength: 2 }), resultText: text }),
   fc.record({ _tag: fc.constant("ExecutionEnded" as const), phase: nat, outcome }),
   fc.record({ _tag: fc.constant("AgentCallStarted" as const), agent, purpose: text }),
   fc.record({ _tag: fc.constant("ToolUsed" as const), agent, tool: text, target: text }),

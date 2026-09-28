@@ -282,7 +282,7 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
       subject: `issue ${idNew}, a repetition of issue ${idOld}`,
       id: idNew as IssueId,
     })),
-    ...response.questions_for_user.map((question): Ask => ({ say: [""], subject: `question from Claude Code: ${question.replace(/\s+/g, " ")}`, id: null })),
+    ...response.questions_for_user.map((question): Ask => ({ say: [""], subject: `question from Claude Code: ${question.question.replace(/\s+/g, " ")}`, id: null })),
   ];
   return askEach(state, pauses, (asking, queue) => ({ name: "askingPauses", asking, queue }), afterPauses, before);
 };

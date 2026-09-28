@@ -30,6 +30,9 @@ function laterRound(file: string, logFile: string, idPrefix: string, round: numb
 Read both files again and review plan-review/${file} again under the same rules as before. New issues receive ids of the form ${idPrefix}-R${round}-1, ${idPrefix}-R${round}-2, and so on.`;
 }
 
+/** How a question for the user is filled (decision Q1 of the decision-support task). */
+export const QUESTION_OPTIONS_RULE = `Each entry of questions_for_user has a question and options. When the question is a choice, give two or more mutually exclusive options, each with a short label and a description; otherwise return an empty options array.`;
+
 /** Rules for Claude Code's answer to a review. 'amendment' names what an accepted issue requires. */
 function respondRules(amendment: string): string {
   return `plan-review/user-decisions.md contains input and decisions by the user, which must be followed.
@@ -50,6 +53,7 @@ Use new_action 'rejected' with the id of an accepted issue whose correction you 
 Use new_action 'plan_error' with an empty id for an error that concerns no issue; correct it.
 Return an empty self_corrections array when there is none.
 Return exactly one disposition per issue id. Put in questions_for_user only questions that the user alone can answer.
+${QUESTION_OPTIONS_RULE}
 Do not use the AskUserQuestion tool.`;
 }
 
@@ -150,13 +154,15 @@ export function initialPlanPrompt(task: string, withRequirements: boolean): stri
 ${requirements}Write the plan to plan-review/plan.md as numbered steps, each with a marker that shows whether the step is completed.
 Do not modify any other file. Do not implement anything.
 Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be written; otherwise return an empty array.
+${QUESTION_OPTIONS_RULE}
 Task: ${task}`;
 }
 
 export const revisePlanPrompt = `Execution has stopped. The last entry of plan-review/user-decisions.md contains the user's input for this stop.
 Revise plan-review/plan.md for the remaining work: keep the completed steps and their markers, and change, add, or remove remaining steps as the user's input and the current state of the codebase require.
 If no change to the plan is required, leave the file unchanged. Do not modify any other file. Do not implement anything.
-Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.`;
+Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.
+${QUESTION_OPTIONS_RULE}`;
 
 export const planApplyDecisionsPrompt = `plan-review/user-decisions.md has new entries. Read the file and amend plan-review/plan.md where a decision requires it. Do not modify any other file.
 Return an empty questions_for_user array.`;
@@ -345,7 +351,8 @@ export function revisePlanAfterExecutionPrompt(phase: number, end: Readonly<{ st
   return `Execution phase ${phase} has ended.${stop}${review}
 Revise plan-review/plan.md: keep the completed steps and their markers, add steps that correct the accepted issues and follow the decisions, and change, add, or remove remaining steps as the current state of the codebase requires.
 If no change to the plan is required, leave the file unchanged. Do not modify any other file. Do not implement anything.
-Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.`;
+Put in questions_for_user only questions that the user alone can answer and without whose answer the plan cannot be revised; otherwise return an empty array.
+${QUESTION_OPTIONS_RULE}`;
 }
 
 /**

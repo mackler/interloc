@@ -30,7 +30,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
     execs: [finished],
   },
   decision: {
-    steps: [{ output: { questions_for_user: ["Which database should the service use?"] }, plan: "1. [ ] the step\n" }, { output: noQuestions }],
+    steps: [{ output: { questions_for_user: [{ question: "Which database should the service use?", options: [] }] }, plan: "1. [ ] the step\n" }, { output: noQuestions }],
     reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
   },
@@ -94,12 +94,12 @@ export const SCENARIOS: Record<string, TestOptions> = {
   },
   // Two decisions in a row, for two tabs and a dropped connection.
   tabs: {
-    steps: [{ output: { questions_for_user: ["Which database should the service use?", "Which cache should the service use?"] }, plan: "1. [ ] the step\n" }],
+    steps: [{ output: { questions_for_user: [{ question: "Which database should the service use?", options: [] }, { question: "Which cache should the service use?", options: [] }] }, plan: "1. [ ] the step\n" }],
     reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
   },
   drop: {
-    steps: [{ output: { questions_for_user: ["Which database should the service use?"] }, plan: "1. [ ] the step\n" }],
+    steps: [{ output: { questions_for_user: [{ question: "Which database should the service use?", options: [] }] }, plan: "1. [ ] the step\n" }],
     reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
   },
