@@ -697,6 +697,10 @@ export function decisionViewHeading(k: number, question: string): string {
   return `Decision ${k}: ${question}`;
 }
 export const RECOMMENDATION_HEADING = "Recommendation";
+/** The terminal's heading of an option's arguments. */
+export function optionHeading(n: number, label: string): string {
+  return `Option ${n}: ${label}`;
+}
 export function recommendedOption(option: string): string {
   return `Recommended option: ${option}`;
 }

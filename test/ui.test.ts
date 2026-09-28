@@ -148,3 +148,11 @@ test("notify renders Claude Code's prose in the terminal with the [claude] prefi
   await withUi(io, (ui) => ui.notify({ _tag: "ClaudeSaid", text: "done" }));
   assert.equal(io.written(), "[claude] done\n");
 });
+
+// Decision support, plan step 5.2: the terminal prints a decision's analysis when it is shown.
+test("notify prints a decision's analysis in the terminal", async () => {
+  const io = streams();
+  const analysis = { decision: "d", columns: [{ option: "A", advantages: [], disadvantages: [] }, { option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
+  await withUi(io, (ui) => ui.notify({ _tag: "DecisionAnalyzed", decision: 1, question: "A or B?", options: [], analysis }));
+  assert.equal(io.written(), ["", "Decision 1: A or B?", "", "Option 1: A", "", "  Disadvantages:", "", "Option 2: B", "", "  Disadvantages:", ""].join("\n") + "\n");
+});

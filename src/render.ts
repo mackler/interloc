@@ -2,6 +2,8 @@
 // and the headings of the subjects (finding 27: the Store writes; it does not compose text).
 
 import type { SubjectId } from "./artifacts.ts";
+import type { AnalysisView, EntryView } from "./analysisView.ts";
+import { decisionViewHeading, optionHeading, recommendedOption } from "./prompts.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { TurnText } from "./schemaNormalize.ts";
@@ -102,3 +104,26 @@ export const renderChoice = (k: number, answer: string, option: string | null): 
 /** The terminal lines of options presented with a question: one per option, numbered from 1. */
 export const optionLines = (options: readonly Readonly<{ label: string; description: string }>[]): readonly string[] =>
   options.map((o, i) => `  ${i + 1}. ${o.label}${o.description === "" ? "" : ` - ${o.description}`}`);
+
+/**
+ * A decision's analysis as the terminal prints it (decision support): the options one after another, each with its
+ * advantages, the heading "Disadvantages:" and its disadvantages; every element a bullet, each counterargument indented
+ * under the element it disputes, two more spaces per level; the equivalence symbols after titles and sentences.
+ */
+export const analysisLines = (k: number, question: string, view: AnalysisView): readonly string[] => {
+  const marked = (text: string, symbol: string | null) => (symbol === null ? text : `${text} ${symbol}`);
+  const entryLines = (entry: EntryView): readonly string[] => [
+    `  ${marked(entry.title, entry.symbol)}`,
+    ...entry.elements.flatMap((el) => [`    - ${el.text}`, ...el.arguments.map((a) => `${" ".repeat(6 + 2 * a.level)}${marked(a.text, a.symbol)}`)]),
+  ];
+  const columns = view.columns.flatMap((column, i) => [
+    optionHeading(i + 1, column.option),
+    "",
+    ...column.advantages.flatMap((e) => [...entryLines(e), ""]),
+    `  ${column.disadvantagesHeading}`,
+    ...column.disadvantages.flatMap((e) => ["", ...entryLines(e)]),
+    "",
+  ]);
+  const recommendation = view.recommendation === null ? [] : [recommendedOption(view.recommendation.option), view.recommendation.reason];
+  return ["", decisionViewHeading(k, question), "", ...columns, ...recommendation];
+};

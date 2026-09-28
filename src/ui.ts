@@ -8,7 +8,8 @@ import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
 import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
 import { interviewHelp } from "./prompts.ts";
-import { claudeLine } from "./render.ts";
+import { analysisLines, claudeLine } from "./render.ts";
+import { viewOf } from "./analysisView.ts";
 import { Ui as UiService, type UiShape } from "./services.ts";
 
 /**
@@ -65,14 +66,17 @@ export const terminalUi = (
 
     return {
       say: (text) => Effect.sync(() => void output.write(text + "\n")),
-      // The terminal prints the interview's opening help (finding 8 of docs/gui-review.md) and Claude Code's prose with its
-      // "[claude] " prefix (issue #5); other events print nothing.
+      // The terminal prints the interview's opening help (finding 8 of docs/gui-review.md), Claude Code's prose with its
+      // "[claude] " prefix (issue #5) and a decision's analysis; other events print nothing.
       notify: (event) => {
         switch (event._tag) {
           case "InterviewOpened":
             return Effect.sync(() => void output.write(interviewHelp(event.heading, "terminal") + "\n"));
           case "ClaudeSaid":
             return Effect.sync(() => void output.write(claudeLine(event.text) + "\n"));
+          case "DecisionAnalyzed":
+            // Decision support: the terminal shows each option's arguments one after another.
+            return Effect.sync(() => void output.write(analysisLines(event.decision, event.question, viewOf(event.analysis)).join("\n") + "\n"));
           default:
             return Effect.void;
         }
