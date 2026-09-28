@@ -1,7 +1,7 @@
 // Prompt texts. All paths are relative to the project directory.
 
 import { pathOf } from "./artifacts.ts";
-import type { LogEntry, Review } from "./schema.ts";
+import { FILE_CHANGE_FIELD, type LogEntry, type Review } from "./schema.ts";
 import type { InterviewStage } from "./uiEvents.ts";
 
 const SEVERITY = `Severity: blocking = the work cannot succeed with the file as written; major = the file as written will produce a defect or omits something required; minor = everything else.`;
@@ -12,6 +12,7 @@ function logRules(logFile: string, idPrefix: string, round: number): string {
 Every entry has id, phase, round, source, problem, action, rationale and superseded. An entry with superseded = true has been replaced by a later entry with the same id; use the later entry.
 An entry with source 'review' is an issue you raised: it also has severity, location, evidence, the planner's action ('accepted', 'partially_accepted', 'rejected', 'no_change_needed' or 'clarification_requested'), and duplicate_of and reverses, each the id of an earlier issue or null.
 An entry with source 'self_correction' records a correction that the planner made to its own earlier work (action 'accepted', 'plan_error' or 'correction_disputed').
+Every entry with source 'review' or 'self_correction' also has ${FILE_CHANGE_FIELD}: what the program measured in the reviewed file during the planner's response in that round, for all of that round's entries together: changed (true or false), and the numbers of lines added and removed; null where nothing was measured. It is the program's measurement, not the planner's claim. If an 'accepted' or 'partially_accepted' entry's rationale describes amendments that ${FILE_CHANGE_FIELD} does not bear out, raise it as an issue.
 An entry with source 'user' (action 'decided_by_user') contains a decision of the user on that issue, which must be followed.
 The rationale of every entry is addressed to you; read it irrespective of the action.
 plan-review/reviewer-feedback.md contains feedback from the planner that concerns no single issue; take it into account.

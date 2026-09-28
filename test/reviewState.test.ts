@@ -11,9 +11,9 @@ import * as prompts from "../src/prompts.ts";
 // state machine. The scenario tests of test/run.test.ts remain the behavioural specification; these
 // examples pin each transition.
 
-const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, idNumber: 1, proceed: "proceed to execution with the plan as it is", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, idNumber: 1, proceed: "proceed to execution with the plan as it is", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, onUnchanged: null, maxRounds: 5, maxIdleRounds: 2, countMinor: true };
 const start = (config: Partial<{ maxRounds: number; maxIdleRounds: number; countMinor: boolean }> = {}, log: LogEntry[] = []): Transition =>
-  advance(initialState(setup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", log });
+  advance(initialState(setup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", text: "", log });
 // Notify commands are pinned by their own tests below; the sequences of the other commands ignore them.
 const kinds = (t: Transition): string[] => t.commands.filter((c) => c.kind !== "Notify").map((c) => c.kind);
 const last = (t: Transition): ReviewCommand => t.commands[t.commands.length - 1];
@@ -96,7 +96,7 @@ test("reviewer feedback is recorded, and a dropped reference is noted", () => {
 });
 
 test("accepted without a change of the file halts", () => {
-  const t = run(afterReview(), response([["A", "accepted"]]), { kind: "FileObserved", hash: "h0" });
+  const t = run(afterReview(), response([["A", "accepted"]]), { kind: "FileObserved", hash: "h0", text: "" });
   const error = halt(t);
   assert.equal(error._tag, "AcceptedWithoutChange");
   assert.match(describe(error), /plan\.md is unchanged/);
@@ -121,7 +121,7 @@ test("the pauses ask in the decided order and a decision leads to ApplyDecisions
 });
 
 test("an unexplained change asks; no decision leads on, a decision applies and observes again", () => {
-  const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" });
+  const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" });
   assert.match(says(t), /changed in cycle 1 without an accepted issue/);
   assert.match((last(t) as { subject: string }).subject, /^the unexplained change to plan\.md in Planning phase 1, cycle 1$/);
   assert.equal(last(t).kind, "AskDecision");
@@ -133,26 +133,26 @@ test("an unexplained change asks; no decision leads on, a decision applies and o
   assert.deepEqual(last(applying), { kind: "ApplyDecisions" });
   const observing = advance(applying.state, { kind: "DecisionsApplied" });
   assert.deepEqual(last(observing), { kind: "ObserveFile", stage: "decision" });
-  const done = advance(observing.state, { kind: "FileObserved", hash: "h2" });
+  const done = advance(observing.state, { kind: "FileObserved", hash: "h2", text: "" });
   assert.deepEqual(done.state.observations.at(-1), { round: 1, stage: "decision", hash: "h2" });
 });
 
 test("identical content names the round after which it was seen, with the decision stage", () => {
-  const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" }, { kind: "DecisionGiven", text: "" });
-  const round2 = run(t, { kind: "ReviewDecoded", review: { issues: [issue("B")] } }, response([["B", "rejected"]]), { kind: "FileObserved", hash: "h0" }, { kind: "DecisionGiven", text: "" });
+  const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" }, { kind: "DecisionGiven", text: "" });
+  const round2 = run(t, { kind: "ReviewDecoded", review: { issues: [issue("B")] } }, response([["B", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" }, { kind: "DecisionGiven", text: "" });
   assert.match(says(round2), /after cycle 2 is identical to plan\.md after cycle 0 \(cycle 0 is the state at the start\)/);
   assert.equal(last(round2).kind, "AskDecision");
 });
 
 test("idle rounds: the prompt after maxIdleRounds, a decision applies and is observed as a decision stage, and the counter resets", () => {
-  const t = run(afterReview(), { kind: "ResponseDecoded", response: respond([["A", "rejected"]]), resultText: "", costUsd: null }, { kind: "FileObserved", hash: "h0" });
-  const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const t = run(afterReview(), { kind: "ResponseDecoded", response: respond([["A", "rejected"]]), resultText: "", costUsd: null }, { kind: "FileObserved", hash: "h0", text: "" });
+  const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
   assert.match(says(idle), /accepted no issue in 1 consecutive cycles\. Issues of cycle 1 without amendment:/);
   assert.equal((last(idle) as { subject: string }).subject, "the issues of the last 1 cycles that produced no amendment");
   assert.equal(last(idle).kind, "AskDecision");
   const applied = run(idle, { kind: "DecisionGiven", text: "apply" }, { kind: "DecisionsApplied" });
   assert.deepEqual(last(applied), { kind: "ObserveFile", stage: "decision" });
-  const next = advance(applied.state, { kind: "FileObserved", hash: "h5" });
+  const next = advance(applied.state, { kind: "FileObserved", hash: "h5", text: "" });
   assert.deepEqual(next.state.observations.at(-1), { round: 1, stage: "decision", hash: "h5" });
   assert.equal(next.state.idle, 0);
   assert.deepEqual(last(next), { kind: "CallReviewer", round: 2 });
@@ -160,7 +160,7 @@ test("idle rounds: the prompt after maxIdleRounds, a decision applies and is obs
 });
 
 test("the round limit: proceed, stop, or more rounds", () => {
-  const atLimit = run(start({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const atLimit = run(start({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
   assert.deepEqual(last(atLimit), { kind: "AskLimit", limit: 1 });
   assert.match(says(atLimit), /per cycle of Planning phase 1:\n  cycle 1: counted issues = 1, total_cost_usd = 0.1/);
   const proceed = advance(atLimit.state, { kind: "LimitAnswer", answer: "p" });
@@ -173,7 +173,7 @@ test("the round limit: proceed, stop, or more rounds", () => {
 });
 
 test("amend runs between the pauses and the log when the subject has one", () => {
-  const withAmend = advance(initialState({ ...setup, hasAmend: true }, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", log: [] });
+  const withAmend = advance(initialState({ ...setup, hasAmend: true }, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", text: "", log: [] });
   const t = run(withAmend, { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]));
   assert.deepEqual(last(t), { kind: "Amend", round: 1 });
   const amended = advance(t.state, { kind: "Amended" });
@@ -188,7 +188,7 @@ test("every batch has at most one event-producing command, and it is the last", 
   };
   let t = start({ maxIdleRounds: 1 });
   check(t);
-  for (const e of [{ kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" }, { kind: "DecisionGiven", text: "" }, { kind: "DecisionGiven", text: "" }] as ReviewEvent[]) {
+  for (const e of [{ kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" }, { kind: "DecisionGiven", text: "" }, { kind: "DecisionGiven", text: "" }] as ReviewEvent[]) {
     t = advance(t.state, e);
     check(t);
   }
@@ -259,7 +259,7 @@ test("Notify: a response is reported after its round record", () => {
 });
 
 test("Notify: proceeding at the round limit finishes the loop with proceed", () => {
-  const atLimit = run(start({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const atLimit = run(start({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
   const proceed = advance(atLimit.state, { kind: "LimitAnswer", answer: "p" });
   assert.deepEqual(
     proceed.commands.filter((c) => c.kind === "Notify").map((c) => (c as { event: unknown }).event),
@@ -270,7 +270,7 @@ test("Notify: proceeding at the round limit finishes the loop with proceed", () 
 // Plan step 2.4: the policies of a work review (Q13, Q14, G-R1-1; P1-R1-1 of the earlier run, P1-R1-1 of this one).
 const workSetup: ReviewSetup = { ...setup, subject: { work: 1 }, heading: "Work review 1", fileLabel: "changes.diff", dirName: "work-review-1", proceed: null, leaveOnAcceptance: true, leaveOnDecision: true };
 const workStart = (config: Partial<{ maxRounds: number; maxIdleRounds: number }> = {}, log: LogEntry[] = []): Transition =>
-  advance(initialState(workSetup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", log });
+  advance(initialState(workSetup, { maxRounds: 5, maxIdleRounds: 2, countMinor: true, ...config }), { kind: "Begin", hash: "h0", text: "", log });
 const allKinds = (t: Transition): string[] => t.commands.map((c) => (c.kind === "Notify" ? `Notify:${c.event._tag}` : c.kind === "Checkpoint" ? `Checkpoint:${c.point.stage}` : c.kind));
 const savedLog = (t: Transition): readonly LogEntry[] => {
   const saves = t.commands.filter((c) => c.kind === "SaveLog");
@@ -283,7 +283,7 @@ const revised = (t: Transition): void => {
 };
 
 test("work review: without a proceed choice, p at the round limit is a stop", () => {
-  const atLimit = run(workStart({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const atLimit = run(workStart({ maxRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
   assert.deepEqual(last(atLimit), { kind: "AskLimit", limit: 1 });
   assert.equal(halt(advance(atLimit.state, { kind: "LimitAnswer", answer: "p" }))._tag, "RoundLimitStop");
 });
@@ -317,17 +317,17 @@ test("work review exit (i): a decision at a pause after the response logs the ro
 });
 
 test("work review exit (ii): a decision at the idle, unexplained-change or identical-content pause appends nothing and ends after checkpoint decided", () => {
-  const idleAsk = run(workStart({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
-  const unexplainedAsk = run(workStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" });
+  const idleAsk = run(workStart({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
+  const unexplainedAsk = run(workStart(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" });
   const identicalAsk = run(
     workStart({ maxIdleRounds: 5 }),
     { kind: "ReviewDecoded", review: { issues: [issue("A")] } },
     response([["A", "rejected"]]),
-    { kind: "FileObserved", hash: "h1" },
+    { kind: "FileObserved", hash: "h1", text: "" },
     { kind: "DecisionGiven", text: "" },
     { kind: "ReviewDecoded", review: { issues: [issue("B")] } },
     response([["B", "rejected"]]),
-    { kind: "FileObserved", hash: "h0" },
+    { kind: "FileObserved", hash: "h0", text: "" },
     { kind: "DecisionGiven", text: "" },
   );
   for (const [asked, step] of [[idleAsk, "askingIdle"], [unexplainedAsk, "askingUnexplained"], [identicalAsk, "askingIdentical"]] as const) {
@@ -352,14 +352,14 @@ test("work review exit (iii): a decision on a reraised issue appends only the de
 });
 
 test("work review: an empty answer continues the loop as for the plan", () => {
-  const idleAsk = run(workStart({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const idleAsk = run(workStart({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
   assert.deepEqual(last(advance(idleAsk.state, { kind: "DecisionGiven", text: "" })), { kind: "CallReviewer", round: 2 });
 });
 
 // Decision support, plan step 1.3 (P1-R1-1): decision 2 inside phase 1 generates D2-… ids, and its log entries carry phase 1.
 test("a decision subject generates ids with its decision number and records the enclosing phase in its log", () => {
   const decision: ReviewSetup = { ...setup, subject: { decision: 2 }, heading: "Decision 2", fileLabel: "analysis.json", dirName: "decision-2", phase: 1, idNumber: 2 };
-  const first = advance(initialState(decision, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", log: [] });
+  const first = advance(initialState(decision, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", text: "", log: [] });
   const t = run(first, { kind: "ReviewDecoded", review: { issues: [issue("D2-R1-1")] } }, { kind: "ResponseDecoded", response: respond([["D2-R1-1", "accepted"]], { self_corrections: [{ id: "", new_action: "plan_error", explanation: "x" }] }), resultText: "", costUsd: null });
   const saved = t.commands.find((c) => c.kind === "SaveLog");
   assert.ok(saved !== undefined && saved.kind === "SaveLog");
@@ -403,8 +403,51 @@ test("each disputed pause offers the two positions; a question offers its option
     question.options,
   ]);
   // The unexplained change, identical content and the idle pause.
-  const unexplained = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1" });
+  const unexplained = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" });
   assert.deepEqual(optionsOf(unexplained), []);
-  const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0" });
+  const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
   assert.deepEqual(optionsOf(idle), []);
+});
+
+// Issue #31 (plan step S6): a measured subject observes the reviewed file before it logs the round; the log's
+// file_change and the guard's hash comparison both derive from that one observation.
+const measured: ReviewSetup = { ...setup, onUnchanged: "corrective" };
+const measuredStart = (text: string): Transition =>
+  advance(initialState(measured, { maxRounds: 5, maxIdleRounds: 2, countMinor: true }), { kind: "Begin", hash: "h0", text, log: [] });
+const loggedBy = (t: Transition): readonly LogEntry[] => {
+  const save = t.commands.find((c) => c.kind === "SaveLog");
+  assert.ok(save !== undefined, `no SaveLog in ${kinds(t).join(",")}`);
+  return (save as { log: readonly LogEntry[] }).log;
+};
+const changeOf = (e: LogEntry | undefined): unknown => (e !== undefined && "file_change" in e ? e.file_change : undefined);
+
+test("a measured subject observes the file before it logs, and the log's file_change agrees with the guard's comparison", () => {
+  const responded = run(measuredStart("a\n"), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]));
+  assert.deepEqual(last(responded), { kind: "ObserveFile", stage: "response" });
+  assert.equal(kinds(responded).includes("SaveLog"), false, "the round was logged before its observation");
+  const cases: [string, string, string][] = [
+    ["h1", "a\nb\n", "changed"],
+    ["h0", "a\n", "unchanged"],
+  ];
+  for (const [hash, text, what] of cases) {
+    const t = advance(responded.state, { kind: "FileObserved", hash, text });
+    const e = loggedBy(t)[0];
+    assert.equal((changeOf(e) as { changed: boolean }).changed, hash !== "h0", what);
+  }
+  const changed = loggedBy(advance(responded.state, { kind: "FileObserved", hash: "h1", text: "a\nb\n" }));
+  assert.deepEqual(changeOf(changed[0]), { changed: true, added: 1, removed: 0 });
+});
+
+test("a file that returns to an earlier content is measured as changed, and the identical-content pause follows", () => {
+  const round1 = run(measuredStart("a\n"), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "accepted"]]), { kind: "FileObserved", hash: "h1", text: "b\n" });
+  const round2 = run(round1, { kind: "ReviewDecoded", review: { issues: [issue("B")] } }, response([["B", "accepted"]]), { kind: "FileObserved", hash: "h0", text: "a\n" });
+  const e = loggedBy(round2).find((x) => x.id === "B");
+  assert.deepEqual(changeOf(e), { changed: true, added: 1, removed: 1 });
+  assert.equal(round2.state.step.name, "askingIdentical");
+});
+
+test("an unmeasured subject (the work review) logs file_change null and observes after the log, as before", () => {
+  const t = run(start(), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]));
+  assert.equal(changeOf(loggedBy(t)[0]), null);
+  assert.deepEqual(last(t), { kind: "ObserveFile", stage: "response" });
 });

@@ -125,6 +125,9 @@ test("a gap that Claude Code accepts produces a second interview and a revised r
   assert.equal(read(probe.dir, "requirements.md"), "Q1: A\nRetries: 3\n");
   assert.match(read(probe.dir, "conversation.md"), /## Interview\n[\s\S]*## Second interview\n/);
   assert.equal((await probe.loadLog("requirements"))[0].id, "G-R1-1");
+  // Issue #31 (G-R1-1): the requirements' change is measured from the response through the second interview.
+  const [gap] = await probe.loadLog("requirements");
+  assert.deepEqual(gap !== undefined && "file_change" in gap ? gap.file_change : undefined, { changed: true, added: 1, removed: 0 });
   // The user reads "Clarification" and "Follow-up clarification"; conversation.md keeps its record headings.
   const headings = probe.ui.notified.flatMap((e) => (e._tag === "InterviewOpened" || e._tag === "InterviewTurn" ? [e.heading] : []));
   assert.deepEqual([...new Set(headings)], ["Clarification", "Follow-up clarification"]);

@@ -2,7 +2,7 @@
 // validated round (src/round.ts), so a missing disposition is unrepresentable here (finding 4).
 
 import type { IssueId, ValidatedRound } from "./round.ts";
-import type { LogEntry, Review } from "./schema.ts";
+import type { FileChange, LogEntry, Review } from "./schema.ts";
 
 const NOT_ACCEPTED_IN_FULL = new Set(["rejected", "partially_accepted", "no_change_needed"]);
 
@@ -46,7 +46,7 @@ function supersede(log: readonly LogEntry[], ids: ReadonlySet<string>): LogEntry
  * Decision Q2: a self-correction that shares an id with a review issue of the round is appended before the
  * review entries and superseded by the disposition, which is the last word; other self-corrections follow.
  */
-export function appendRound(log: readonly LogEntry[], round: ValidatedRound): readonly LogEntry[] {
+export function appendRound(log: readonly LogEntry[], round: ValidatedRound, change: FileChange | null): readonly LogEntry[] {
   const { phase, round: n } = round;
   const fromReview: LogEntry[] = round.review.issues.map((issue) => {
     const d = round.dispositions.find((x) => x.id === issue.id)!;
@@ -64,6 +64,7 @@ export function appendRound(log: readonly LogEntry[], round: ValidatedRound): re
       duplicate_of: d.duplicateOf,
       reverses: d.reverses,
       superseded: false,
+      file_change: change,
     };
   });
   const fromSelf: LogEntry[] = round.selfCorrections.map((sc) => {
@@ -77,6 +78,7 @@ export function appendRound(log: readonly LogEntry[], round: ValidatedRound): re
       action: sc.newAction === "rejected" ? "correction_disputed" : sc.newAction,
       rationale: sc.explanation,
       superseded: false,
+      file_change: change,
     };
   });
   const reviewIds = new Set(fromReview.map((e) => e.id));
@@ -84,6 +86,13 @@ export function appendRound(log: readonly LogEntry[], round: ValidatedRound): re
   const others = fromSelf.filter((e) => !reviewIds.has(e.id));
   const added = [...overlapping, ...fromReview, ...others];
   return [...supersede(log, new Set(added.map((e) => e.id))), ...added];
+}
+
+/** An entry as the user is shown it (Q6 of issue #31): without the measurement, which is for the records and Codex. */
+export function displayEntry(entry: LogEntry): Omit<LogEntry, "file_change"> {
+  if (!("file_change" in entry)) return entry;
+  const { file_change: _measured, ...shown } = entry;
+  return shown;
 }
 
 /** The log with a decision of the user on one issue appended; earlier entries of that id are superseded. */

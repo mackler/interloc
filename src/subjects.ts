@@ -37,6 +37,7 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     proceed: prompts.PROCEED_TO_CLARIFICATION,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
+    onUnchanged: "corrective",
     prepare: null,
   };
 }
@@ -60,6 +61,7 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
     proceed: prompts.PROCEED_TO_PLANNING,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
+    onUnchanged: "pause",
     prepare: null,
   };
 }
@@ -84,6 +86,7 @@ export function planSubject(phase: number, withRequirements: boolean, previous: 
     proceed: prompts.PROCEED_TO_IMPLEMENTATION,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
+    onUnchanged: "corrective",
     prepare: null,
   };
 }
@@ -141,6 +144,7 @@ export function decisionSubject(k: number, phase: number, format: string, valida
     proceed: prompts.PROCEED_TO_CHOICE,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
+    onUnchanged: "corrective",
     prepare: null,
   };
 }
@@ -165,6 +169,7 @@ export function workSubject(phase: number, withRequirements: boolean): Subject<P
     proceed: null,
     leaveOnAcceptance: true,
     leaveOnDecision: true,
+    onUnchanged: null,
     prepare: Effect.gen(function* () {
       const store = yield* Store;
       yield* store.changeRecord(phase);

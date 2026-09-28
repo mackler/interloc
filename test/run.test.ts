@@ -23,6 +23,10 @@ test("one accepted issue, then convergence, then finished", async () => {
   const log = await probe.loadLog();
   assert.equal(log.length, 1);
   assert.equal(log[0].action, "accepted");
+  // Issue #31: the plan's change during the response (v1 to v2 in plan.json) is on the entry.
+  const change = "file_change" in log[0] ? log[0].file_change : undefined;
+  assert.equal(change?.changed, true);
+  assert.ok(change !== null && change !== undefined && change.added >= 1 && change.removed >= 1, JSON.stringify(change));
   const conversation = fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8");
   assert.match(conversation, /\[P1-R1-1\]\*\* accepted/);
   assert.match(conversation, /The review of plan.json has converged/);
@@ -47,6 +51,24 @@ test("a rejected issue raised again produces one prompt", async () => {
   // Finding 15: the decision on the reraised issue is one typed decision, so it is in the issue log too.
   assert.equal(entries.at(-1)?.action, "decided_by_user");
   assert.equal(entries.at(-1)?.rationale, "keep the rejection");
+});
+
+// Issue #31, Q6: the measurement is in the issue log and the reviewer's prompt, never in what the user is shown.
+test("a pause shows the log entries without file_change, while issue-log.json keeps it", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["keep the rejection"],
+    steps: [
+      { output: noQuestions, plan: "v1" },
+      { output: respond([["A", "accepted"], ["B", "rejected"]]), plan: "v2" },
+      { output: respond([["B", "rejected"]]) },
+    ],
+    reviews: [{ issues: [issue("A"), issue("B")] }, { issues: [issue("B")] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  await runTask(layer);
+  assert.ok(probe.ui.said.some((line) => line.includes('"rationale"')), "the pause showed no log entry");
+  assert.equal(probe.ui.said.some((line) => line.includes(S.FILE_CHANGE_FIELD)), false, "the user was shown file_change");
+  assert.ok((await probe.loadLog()).some((e) => S.FILE_CHANGE_FIELD in e), "issue-log.json lacks file_change");
 });
 
 test("a stop with a question starts a second planning phase with a new Codex thread", async () => {

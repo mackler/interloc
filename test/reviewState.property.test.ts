@@ -9,7 +9,7 @@ import { issue, respond } from "./helpers.ts";
 // through `advance`, checked against a small independent model kept in the test.
 
 const RUNS = { numRuns: 150, seed: 20260925 };
-const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, idNumber: 1, proceed: "proceed", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, maxRounds: 3, maxIdleRounds: 2, countMinor: true };
+const setup: ReviewSetup = { subject: { plan: 1 }, heading: "Planning phase 1", fileLabel: "plan.md", dirName: "planning-1", phase: 1, idNumber: 1, proceed: "proceed", hasAmend: false, leaveOnAcceptance: false, leaveOnDecision: false, onUnchanged: null, maxRounds: 3, maxIdleRounds: 2, countMinor: true };
 const PRODUCING = new Set(["AskLimit", "AskDecision", "CallReviewer", "CallPlanner", "ApplyDecisions", "Amend", "ObserveFile", "Halt", "Finish"]);
 const ACTIONS: readonly Action[] = ["accepted", "partially_accepted", "rejected", "no_change_needed", "clarification_requested"];
 
@@ -31,7 +31,7 @@ const arbScript: fc.Arbitrary<Script> = fc.record(
 /** Drives `advance` with scripted answers until it finishes or halts, recording what the model needs. */
 const drive = (scripts: readonly Script[], use: ReviewSetup = setup) => {
   const config = { maxRounds: use.maxRounds, maxIdleRounds: use.maxIdleRounds, countMinor: true };
-  let t: Transition = advance(initialState(use, config), { kind: "Begin", hash: "h0", log: [] });
+  let t: Transition = advance(initialState(use, config), { kind: "Begin", hash: "h0", text: "", log: [] });
   const trace: ReviewCommand[] = [...t.commands];
   const reviewerCalls: number[] = [];
   const plannerCalls: number[] = [];
@@ -80,7 +80,7 @@ const drive = (scripts: readonly Script[], use: ReviewSetup = setup) => {
         event = { kind: "Amended" };
         break;
       case "ObserveFile":
-        event = { kind: "FileObserved", hash: script.hash };
+        event = { kind: "FileObserved", hash: script.hash, text: "" };
         break;
     }
     if (event !== null) {

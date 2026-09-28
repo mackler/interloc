@@ -19,7 +19,7 @@ const failureText = <A>(result: Result.Result<A, StateFileInvalid>): string => {
   assert.ok(Result.isFailure(result), "the read succeeded");
   return describe(result.failure);
 };
-const review = { id: "A", phase: 1, round: 1, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r", duplicate_of: null, reverses: null, superseded: false };
+const review = { id: "A", phase: 1, round: 1, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r", duplicate_of: null, reverses: null, superseded: false, file_change: null };
 
 test("readLog reads a version-2 log file and rejects a bare array (the old shape)", () => {
   const entries = ok(readLog("issue-log.json", JSON.stringify({ version: 2, entries: [review] })));
@@ -27,6 +27,18 @@ test("readLog reads a version-2 log file and rejects a bare array (the old shape
   const { duplicate_of: _d, reverses: _r, superseded: _s, ...old } = review;
   assert.match(failureText(readLog("issue-log.json", JSON.stringify([old]))), /issue-log\.json could not be read/);
   assert.match(failureText(readLog("issue-log.json", JSON.stringify({ entries: [review] }))), /version/);
+});
+
+// Issue #31 (behavior 8 amended): an entry of source review or self_correction carries file_change, the change of the
+// reviewed file measured during the round's response, or null; an entry without the field is not of the current shape.
+test("readLog reads file_change, and rejects a review or self-correction entry without it", () => {
+  const measured = { ...review, file_change: { changed: true, added: 3, removed: 1 } };
+  const self = { id: "P1-S1-1", phase: 1, round: 1, source: "self_correction", problem: "p", action: "plan_error", rationale: "r", superseded: false, file_change: null };
+  assert.deepEqual(ok(readLog("issue-log.json", JSON.stringify({ version: 2, entries: [measured, self] }))), [measured, self]);
+  const { file_change: _f, ...withoutReview } = measured;
+  assert.match(failureText(readLog("issue-log.json", JSON.stringify({ version: 2, entries: [withoutReview] }))), /file_change/);
+  const { file_change: _g, ...withoutSelf } = self;
+  assert.match(failureText(readLog("issue-log.json", JSON.stringify({ version: 2, entries: [withoutSelf] }))), /file_change/);
 });
 
 test("a version-2 review entry with a misspelled action fails naming the path (finding 6)", () => {

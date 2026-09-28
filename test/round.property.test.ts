@@ -21,7 +21,7 @@ const arbIssue = (id: string) => record({ id: fc.constant(id), severity: fc.cons
 const arbReview: fc.Arbitrary<Review> = fc.uniqueArray(arbId, { minLength: 0, maxLength: 5 }).chain((ids) => fc.tuple(...ids.map(arbIssue)).map((issues) => ({ issues })));
 const arbEntry = (id: string): fc.Arbitrary<LogEntry> =>
   fc.oneof(
-    record({ id: fc.constant(id as IssueId), phase: fc.constant(0), round: fc.constant(0), source: fc.constant("review" as const), severity: fc.constantFrom("blocking", "major", "minor"), location: fc.string(), problem: fc.string(), evidence: fc.string(), action: fc.constantFrom(...ACTIONS), rationale: fc.string(), duplicate_of: fc.constant(null), reverses: fc.constant(null), superseded: fc.constant(false) }),
+    record({ id: fc.constant(id as IssueId), phase: fc.constant(0), round: fc.constant(0), source: fc.constant("review" as const), severity: fc.constantFrom("blocking", "major", "minor"), location: fc.string(), problem: fc.string(), evidence: fc.string(), action: fc.constantFrom(...ACTIONS), rationale: fc.string(), duplicate_of: fc.constant(null), reverses: fc.constant(null), superseded: fc.constant(false), file_change: fc.constant(null) }),
     record({ id: fc.constant(id as IssueId), phase: fc.constant(0), round: fc.constant(0), source: fc.constant("user" as const), problem: fc.string(), action: fc.constant("decided_by_user" as const), rationale: fc.string(), superseded: fc.constant(false) }),
   );
 const arbLog: fc.Arbitrary<LogEntry[]> = fc.uniqueArray(arbId, { maxLength: 4 }).chain((ids) => fc.tuple(...ids.map(arbEntry)));
@@ -54,7 +54,7 @@ test("property: a generated valid round validates, its inputs are unchanged, and
       const result = validate(frozen);
       assert.ok(Result.isSuccess(result), "valid round rejected");
       assert.deepEqual(frozen, round);
-      const after = log.appendRound(frozen.history, result.success);
+      const after = log.appendRound(frozen.history, result.success, null);
       for (const issue of frozen.review.issues) assert.equal(after.filter((e) => e.id === issue.id && e.superseded !== true).length, 1, `issue ${issue.id}`);
       assert.equal(after.length, frozen.history.length + frozen.review.issues.length + frozen.response.self_corrections.length);
     }),
@@ -96,7 +96,7 @@ test("property: a user decision supersedes earlier entries of its id, and the on
         if (!Result.isSuccess(validated)) return;
         const result = validateRound(validated.success, round.response, history, phase, 1, "P");
         if (!Result.isSuccess(result)) return; // a generated id may collide with the growing history; that is a valid RoundInvalid
-        history = log.appendRound(history, result.success);
+        history = log.appendRound(history, result.success, null);
         if (decision !== null) history = log.appendUserDecision(history, decision[0] as IssueId, decision[1], phase, 1);
         phase++;
       }

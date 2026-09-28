@@ -34,8 +34,8 @@ const interviewTurn: legacy.InterviewTurn & { asked_ids: string[] } & CurrentQue
 const execReport: legacy.ExecReport = { status: "finished", summary: "s", question: "", remaining_work: "" };
 const execOutcome: legacy.ExecOutcome = { status: "needs_input", summary: "s", question: "q", remainingWork: "w", userInput: null };
 // Version 2 (Q5): three shapes tagged by source.
-const reviewEntry = { id: "A", phase: 1, round: 2, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r", duplicate_of: null, reverses: null, superseded: false };
-const selfEntry = { id: "P1-S2-1", phase: 1, round: 2, source: "self_correction", problem: "p", action: "plan_error", rationale: "r", superseded: false };
+const reviewEntry = { id: "A", phase: 1, round: 2, source: "review", severity: "major", location: "l", problem: "p", evidence: "e", action: "accepted", rationale: "r", duplicate_of: null, reverses: null, superseded: false, file_change: null };
+const selfEntry = { id: "P1-S2-1", phase: 1, round: 2, source: "self_correction", problem: "p", action: "plan_error", rationale: "r", superseded: false, file_change: null };
 const userEntry = { id: "A", phase: 1, round: 2, source: "user", problem: "p", action: "decided_by_user", rationale: "r", superseded: true };
 const usage = { version: 2, agent: "claude", time: "2026-09-24T00:00:00.000Z", session: null, num_turns: 0, total_cost_usd: 0 };
 const config: legacy.Config = { questionPhase: true, ignorePaths: ["a.txt"], maxRounds: 5, maxIdleRounds: 2, countMinor: true, execPermissionMode: "auto", claudeModel: null, codexModel: null };

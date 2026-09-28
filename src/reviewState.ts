@@ -4,13 +4,14 @@
 // The pause order of decided behaviour 7 is the order of the steps below. No I/O, no Effect.
 
 import { AcceptedWithoutChange, RoundLimitStop, type RunError } from "./errors.ts";
+import { lineChange } from "./lineChange.ts";
 import { parseExtraRounds } from "./input.ts";
 import * as prompts from "./prompts.ts";
 import * as log from "./issueLog.ts";
 import { renderRound } from "./render.ts";
 import { type IssueId, validateReview, validateRound, type ValidatedReview, type ValidatedRound } from "./round.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
-import type { Config, LogEntry, PlannerResponse, Review } from "./schema.ts";
+import type { Config, FileChange, LogEntry, PlannerResponse, Review } from "./schema.ts";
 import type { SubjectId } from "./artifacts.ts";
 import type { LoopResult, UiEvent } from "./uiEvents.ts";
 import { Result } from "effect";
@@ -45,14 +46,15 @@ export type ReviewCommand =
 
 /** What the world reports back. */
 export type ReviewEvent =
-  | Readonly<{ kind: "Begin"; hash: string; log: readonly LogEntry[] }>
+  /** `text`: the reviewed file's text, from which the change during a response is measured (issue #31); "" when absent. */
+  | Readonly<{ kind: "Begin"; hash: string; text: string; log: readonly LogEntry[] }>
   | Readonly<{ kind: "LimitAnswer"; answer: string }>
   | Readonly<{ kind: "ReviewDecoded"; review: Review }>
   | Readonly<{ kind: "ResponseDecoded"; response: PlannerResponse; resultText: string; costUsd: number | null }>
   | Readonly<{ kind: "DecisionGiven"; text: string }>
   | Readonly<{ kind: "DecisionsApplied" }>
   | Readonly<{ kind: "Amended" }>
-  | Readonly<{ kind: "FileObserved"; hash: string }>;
+  | Readonly<{ kind: "FileObserved"; hash: string; text: string }>;
 
 /** What the loop is set up with: the subject's names and the configuration. */
 export type ReviewSetup = Readonly<{
@@ -72,6 +74,12 @@ export type ReviewSetup = Readonly<{
   leaveOnAcceptance: boolean;
   /** G-R1-1: a non-empty decision at any pause ends the loop with "revise" instead of a planning call. */
   leaveOnDecision: boolean;
+  /**
+   * Issue #30: what follows a response that accepted an issue and left the reviewed file unchanged: a corrective turn
+   * (the question list, the plan, a decision), the pause at once (the requirements, G-R1-1), or nothing (the work review,
+   * Q7). A subject with a value is measured (issue #31): its file is observed before the round is logged.
+   */
+  onUnchanged: "corrective" | "pause" | null;
   maxRounds: number;
   maxIdleRounds: number;
   countMinor: boolean;
@@ -99,6 +107,8 @@ export type Step =
   | Readonly<{ name: "askingPauses"; asking: Ask; queue: readonly Ask[] }>
   | Readonly<{ name: "applyingPauseDecisions" }>
   | Readonly<{ name: "amending" }>
+  /** A measured subject: the observation after the response, before the round is logged (issue #31). */
+  | Readonly<{ name: "measuring" }>
   | Readonly<{ name: "observingResponse" }>
   | Readonly<{ name: "askingUnexplained"; asking: Ask; hash: string }>
   | Readonly<{ name: "applyingUnexplained" }>
@@ -120,6 +130,10 @@ export type RoundInProgress = Readonly<{
   resultText: string;
   decided: boolean;
   decisions: readonly DecisionEvent[];
+  /** The reviewed file's text when the round began, from which the response's change is measured (issue #31). */
+  startText: string;
+  /** The issue log when the round began: the round's log is built from it (P2-R1-1). */
+  startLog: readonly LogEntry[];
 }>;
 
 export type ReviewState = Readonly<{
@@ -130,6 +144,8 @@ export type ReviewState = Readonly<{
   idle: number;
   log: readonly LogEntry[];
   observations: readonly Observation[];
+  /** The reviewed file's text at the last observation (issue #31). */
+  lastText: string;
   counts: readonly number[];
   costs: readonly (number | null)[];
   current: RoundInProgress;
@@ -137,7 +153,7 @@ export type ReviewState = Readonly<{
 
 export type Transition = Readonly<{ state: ReviewState; commands: readonly ReviewCommand[] }>;
 
-const freshRound: RoundInProgress = { review: null, validatedReview: null, round: null, response: null, resultText: "", decided: false, decisions: [] };
+const freshRound: RoundInProgress = { review: null, validatedReview: null, round: null, response: null, resultText: "", decided: false, decisions: [], startText: "", startLog: [] };
 
 export const initialState = (setup: ReviewSetup, config: Pick<Config, "maxRounds" | "maxIdleRounds" | "countMinor">): ReviewState => ({
   setup: { ...setup, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor },
@@ -147,6 +163,7 @@ export const initialState = (setup: ReviewSetup, config: Pick<Config, "maxRounds
   idle: 0,
   log: [],
   observations: [],
+  lastText: "",
   counts: [],
   costs: [],
   current: freshRound,
@@ -159,6 +176,8 @@ const say = (text: string): ReviewCommand => ({ kind: "Say", text });
 const idPrefixOf = (subject: SubjectId): string => (subject === "questions" ? "Q" : subject === "requirements" ? "G" : "plan" in subject ? "P" : "work" in subject ? "W" : "D");
 const notify = (event: UiEvent): ReviewCommand => ({ kind: "Notify", event });
 const show = (value: unknown): string => JSON.stringify(value, null, 2);
+/** The log entries of one id as the user is shown them: without the measurement (issue #31, Q6). */
+const showEntries = (history: readonly LogEntry[], id: string): string => show(history.filter((e) => e.id === id).map(log.displayEntry));
 const describeObservation = (o: Observation): string => prompts.observedAfter(o.round, o.stage === "decision");
 
 // ---- transitions --------------------------------------------------------------------------------
@@ -185,7 +204,7 @@ const startRound = (s: ReviewState): Transition => {
     return { state: { ...s, step: { name: "awaitingLimit" } }, commands: [...lines.map(say), { kind: "AskLimit", limit: s.limit }] };
   }
   return {
-    state: { ...s, round: n, step: { name: "awaitingReview" }, current: freshRound },
+    state: { ...s, round: n, step: { name: "awaitingReview" }, current: { ...freshRound, startText: s.lastText, startLog: s.log } },
     commands: [notify({ _tag: "RoundBegan", subject: s.setup.subject, round: n, limit: s.limit }), say(prompts.cycleReviewLine(heading, n)), { kind: "CallReviewer", round: n }],
   };
 };
@@ -221,7 +240,7 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
   const checked = validateReview(review);
   if (Result.isFailure(checked)) return halt(s, checked.failure);
   const counted = log.countedIssues(review, countMinor);
-  const state: ReviewState = { ...s, counts: [...s.counts, counted], current: { ...freshRound, review, validatedReview: checked.success } };
+  const state: ReviewState = { ...s, counts: [...s.counts, counted], current: { ...freshRound, startText: s.current.startText, startLog: s.current.startLog, review, validatedReview: checked.success } };
   const before: ReviewCommand[] = [
     { kind: "SaveReview", round: n, review },
     { kind: "SaveRound", record: { kind: "no_response", subject: s.setup.dirName, phase: s.setup.phase, round: n, reconstructed: false, review: checked.success } },
@@ -232,7 +251,7 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
     return done(state, { kind: "Finish", result: "converged" }, [...before, { kind: "Converse", markdown: `## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n` }, checkpoint(state, "reviewed"), notify({ _tag: "LoopFinished", subject: s.setup.subject, result: "converged" })]);
   }
   const reraised: Ask[] = log.reraisedIds(s.log, review).map((id) => ({
-    say: [`\nCodex has raised again an issue that Claude Code did not accept in full:`, show(s.log.filter((e) => e.id === id)), show(review.issues.find((i) => i.id === id))],
+    say: [`\nCodex has raised again an issue that Claude Code did not accept in full:`, showEntries(s.log, id), show(review.issues.find((i) => i.id === id))],
     subject: `issue ${id}, raised again after Claude Code did not accept it in full`,
     id: id as IssueId,
     options: positions(reviewerSays(review.issues.find((i) => i.id === id)), currentEntry(s.log, id)?.rationale ?? ""),
@@ -274,7 +293,7 @@ const onResponseDecoded = (s: ReviewState, response: PlannerResponse, resultText
     checkpoint(state, "responded"),
   ];
   const history = s.log;
-  const entries = (id: string) => show(history.filter((e) => e.id === id));
+  const entries = (id: string) => showEntries(history, id);
   // The pause order of decided behaviour 7.
   const pauses: Ask[] = [
     ...log.secondClarifications(history, round).map((id): Ask => ({
@@ -313,20 +332,27 @@ const amendStep = (s: ReviewState, before: readonly ReviewCommand[] = []): Trans
   s.setup.hasAmend ? { state: { ...s, step: { name: "amending" } }, commands: [...before, { kind: "Amend", round: s.round }] } : logStep(s, before);
 
 /** The log of the round in progress: the round, then the user's decisions on single issues, which replace the round's disposition. */
-const roundLog = (s: ReviewState, decisions: readonly DecisionEvent[]): readonly LogEntry[] =>
-  decisions.reduce((acc, d) => (d.id === null ? acc : log.appendUserDecision(acc, d.id, d.decision, s.setup.phase, s.round)), log.appendRound(s.log, s.current.round!));
+const roundLog = (s: ReviewState, decisions: readonly DecisionEvent[], change: FileChange | null): readonly LogEntry[] =>
+  decisions.reduce((acc, d) => (d.id === null ? acc : log.appendUserDecision(acc, d.id, d.decision, s.setup.phase, s.round)), log.appendRound(s.current.startLog, s.current.round!, change));
 
 /** The loop leaves for a planning phase (a work review, plan 2.4). */
 const leave = (s: ReviewState, before: readonly ReviewCommand[]): Transition =>
   done(s, { kind: "Finish", result: "revise" }, [...before, notify({ _tag: "LoopFinished", subject: s.setup.subject, result: "revise" })]);
 
-/** The issue log update; with leaveOnAcceptance, a round with a correction due leaves right after it (Q14). */
+/**
+ * The issue log update. A measured subject (issue #31) first observes the file, so that the log carries the response's
+ * change and the checks after the response use the same observation; an unmeasured one logs with file_change null and
+ * observes after (with leaveOnAcceptance, a round with a correction due leaves right after its log, Q14).
+ */
 const logStep = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition => {
-  const updated = roundLog(s, s.current.decisions);
-  const logged: readonly ReviewCommand[] = [...before, { kind: "SaveLog", log: updated }, checkpoint(s, "logged")];
-  const state: ReviewState = { ...s, log: updated };
+  if (s.setup.onUnchanged !== null) return { state: { ...s, step: { name: "measuring" } }, commands: [...before, { kind: "ObserveFile", stage: "response" }] };
+  const { state, logged } = logRound(s, null, before);
   if (s.setup.leaveOnAcceptance && log.correctionsDue(s.current.round!)) return leave(state, logged);
   return { state: { ...state, step: { name: "observingResponse" } }, commands: [...logged, { kind: "ObserveFile", stage: "response" }] };
+};
+const logRound = (s: ReviewState, change: FileChange | null, before: readonly ReviewCommand[]): { state: ReviewState; logged: readonly ReviewCommand[] } => {
+  const updated = roundLog(s, s.current.decisions, change);
+  return { state: { ...s, log: updated }, logged: [...before, { kind: "SaveLog", log: updated }, checkpoint(s, "logged")] };
 };
 
 const lastHash = (s: ReviewState): string => s.observations[s.observations.length - 1]?.hash ?? "";
@@ -364,23 +390,33 @@ const finishRound = (s: ReviewState, hash: string, stage: Stage, before: readonl
 };
 const withBefore = (t: Transition, before: readonly ReviewCommand[]): Transition => (before.length === 0 ? t : { state: t.state, commands: [...before, ...t.commands] });
 
-const onFileObserved = (s: ReviewState, hash: string): Transition => {
+/** The checks of behaviour 7 on the observation after the response, in their order. */
+const checkResponse = (s: ReviewState, hash: string, before: readonly ReviewCommand[] = []): Transition => {
   const { fileLabel, heading } = s.setup;
+  const { accepted, selfCount } = roundCounts(s);
+  const last = lastHash(s);
+  if (accepted > 0 && hash === last) return done(s, { kind: "Halt", error: new AcceptedWithoutChange({ fileLabel, accepted }) }, before);
+  if (accepted === 0 && selfCount === 0 && !s.current.decided && hash !== last) {
+    const asking: Ask = {
+      say: [prompts.unexplainedChangeLine(fileLabel, s.round), `The free-text response of Claude Code: ${s.current.resultText || "none"}`],
+      subject: prompts.unexplainedChangeSubject(fileLabel, heading, s.round),
+      id: null,
+    };
+    return ask(s, { name: "askingUnexplained", hash, asking }, asking, before);
+  }
+  return identicalCheck(s, hash, "response", before);
+};
+
+/** Every observation leaves its text as the last seen (issue #31). */
+const onFileObserved = (s: ReviewState, hash: string, text: string): Transition => onObservation({ ...s, lastText: text }, hash, text);
+const onObservation = (s: ReviewState, hash: string, text: string): Transition => {
   switch (s.step.name) {
-    case "observingResponse": {
-      const { accepted, selfCount } = roundCounts(s);
-      const last = lastHash(s);
-      if (accepted > 0 && hash === last) return halt(s, new AcceptedWithoutChange({ fileLabel, accepted }));
-      if (accepted === 0 && selfCount === 0 && !s.current.decided && hash !== last) {
-        const asking: Ask = {
-          say: [prompts.unexplainedChangeLine(fileLabel, s.round), `The free-text response of Claude Code: ${s.current.resultText || "none"}`],
-          subject: prompts.unexplainedChangeSubject(fileLabel, heading, s.round),
-          id: null,
-        };
-        return ask(s, { name: "askingUnexplained", hash, asking }, asking);
-      }
-      return identicalCheck(s, hash, "response");
+    case "measuring": {
+      const { state, logged } = logRound(s, lineChange(s.current.startText, text), []);
+      return checkResponse(state, hash, logged);
     }
+    case "observingResponse":
+      return checkResponse(s, hash);
     case "observingUnexplained":
       return identicalCheck(s, hash, "decision");
     case "observingIdentical":
@@ -403,7 +439,7 @@ const leaveOnDecision = (s: ReviewState, asking: Ask, text: string): Transition 
   switch (s.step.name) {
     // (i) After the response, before logStep: the round and every issue-naming decision of it, once; then logged.
     case "askingPauses": {
-      const updated = roundLog(s, asking.id === null ? s.current.decisions : [...s.current.decisions, decision]);
+      const updated = roundLog(s, asking.id === null ? s.current.decisions : [...s.current.decisions, decision], null);
       return leave({ ...s, log: updated }, [...recorded, { kind: "SaveLog", log: updated }, checkpoint(s, "logged")]);
     }
     // (iii) Before the response: only the decision's entry; the round record stays no_response, so decided, not logged.
@@ -471,7 +507,7 @@ const onDecisionsApplied = (s: ReviewState): Transition => {
 export const advance = (state: ReviewState, event: ReviewEvent): Transition => {
   switch (event.kind) {
     case "Begin":
-      return startRound({ ...state, log: event.log, observations: [{ round: 0, stage: "start", hash: event.hash }] });
+      return startRound({ ...state, log: event.log, lastText: event.text, observations: [{ round: 0, stage: "start", hash: event.hash }] });
     case "LimitAnswer":
       return state.step.name === "awaitingLimit" ? onLimitAnswer(state, event.answer) : noop(state);
     case "ReviewDecoded":
@@ -485,6 +521,6 @@ export const advance = (state: ReviewState, event: ReviewEvent): Transition => {
     case "Amended":
       return state.step.name === "amending" ? logStep(state) : noop(state);
     case "FileObserved":
-      return onFileObserved(state, event.hash);
+      return onFileObserved(state, event.hash, event.text);
   }
 };

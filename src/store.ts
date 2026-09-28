@@ -244,6 +244,15 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
         typeof subject === "object" && "work" in subject
           ? diffText().pipe(Effect.map((text) => (text === null ? "" : createHash("sha256").update(text).digest("hex"))))
           : recordHash(subject),
+      observeFile: (subject) =>
+        typeof subject === "object" && "work" in subject
+          ? diffText().pipe(Effect.map((text) => ({ hash: text === null ? "" : createHash("sha256").update(text).digest("hex"), text: "" })))
+          : Effect.gen(function* () {
+              const file = at(reviewedFile(subject));
+              if (!(yield* exists(file))) return { hash: "", text: "" };
+              const bytes = yield* io("read", file, fs.readFile(file));
+              return { hash: createHash("sha256").update(bytes).digest("hex"), text: new TextDecoder().decode(bytes) };
+            }),
       recordHash,
       /** Written to a temporary name and renamed into place, like the JSON records. */
       readChangeRecord: (phase) =>

@@ -4,6 +4,9 @@ import { test } from "node:test";
 import { planReviewPrompt, questionReviewPrompt } from "../src/prompts.ts";
 import * as prompts from "../src/prompts.ts";
 import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
+import { appendRound } from "../src/issueLog.ts";
+import type { IssueId } from "../src/round.ts";
+import * as S from "../src/schema.ts";
 
 // Decision Q5: the prompts describe the version-2 issue log (an object with entries; three sources; null references).
 test("the log rules name the entries list, the three sources and null references", () => {
@@ -13,6 +16,20 @@ test("the log rules name the entries list, the three sources and null references
     assert.match(text, /source 'self_correction'/);
     assert.match(text, /source 'user'/);
     assert.match(text, /duplicate_of .*null|null .*duplicate_of/);
+  }
+});
+
+// Issue #31 (the seam of S7): every key the log rules name for the measurement is a key of an entry appendRound writes,
+// and the rules name the field by the schema's constant. The rules are in round 1's prompt; later rounds refer to them in the same thread.
+test("the log rules explain file_change with the keys the log entries carry", () => {
+  const [entry] = appendRound([], { phase: 1, round: 1, review: { issues: [{ id: "P1-R1-1" as IssueId, severity: "major", location: "l", problem: "p", evidence: "e" }] }, dispositions: [{ id: "P1-R1-1" as IssueId, action: "accepted", rationale: "r", duplicateOf: null, reverses: null }], selfCorrections: [], notes: [], reviewerFeedback: "", questionsForUser: [] }, { changed: true, added: 1, removed: 0 });
+  const serialized = JSON.parse(JSON.stringify(entry)) as Record<string, Record<string, unknown>>;
+  for (const text of [planReviewPrompt(1, 1, false), questionReviewPrompt(1), prompts.requirementsReviewPrompt(1), prompts.decisionReviewPrompt("f", 1, 1), prompts.workReviewPrompt(1, 1, true)]) {
+    assert.ok(text.includes(`${S.FILE_CHANGE_FIELD}:`), "the rules do not explain the field");
+    for (const key of ["changed", "added", "removed"]) {
+      assert.match(text, new RegExp(`\\b${key}\\b`));
+      assert.ok(key in serialized[S.FILE_CHANGE_FIELD]!, `the entry lacks ${key}`);
+    }
   }
 });
 

@@ -118,6 +118,11 @@ export interface StoreShape {
    * diff recomputed from the baseline and the current tree (Q14). "" when it does not exist.
    */
   fileHash(subject: SubjectId): Effect.Effect<string, StoreError>;
+  /**
+   * The reviewed file observed once (issue #31): its hash, as fileHash gives it, and its text from the same read, from
+   * which the change during a response is measured. The work review is not measured (Q7): its text is "".
+   */
+  observeFile(subject: SubjectId): Effect.Effect<Readonly<{ hash: string; text: string }>, StoreError>;
   /** The hash of the bytes of the reviewed artifact on disk (the guard of behaviour 5); equal to fileHash but for a work review. */
   recordHash(subject: SubjectId): Effect.Effect<string, StoreError>;
   /** Writes work-review-<phase>/changes.diff: the diff of the project from the baseline tree to the current one (Q7). */

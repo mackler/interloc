@@ -54,6 +54,12 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
   leaveOnAcceptance: boolean;
   /** G-R1-1: a non-empty decision at a pause ends the loop with "revise" instead of a planning call. */
   leaveOnDecision: boolean;
+  /**
+   * Issue #30: what follows a response that accepted an issue and left the reviewed file unchanged: a corrective turn,
+   * the pause at once (the requirements, G-R1-1), or null where the condition cannot arise (the work review, Q7). A
+   * subject with a value has its file's change measured in the issue log (issue #31).
+   */
+  onUnchanged: "corrective" | "pause" | null;
   /** Run before every round's Codex turn, before its guard's snapshot (the work review rewrites changes.diff); null otherwise. */
   prepare: Effect.Effect<void, RunError, Services> | null;
 }>;
@@ -306,7 +312,7 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
             if (subject.amend !== null) yield* subject.amend(state.current.review!, state.current.response as R, command.round);
             return { kind: "Amended" };
           case "ObserveFile":
-            return { kind: "FileObserved", hash: yield* store.fileHash(id) };
+            return { kind: "FileObserved", ...(yield* store.observeFile(id)) };
         }
       });
 
@@ -321,6 +327,7 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
         return yield* Effect.die(new Error("the review loop ended a batch without an event"));
       });
 
-    const setup: ReviewSetup = { subject: id, heading, fileLabel, dirName: subjectDir(id), phase, idNumber: typeof id === "object" && "decision" in id ? id.decision : phase, proceed: subject.proceed, hasAmend: subject.amend !== null, leaveOnAcceptance: subject.leaveOnAcceptance, leaveOnDecision: subject.leaveOnDecision, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
-    return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: yield* store.fileHash(id), log: yield* store.loadLog(id) }));
+    const setup: ReviewSetup = { subject: id, heading, fileLabel, dirName: subjectDir(id), phase, idNumber: typeof id === "object" && "decision" in id ? id.decision : phase, proceed: subject.proceed, hasAmend: subject.amend !== null, leaveOnAcceptance: subject.leaveOnAcceptance, leaveOnDecision: subject.leaveOnDecision, onUnchanged: subject.onUnchanged, maxRounds: config.maxRounds, maxIdleRounds: config.maxIdleRounds, countMinor: config.countMinor };
+    const begun = yield* store.observeFile(id);
+    return yield* interpret(advance(initialState(setup, config), { kind: "Begin", hash: begun.hash, text: begun.text, log: yield* store.loadLog(id) }));
   });

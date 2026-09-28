@@ -74,7 +74,7 @@ test("appendRound takes the validated round, leaves its inputs unchanged, and ap
   const response = respond([["X", "accepted"]], { self_corrections: [{ id: "X", new_action: "rejected", explanation: "disputed" }, { id: "", new_action: "plan_error", explanation: "other" }] });
   const before: readonly LogEntry[] = Object.freeze([entry("X", "rejected", { round: 1 })]);
   const round = ok(validateRound(r, response, before, 1, 2, "P"));
-  const after = log.appendRound(before, round);
+  const after = log.appendRound(before, round, null);
   assert.deepEqual(before, [entry("X", "rejected", { round: 1 })]);
   const currentX = after.filter((e) => e.id === "X" && e.superseded !== true);
   assert.equal(currentX.length, 1, JSON.stringify(after, null, 1));

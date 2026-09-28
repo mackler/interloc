@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { appendRound, correctionCount, correctionsDue } from "../src/issueLog.ts";
+import { appendRound, correctionCount, correctionsDue, displayEntry } from "../src/issueLog.ts";
 import type { IssueId, ValidatedRound } from "../src/round.ts";
 
 // Plan step 2.4 (P1-R1-1 of this run, rounds 1 and 2): a work review leaves for a planning phase when the round has a
@@ -33,7 +33,7 @@ test("correctionsDue: a self-correction superseded by the round's disposition of
   const overlapping = round([["X", "rejected"]], [["X", "accepted"]]);
   assert.equal(correctionsDue(overlapping), false);
   // In agreement with the log appendRound writes: the disposition's entry is the current one.
-  const log = appendRound([], overlapping);
+  const log = appendRound([], overlapping, null);
   assert.deepEqual(log.filter((e) => e.superseded !== true).map((e) => [e.id, e.action]), [["X", "rejected"]]);
 });
 
@@ -49,4 +49,23 @@ test("correctionCount: accepted and partially accepted dispositions and effectiv
   assert.equal(correctionCount(ids, response([], [["", "plan_error"], ["P1-R1-2", "accepted"]])), 2, "effective self-corrections outside the review count");
   assert.equal(correctionCount(ids, response(["rejected"], [["R0", "accepted"]])), 0, "a self-correction of an issue of the same review is superseded");
   assert.equal(correctionCount(ids, response([], [["P1-R1-2", "rejected"]])), 0, "a rejecting self-correction is not a correction");
+});
+
+// Issue #31: the change of the round's response is stamped on every entry the round appends; a user's decision has none.
+test("appendRound stamps the round's file change on each entry it appends", () => {
+  const change = { changed: true, added: 2, removed: 1 };
+  const log = appendRound([], round([["A", "accepted"], ["B", "rejected"]], [["P1-S1-1", "plan_error"]]), change);
+  assert.equal(log.length, 3);
+  for (const e of log) assert.deepEqual("file_change" in e ? e.file_change : undefined, change);
+  const unmeasured = appendRound([], round([["A", "accepted"]]), null);
+  assert.equal("file_change" in unmeasured[0]! ? unmeasured[0].file_change : undefined, null);
+});
+
+// Q6: the measurement goes to the records and to Codex only; what the user is shown of an entry omits it.
+test("displayEntry omits file_change and keeps everything else", () => {
+  const [entry] = appendRound([], round([["A", "accepted"]]), { changed: false, added: 0, removed: 0 });
+  const shown = displayEntry(entry!);
+  assert.equal("file_change" in shown, false);
+  const { file_change: _f, ...rest } = entry as typeof entry & { file_change: unknown };
+  assert.deepEqual(shown, rest);
 });

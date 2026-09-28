@@ -118,7 +118,7 @@ test("recordsSnapshot changes with every guarded record and not with usage.jsonl
 });
 
 // Decision support, plan step 1.5: the records of decision k.
-const logEntry = (id: string, phase = 1) => ({ id, phase, round: 1, source: "self_correction" as const, problem: "p", action: "plan_error" as const, rationale: "r", superseded: false }) as never;
+const logEntry = (id: string, phase = 1) => ({ id, phase, round: 1, source: "self_correction" as const, problem: "p", action: "plan_error" as const, rationale: "r", superseded: false, file_change: null }) as never;
 const analysis = { decision: "d", columns: [{ kind: "argued" as const, option: "A", advantages: [], disadvantages: [] }, { kind: "argued" as const, option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
 const question = { phase: { kind: "planning" as const, n: 1 }, label: "Planning", question: "Which?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
 const json = (repo: string, name: string) => JSON.parse(fs.readFileSync(path.join(repo, "plan-review", name), "utf8"));
@@ -198,4 +198,21 @@ test("a plan.json that does not decode is a typed error", async () => {
   fs.writeFileSync(path.join(repo, "plan-review", "plan.json"), JSON.stringify({ version: 2, plan: { stages: [{ number: 1 }] } }));
   const failure = await run(Effect.flip(store.loadPlan()));
   assert.equal(failure._tag, "StateFileInvalid");
+});
+
+// Issue #31 (plan step S4): the reviewed file is observed once, its hash and its text from the one read; the hash is
+// the one fileHash gives, so the change record and the guard of behaviour 7 cannot disagree.
+test("observeFile gives the hash fileHash gives and the text of the same read", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  await run(store.init("task"));
+  assert.deepEqual(await run(store.observeFile("requirements")), { hash: "", text: "" }, "an absent file");
+  await run(store.writeRequirements("# R\n\nline\n"));
+  const observed = await run(store.observeFile("requirements"));
+  assert.equal(observed.hash, await run(store.fileHash("requirements")));
+  assert.equal(observed.text, fs.readFileSync(path.join(repo, "plan-review", "requirements.md"), "utf8"));
+  // The work review is not measured (Q7): its hash is fileHash's, and it has no text.
+  const work = await run(store.observeFile({ work: 1 }));
+  assert.equal(work.hash, await run(store.fileHash({ work: 1 })));
+  assert.equal(work.text, "");
 });

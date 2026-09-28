@@ -196,6 +196,15 @@ export type IssueId = typeof IssueId.Type;
 
 /** The fields every entry of an issue log has. `superseded` is required (Q5): true when a later entry has the same id. */
 const logEntryBase = { id: IssueId, phase: NonNegativeInt, round: NonNegativeInt, problem: Schema.String, rationale: Schema.String, superseded: Schema.Boolean };
+/**
+ * What the program measured of the reviewed file during the planner's response of a round (issue #31): whether it
+ * changed at all, and the lines added and removed. One response makes one set of edits, so every entry of the round
+ * carries the same value; null where nothing is measured (the work review, Q7).
+ */
+export const FileChange = Schema.Struct({ changed: Schema.Boolean, added: NonNegativeInt, removed: NonNegativeInt });
+export type FileChange = typeof FileChange.Type;
+/** The name of that field in the log entries, as the reviewer's prompt names it (src/prompts.ts logRules). */
+export const FILE_CHANGE_FIELD = "file_change";
 /** An issue Codex raised, with Claude Code's disposition; a reference names an earlier issue or is null. */
 export const ReviewEntry = Schema.Struct({
   ...logEntryBase,
@@ -206,9 +215,15 @@ export const ReviewEntry = Schema.Struct({
   action: Action,
   duplicate_of: Schema.NullOr(IssueId),
   reverses: Schema.NullOr(IssueId),
+  [FILE_CHANGE_FIELD]: Schema.NullOr(FileChange),
 });
 /** A correction Claude Code made to its own earlier work. */
-export const SelfCorrectionEntry = Schema.Struct({ ...logEntryBase, source: Schema.Literal("self_correction"), action: Schema.Literals(["accepted", "plan_error", "correction_disputed"]) });
+export const SelfCorrectionEntry = Schema.Struct({
+  ...logEntryBase,
+  source: Schema.Literal("self_correction"),
+  action: Schema.Literals(["accepted", "plan_error", "correction_disputed"]),
+  [FILE_CHANGE_FIELD]: Schema.NullOr(FileChange),
+});
 /** A decision of the user on one issue. */
 export const UserEntry = Schema.Struct({ ...logEntryBase, source: Schema.Literal("user"), action: Schema.Literal("decided_by_user") });
 /** One entry of an issue log, tagged by `source` (finding 6; Q5). */
