@@ -681,6 +681,15 @@ describe("DecisionView", () => {
     expect(shown).toEqual(["conversation"]);
   });
 
+  // W1-R1-3: the recommendation scrolls with the columns, so that a long one cannot squeeze them.
+  test("the recommendation is inside the scrolling area, below the row of columns", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const root = show(DecisionView, { event, narrow: false, onShowConversation: () => undefined });
+    const scroller = one(root, ".scroll");
+    expect(scroller.querySelector(".recommendation")).not.toBe(null);
+    expect(scroller.querySelector(".columns")).not.toBe(null);
+  });
+
   test("below 390 px the analysis is not laid out; a message asks for a wider window", async () => {
     const { default: DecisionView } = await import("./components/DecisionView.svelte");
     const root = show(DecisionView, { event, narrow: true, onShowConversation: () => undefined });

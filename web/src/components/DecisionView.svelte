@@ -59,7 +59,10 @@
     <p class="narrow m3-font-body-medium" role="alert">{ENLARGE_WINDOW_NOTICE}</p>
   {:else}
     {#if overflowing}<p class="hint m3-font-body-small">{SCROLL_SIDEWAYS_HINT}</p>{/if}
-    <div class="columns" bind:this={row} style:grid-template-columns="repeat({view.columns.length}, minmax(20rem, 1fr))">
+    <!-- The columns and the recommendation scroll together, so that a long recommendation never squeezes the columns
+         (W1-R1-3) [aesthetic and minimalist design; visibility of system status: all of it can be reached]. -->
+    <div class="scroll" bind:this={row}>
+    <div class="columns" style:grid-template-columns="repeat({view.columns.length}, minmax(20rem, 1fr))">
       {#each view.columns as column, i (i)}
         <article class="column m3-font-body-medium">
           <h3 class="m3-font-title-medium">{column.option}</h3>
@@ -72,9 +75,10 @@
     {#if view.recommendation !== null}
       <section class="recommendation m3-font-body-medium" aria-label={RECOMMENDATION_HEADING}>
         <h3 class="m3-font-title-small">{recommendedOption(view.recommendation.option)}</h3>
-        <p>{view.recommendation.reason}</p>
+        {#each view.recommendation.reason.split(/\n\s*\n/) as paragraph, i (i)}<p>{paragraph}</p>{/each}
       </section>
     {/if}
+    </div>
   {/if}
 </section>
 
@@ -83,8 +87,9 @@
   .head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
   .head h2 { margin: 0; }
   .hint, .narrow { margin: 0; color: var(--m3c-on-surface-variant); }
-  /* The row of columns scrolls in both directions within the area, so that the question and the prompt stay in view. */
-  .columns { display: grid; gap: 0.75rem; flex: 1; min-height: 0; overflow: auto; align-items: start; }
+  /* The columns and the recommendation scroll in both directions within the area, so that the question and the prompt stay in view. */
+  .scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 0.75rem; }
+  .columns { display: grid; gap: 0.75rem; flex-shrink: 0; align-items: start; }
   .column { padding: 0.75rem; border-radius: var(--m3-shape-medium); background: var(--m3c-surface-container); user-select: text; }
   .column h3 { margin: 0 0 0.5rem; position: sticky; top: 0; background: inherit; }
   .disadvantages-heading { margin: 1rem 0 0.5rem; }
@@ -95,5 +100,7 @@
   .arguments { list-style: none; margin: 0.25rem 0 0.25rem 0.5rem; padding: 0; }
   .argument { margin-top: 0.25rem; padding-left: 0.5rem; border-left: 2px solid var(--m3c-outline-variant); color: var(--m3c-on-surface-variant); }
   .recommendation { padding: 0.75rem; border-radius: var(--m3-shape-medium); background: var(--m3c-secondary-container); color: var(--m3c-on-secondary-container); }
-  .recommendation h3, .recommendation p { margin: 0; }
+  .recommendation { position: sticky; left: 0; flex-shrink: 0; }
+  .recommendation h3 { margin: 0; }
+  .recommendation p { margin: 0.5rem 0 0; }
 </style>

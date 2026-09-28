@@ -5,7 +5,8 @@
 // "interview", "workCorrection", "tabs", "drop", "long"; and "questionReview", the question phase whose review raises
 // an issue, so that Claude Code's response carries the amended list (defect A of docs/page-question-phase-defects.md);
 // "longChoices", an interview turn whose numbered answers are paragraphs (issue #12); "decide", a plan writer's question
-// with two options on which the user takes "Help me Decide" (decision support).
+// with two options on which the user takes "Help me Decide" (decision support); "decideLong", the same with a
+// recommendation of several paragraphs (W1-R1-3).
 // PORT is the port.
 
 import { Effect } from "effect";
@@ -49,6 +50,11 @@ const DECIDE_ANALYSIS = {
   ],
   recommendation: { option: "", reason: "" },
 };
+/** A recommendation of twelve paragraphs, the last one marked so that a test can find it. */
+const LONG_RECOMMENDATION = [
+  ...Array.from({ length: 11 }, (_, i) => `Paragraph ${i + 1}: the advantage that developers set up the service sooner outweighs, for every developer and from the first day, the disadvantage that operators maintain one more server, because the service has one operator and many developers.`),
+  "The last paragraph of the recommendation.",
+].join("\n\n");
 export const SCENARIOS: Record<string, TestOptions> = {
   converge: {
     steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "1. [ ] the step, amended\n" }],
@@ -134,6 +140,16 @@ export const SCENARIOS: Record<string, TestOptions> = {
     steps: [
       { output: { questions_for_user: [{ question: "Which database should the service use?", options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
       { output: DECIDE_ANALYSIS },
+      { output: noQuestions },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  },
+  // W1-R1-3: a long recommendation must not squeeze the columns.
+  decideLong: {
+    steps: [
+      { output: { questions_for_user: [{ question: "Which database should the service use?", options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
+      { output: { ...DECIDE_ANALYSIS, recommendation: { option: "SQLite", reason: LONG_RECOMMENDATION } } },
       { output: noQuestions },
     ],
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],

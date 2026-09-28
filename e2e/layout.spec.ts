@@ -279,3 +279,20 @@ test("(L12) the analysis at 360 × 640: a message asks for a wider window, and t
   await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
   await expect(analysis).toBeHidden();
 });
+
+// W1-R1-3: a recommendation of several paragraphs scrolls with the columns and does not squeeze them.
+test("(L13) a long recommendation at 1280 × 800: the columns keep their height, and the recommendation's end can be scrolled into view", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await startTask(page, "Add a database", "http://127.0.0.1:8112/");
+  await page.getByRole("button", { name: "Help me Decide" }).click();
+  const analysis = page.getByRole("region", { name: /^Decision 1: / });
+  await expect(analysis).toBeVisible();
+  expect((await box(analysis.locator(".column").nth(0))).height).toBeGreaterThanOrEqual(200);
+  const last = analysis.getByText("The last paragraph of the recommendation.");
+  await last.scrollIntoViewIfNeeded();
+  await expect(last).toBeInViewport();
+  const [end, area] = [await box(last), await box(analysis)];
+  expect(end.y + end.height).toBeLessThanOrEqual(area.y + area.height + 1);
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
+  await expect(analysis).toBeHidden();
+});

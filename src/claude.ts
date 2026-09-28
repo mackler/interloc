@@ -96,8 +96,8 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   };
 
   /** An ask with the offer of decision support (D2), run inside a callback: the services it needs are provided here. */
-  const offering = (decider: DeciderShape, prompt: string, question: Parameters<typeof askOffering>[2], present: Effect.Effect<void>): Effect.Effect<string, CallbackError> =>
-    askOffering((p) => ui.ask(p), prompt, question, present).pipe(Effect.provideService(Decider, decider), Effect.provideService(Store, store), Effect.provideService(Ui, ui));
+  const offering = (decider: DeciderShape, prompt: string, question: Parameters<typeof askOffering>[2], present: Effect.Effect<void>, acceptable?: (answer: string) => boolean): Effect.Effect<string, CallbackError> =>
+    askOffering((p) => ui.ask(p), prompt, question, present, acceptable).pipe(Effect.provideService(Decider, decider), Effect.provideService(Store, store), Effect.provideService(Ui, ui));
 
   /**
    * Asks the user each question; the answers are keyed by the question's index, so equal texts stay apart. A question
@@ -110,8 +110,8 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
         const present = ui.notify({ _tag: "QuestionAsked", question: q.question, options: q.options });
         yield* present;
         for (const line of relayedQuestionSays(q)) yield* ui.say(line);
-        let reply = "";
-        while (reply === "") reply = yield* offering(decider, prompts.optionOrTextPrompt, { question: q.question, options: numberedOptions(q.options) }, present);
+        // A blank reply is asked again, the question presented again first (W1-R1-1, W1-R1-2).
+        const reply = yield* offering(decider, prompts.optionOrTextPrompt, { question: q.question, options: numberedOptions(q.options) }, present, (a) => a !== "");
         const chosen = chooseOption(reply, q.options.length);
         const answer = chosen === null ? reply : q.options[chosen].label;
         answers.set(index, answer);

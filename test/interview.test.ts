@@ -138,3 +138,26 @@ test("an interview turn with numbered answers offers Help me Decide; after the a
   assert.equal(JSON.parse(read(probe.dir, "decision-1/chosen.json")).option, labels[1]);
   assert.match(probe.planner.prompts[3], /\b2\b/);
 });
+
+// W1-R1-1: a blank reply after the analysis is not the choice; the answer that follows is.
+test("an interview turn answered /decide, blank, 2 records option 2", async () => {
+  const labels = numberedChoices(NUMBERED_MESSAGE).map((c) => c.label);
+  const el = { text: "t", counterarguments: [] };
+  const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
+  const analysis = { decision: "d", columns: labels.map((option, i) => ({ option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["/decide", "", "2", ""],
+    steps: [
+      { output: { questions: [q("Q1")] } },
+      { output: turn(NUMBERED_MESSAGE, false, "") },
+      { output: analysis },
+      { output: turn("Done.", true, "# Requirements\n\nQ1: SQLite") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: { questionPhase: true },
+  });
+  await runTask(layer);
+  assert.deepEqual(JSON.parse(read(probe.dir, "decision-1/chosen.json")), { version: 2, decision: 1, answer: "2", option: labels[1] });
+});

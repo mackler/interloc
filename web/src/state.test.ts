@@ -735,3 +735,11 @@ describe("decision support", () => {
     expect(replayed([started, notified(analyzed(3)), asked(1, prompts.withOffer(prompts.decisionPrompt("x")))]).run?.analysis?.event.decision).toBe(3);
   });
 });
+
+// W1-R1-2: a relayed question presented again before the retry of a blank answer keeps its cards.
+test("a blank answer to a relayed question, then the question presented again: the retry keeps both cards", () => {
+  const question: UiEvent = { _tag: "QuestionAsked", question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] };
+  const s = fold(live([started, notified(question), asked(1, prompts.withOffer(prompts.optionOrTextPrompt)), { _tag: "Answered", prompt: 1, text: "" }, notified(question), asked(2, prompts.withOffer(prompts.optionOrTextPrompt))]));
+  expect(s.run?.pending?.asked.prompt).toBe(2);
+  expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["A=1", "B=2"]);
+});

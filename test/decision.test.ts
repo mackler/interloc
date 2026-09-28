@@ -280,3 +280,20 @@ test("at the cycle limit Help me Decide is offered, and a number afterwards adds
   assert.deepEqual(json(probe.dir, "decision-1/question.json").options.map((o: { label: string }) => o.label), [prompts.LIMIT_PROCEED, prompts.LIMIT_STOP, prompts.LIMIT_MORE]);
   assert.deepEqual(json(probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "1", option: prompts.LIMIT_MORE });
 });
+
+// W1-R1-1: an answer the caller rejects is not recorded; the question is asked again.
+test("with a predicate, a rejected answer is asked again and not recorded; without one, an empty answer is the choice", async () => {
+  const notEmpty = (a: string) => a !== "";
+  const retried = await setUp({ answers: ["/decide", "", "2"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  const presented: string[] = [];
+  const answer = await Effect.runPromise(Effect.gen(function* () {
+    const ui = yield* Ui;
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: question.question, options: offered }, Effect.sync(() => void presented.push("present")), notEmpty);
+  }).pipe(Effect.provide(retried.layer)));
+  assert.equal(answer, "2");
+  assert.deepEqual(json(retried.probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "2", option: "PostgreSQL" });
+  assert.equal(presented.length, 2, "presented again after the analysis and after the rejected answer");
+  const empty = await setUp({ answers: ["/decide", ""], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  assert.equal(await offering(empty.layer, { question: question.question, options: offered }), "");
+  assert.deepEqual(json(empty.probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "", option: null });
+});

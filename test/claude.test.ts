@@ -593,3 +593,33 @@ test("an execution permission request offers Help me Decide over Allow and Deny"
   assert.deepEqual(request.options.map((o) => o.label), [prompts.PERMISSION_ALLOW, prompts.PERMISSION_DENY]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")).option, prompts.PERMISSION_ALLOW);
 });
+
+// W1-R1-1, W1-R1-2: a blank answer to a relayed question is asked again, presented again, and not recorded.
+test("a relayed question answered /decide, blank, 2 records option 2 and relays B", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  const relayed: (PermissionResult | null)[] = [];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    relayed.push(await permission(call.options)("AskUserQuestion", { questions }, callContext()));
+    yield success({});
+  })();
+  const fake = await planner([script], ["/decide", "", "2"]);
+  const { decider } = recordingDecider();
+  await run(fake.planner.planning("write the plan", schema), decider);
+  assert.deepEqual(relayed[0], { behavior: "allow", updatedInput: { questions, answers: { "A or B?": "B" } } });
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")), { version: 2, decision: 1, answer: "2", option: "B" });
+});
+
+test("a blank answer to a relayed question presents it again before the retry, with two options and with one", async () => {
+  for (const options of [[{ label: "A", description: "a" }, { label: "B", description: "b" }], [{ label: "A", description: "a" }]]) {
+    const questions = [{ question: "Which?", options }];
+    const script: Script = (call) => (async function* () {
+      yield init();
+      await permission(call.options)("AskUserQuestion", { questions }, callContext());
+      yield success({});
+    })();
+    const fake = await planner([script], ["", "1"]);
+    await run(fake.planner.planning("write the plan", schema));
+    assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionAsked").length, 2, `${options.length} option(s)`);
+  }
+});

@@ -42,11 +42,25 @@ export const limitOptions = (proceed: string | null): readonly OfferedOption[] =
  * Asks a question with the offer (D2). Fewer than two options: the ask unchanged. Otherwise the prompt carries the
  * offer; "/decide" runs a decision loop, shows its analysis, restores the question's presentation (`present`, P1-R1-3)
  * and asks again. Any other answer is returned as typed; after an analysis it is recorded as the choice of every
- * decision made for this question (decision Q4), with the option it chose.
+ * decision made for this question (decision Q4), with the option it chose. An answer that `acceptable` rejects (a blank
+ * reply where one is required) is neither returned nor recorded: the question is presented again and asked again
+ * (W1-R1-1, W1-R1-2), with or without options.
  */
-export const askOffering = <E>(ask: (prompt: string) => Effect.Effect<string, E>, prompt: string, question: OfferedQuestion, present: Effect.Effect<void>): Effect.Effect<string, E | RunError, Decider | Store | Ui> =>
+export const askOffering = <E>(
+  ask: (prompt: string) => Effect.Effect<string, E>,
+  prompt: string,
+  question: OfferedQuestion,
+  present: Effect.Effect<void>,
+  acceptable: (answer: string) => boolean = () => true,
+): Effect.Effect<string, E | RunError, Decider | Store | Ui> =>
   Effect.gen(function* () {
-    if (question.options.length < 2) return yield* ask(prompt);
+    if (question.options.length < 2) {
+      for (;;) {
+        const answer = yield* ask(prompt);
+        if (acceptable(answer)) return answer;
+        yield* present;
+      }
+    }
     const decider = yield* Decider;
     const store = yield* Store;
     const ui = yield* Ui;
@@ -58,6 +72,10 @@ export const askOffering = <E>(ask: (prompt: string) => Effect.Effect<string, E>
         const outcome = yield* decider.decide({ question: question.question, options });
         decisions.push(outcome.decision);
         yield* ui.notify({ _tag: "DecisionAnalyzed", decision: outcome.decision, question: question.question, options, analysis: outcome.analysis });
+        yield* present;
+        continue;
+      }
+      if (!acceptable(answer)) {
         yield* present;
         continue;
       }
