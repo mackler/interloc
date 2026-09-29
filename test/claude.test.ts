@@ -56,10 +56,10 @@ const aborted = (options: Options): Promise<void> => {
 };
 
 test("a planning call returns the structured output and records usage", async () => {
-  const fake = await planner([messages(init("session-7"), assistantTool("Read", { file_path: "/x" }), success({ questions_for_user: [{ question: "q?", options: [] }] }, "done"))]);
+  const fake = await planner([messages(init("session-7"), assistantTool("Read", { file_path: "/x" }), success({ questions_for_user: [{ context: "c", question: "q?", terms: [], options: [] }] }, "done"))]);
   const call = await run(fake.planner.planning("write the plan", schema));
 
-  assert.deepEqual(call.output, { questions_for_user: [{ question: "q?", options: [] }] });
+  assert.deepEqual(call.output, { questions_for_user: [{ context: "c", question: "q?", terms: [], options: [] }] });
   assert.equal(call.resultText, "done");
   assert.equal(call.costUsd, 0.25);
   assert.equal(Effect.runSync(fake.planner.sessionId), "session-7");

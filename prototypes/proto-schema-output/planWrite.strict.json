@@ -6,8 +6,30 @@
       "items": {
         "type": "object",
         "properties": {
+          "context": {
+            "type": "string"
+          },
           "question": {
             "type": "string"
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "explanation": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "term",
+                "explanation"
+              ],
+              "additionalProperties": false
+            }
           },
           "options": {
             "type": "array",
@@ -30,7 +52,9 @@
           }
         },
         "required": [
+          "context",
           "question",
+          "terms",
           "options"
         ],
         "additionalProperties": false

@@ -5,8 +5,8 @@ import { Result } from "effect";
 import { QuestionListInvalid } from "./errors.ts";
 import type { ExecReport, InterviewTurn, QuestionList, QuestionsFile } from "./schema.ts";
 
-/** The questions asked and answered so far, as Claude Code reports them in each turn (issue #21). */
-type TurnIds = Readonly<{ asked: readonly string[]; answered: readonly string[]; current: Readonly<{ id: string; text: string }> }>;
+/** The questions asked and answered so far, as Claude Code reports them in each turn (issue #21), and the question asked now (S3: with its context, terms and options). */
+type TurnIds = Readonly<{ asked: readonly string[]; answered: readonly string[]; current: InterviewTurn["current_question"] }>;
 /** What an interview turn says: the conversation continues, or Claude Code proposes the summary. */
 export type TurnText = Readonly<{ kind: "continuing"; message: string }> | Readonly<{ kind: "summary_proposed"; message: string; summary: string }>;
 /** One interview turn: its text and the questions asked and answered so far. */

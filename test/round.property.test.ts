@@ -33,7 +33,7 @@ const arbResponse = (review: Review, history: LogEntry[]): fc.Arbitrary<PlannerR
     dispositions: fc.tuple(...review.issues.map((i) => record({ id: fc.constant(i.id), action: fc.constantFrom(...ACTIONS), rationale: fc.string(), duplicate_of: ref, reverses: ref }))),
     self_corrections: fc.array(record({ id: fc.oneof(fc.constant(""), arbId), new_action: fc.constantFrom(...NEW_ACTIONS), explanation: fc.string() }), { maxLength: 2 }),
     reviewer_feedback: fc.string(),
-    questions_for_user: fc.array(record({ question: fc.string(), options: fc.array(record({ label: fc.string(), description: fc.string() }), { maxLength: 2 }) }), { maxLength: 2 }),
+    questions_for_user: fc.array(record({ context: fc.string(), question: fc.string(), terms: fc.constant([]), options: fc.array(record({ label: fc.string(), description: fc.string() }), { maxLength: 2 }) }), { maxLength: 2 }),
   });
 };
 const arbRound = fc.tuple(arbReview, arbLog).chain(([review, history]) => arbResponse(review, history).map((response) => ({ review, history, response })));

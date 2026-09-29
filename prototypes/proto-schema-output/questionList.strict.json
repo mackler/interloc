@@ -9,6 +9,9 @@
           "id": {
             "type": "string"
           },
+          "context": {
+            "type": "string"
+          },
           "question": {
             "type": "string"
           },
@@ -40,6 +43,7 @@
         },
         "required": [
           "id",
+          "context",
           "question",
           "reason",
           "proposed_answers",

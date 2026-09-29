@@ -35,7 +35,7 @@ test("the question subject's handlers receive the decoded list and write questio
   await Effect.runPromise(store.init("task"));
   const subject = questionSubject("task");
   const withStore = <A, E>(effect: Effect.Effect<A, E, Store | Ui>): Promise<A> => Effect.runPromise(effect.pipe(Effect.provide(Layer.mergeAll(Layer.succeed(Store, store), Layer.succeed(Ui, new ScriptedUi([]))))));
-  const list = { questions: [{ id: "Q1", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: "A" }] };
+  const list = { questions: [{ id: "Q1", context: "c", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: "A" }] };
   assert.ok(subject.applyDecisions.after !== null && subject.respond.after !== null);
   await withStore(subject.applyDecisions.after(list));
   assert.deepEqual(JSON.parse(fs.readFileSync(store.questions, "utf8")).questions.map((q: { id: string }) => q.id), ["Q1"]);

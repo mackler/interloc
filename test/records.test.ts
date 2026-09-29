@@ -61,7 +61,7 @@ test("readUsage reads version-2 lines and rejects a line of the old shape, namin
 });
 
 test("readQuestions reads the version-2 file and rejects one without the version marker", () => {
-  const file = { version: 2, task: "t", questions: [{ id: "Q1", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: null }] };
+  const file = { version: 2, task: "t", questions: [{ id: "Q1", context: "c", question: "q?", reason: "r", proposed_answers: [{ label: "A", description: "a" }], default_answer: null }] };
   assert.deepEqual(ok(readQuestions("questions.json", JSON.stringify(file))), file);
   const { version: _v, ...old } = file;
   assert.match(failureText(readQuestions("questions.json", JSON.stringify(old))), /questions\.json could not be read/);

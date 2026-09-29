@@ -91,8 +91,8 @@ test("a corrective reply that changes a disposition it may not gets a validation
 });
 
 test("(f) the question list: an accepted issue with questions.json unchanged gets a corrective turn", async () => {
-  const q = (id: string): typeof S.QuestionEntry.Type => ({ id, question: `question ${id}?`, reason: "r", proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }], default_answer: "A" });
-  const turn = (message: string, answered: string[], summary = "") => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: answered, answered_ids: answered, complete: summary !== "", summary });
+  const q = (id: string): typeof S.QuestionEntry.Type => ({ id, context: "c", question: `question ${id}?`, reason: "r", proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }], default_answer: "A" });
+  const turn = (message: string, answered: string[], summary = "") => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: answered, answered_ids: answered, complete: summary !== "", summary });
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["A", ""],
     steps: [

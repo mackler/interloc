@@ -10,13 +10,57 @@
         "id": {
           "type": "string"
         },
+        "context": {
+          "type": "string"
+        },
         "text": {
           "type": "string"
+        },
+        "terms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "term": {
+                "type": "string"
+              },
+              "explanation": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "term",
+              "explanation"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label",
+              "description"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
         "id",
-        "text"
+        "context",
+        "text",
+        "terms",
+        "options"
       ],
       "additionalProperties": false
     },

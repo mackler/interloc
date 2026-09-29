@@ -11,8 +11,8 @@ import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 // Step 4.6 (finding 8; Q4): the interview matches on turn variants, and the question list is normalised.
 type QuestionEntry = typeof S.QuestionEntry.Type;
 const noQuestions = { questions_for_user: [] };
-const q = (id: string, defaultAnswer = "A"): QuestionEntry => ({ id, question: `question ${id}?`, reason: "r", proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }], default_answer: defaultAnswer });
-const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: [], answered_ids: [], complete, summary });
+const q = (id: string, defaultAnswer = "A"): QuestionEntry => ({ id, context: "c", question: `question ${id}?`, reason: "r", proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }], default_answer: defaultAnswer });
+const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: [], answered_ids: [], complete, summary });
 const read = (dir: string, name: string): string => fs.readFileSync(path.join(dir, name), "utf8");
 
 test("a turn that is complete with a blank summary continues the conversation instead of proposing a summary", async () => {
@@ -199,7 +199,7 @@ test("Help me decide on an interview turn names the current question, Question <
     answers: ["/decide", "2", ""],
     steps: [
       { output: { questions: [q("Q4")] } },
-      { output: { ...turn(message, false, ""), current_question: { id: "Q4", text: "Should you also see that a response left the file unchanged?" } } },
+      { output: { ...turn(message, false, ""), current_question: { id: "Q4", context: "", text: "Should you also see that a response left the file unchanged?", terms: [], options: [] } } },
       { output: analysis },
       { output: turn("Done.", true, "# Requirements\n\nQ4: 2") },
       { output: noQuestions, plan: "v1" },

@@ -43,10 +43,28 @@ export const SelfCorrection = Schema.Struct({
  * (two or more mutually exclusive options; an empty list otherwise). A question with two or more options carries the
  * offer of decision support.
  */
+/**
+ * A word or phrase in a question that a reader who has never seen the codebase may not know, with its explanation (issue
+ * #36). Bound to its exact words (decision Q5): the page marks every case-sensitive, whole-word occurrence. Both fields
+ * are plain strings for the agents; `validateQuestion` in src/question.ts rejects a blank one with its repair turn.
+ */
+export const Term = Schema.Struct({ term: Schema.String, explanation: Schema.String });
+/** An option of a question: a short label and a description. */
+export const QuestionOption = Schema.Struct({ label: Schema.String, description: Schema.String });
+/**
+ * A question for the user (decision Q1 of the decision-support task; S3 of the task of issues #46 and #59): the context
+ * paragraph that precedes it, its text, the explanations of its terms and, when it is a choice, its options (two or more
+ * mutually exclusive options; an empty list otherwise). A question with two or more options carries the offer of
+ * decision support.
+ */
 export const UserQuestion = Schema.Struct({
+  context: Schema.String,
   question: Schema.String,
-  options: Schema.Array(Schema.Struct({ label: Schema.String, description: Schema.String })),
+  terms: Schema.Array(Term),
+  options: Schema.Array(QuestionOption),
 });
+/** The reply of a context call (S9, decision Q1): the context paragraph and the terms of a question the program composed. */
+export const QuestionContext = Schema.Struct({ context: Schema.String, terms: Schema.Array(Term) });
 
 /** The fields that every response to a review has. Spread into the question-list response. */
 const plannerResponseFields = {
@@ -131,6 +149,8 @@ export const DecisionAnalysis = Schema.Struct({
 /** One entry of the question list that Claude Code and Codex agree on before the interview. */
 export const QuestionEntry = Schema.Struct({
   id: Schema.String,
+  /** The context paragraph that precedes the question (S3); its terms come from the terms subject after convergence (Q8). */
+  context: Schema.String,
   question: Schema.String,
   reason: Schema.String,
   proposed_answers: Schema.Array(Schema.Struct({ label: Schema.String, description: Schema.String })),
@@ -156,8 +176,11 @@ export const DecisionApplied = Schema.Struct({ analysis: DecisionAnalysis });
  */
 export const InterviewTurn = Schema.Struct({
   message_to_user: Schema.String,
-  /** Issue #35 (Q5, Q6): the question the message asks the user to answer now, its id and its text alone; both empty when none. */
-  current_question: Schema.Struct({ id: Schema.String, text: Schema.String }),
+  /**
+   * Issue #35 (Q5, Q6): the question the message asks the user to answer now, its id and its text alone; S3: with its
+   * context paragraph, its terms and its options. Every field empty when the message asks none.
+   */
+  current_question: Schema.Struct({ id: Schema.String, context: Schema.String, text: Schema.String, terms: Schema.Array(Term), options: Schema.Array(QuestionOption) }),
   asked_ids: Schema.Array(Schema.String),
   answered_ids: Schema.Array(Schema.String),
   complete: Schema.Boolean,
@@ -283,6 +306,9 @@ export type Action = typeof Action.Type;
 export type Disposition = typeof Disposition.Type;
 export type SelfCorrection = typeof SelfCorrection.Type;
 export type UserQuestion = typeof UserQuestion.Type;
+export type Term = typeof Term.Type;
+export type QuestionOption = typeof QuestionOption.Type;
+export type QuestionContext = typeof QuestionContext.Type;
 export type PlannerResponse = typeof PlannerResponse.Type;
 export type PlanWriteResult = typeof PlanWriteResult.Type;
 export type PlanStep = typeof PlanStep.Type;

@@ -3,10 +3,10 @@
 import { Result } from "effect";
 import { QuestionInvalid } from "./errors.ts";
 import type { QuestionProblem } from "./prompts.ts";
+import type { QuestionOption, Term } from "./schema.ts";
 
-/** A word or phrase the reader may not know, bound to its exact words in the text, with its explanation (issue #36, Q5). */
-export type Term = Readonly<{ term: string; explanation: string }>;
-export type QuestionOption = Readonly<{ label: string; description: string }>;
+export type { QuestionOption, Term };
+
 /** The parts of a question that an agent writes: the context paragraph, the question, its terms and its options. */
 export type Question = Readonly<{ context: string; question: string; terms: readonly Term[]; options: readonly QuestionOption[] }>;
 

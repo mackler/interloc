@@ -38,7 +38,7 @@ const arbUsage: fc.Arbitrary<S.UsageRecord> = fc.oneof(arbClaudeUsage, arbCodexU
 const arbQuestions = record<S.QuestionsFile>({
   version: fc.constant(2),
   task: fc.string(),
-  questions: fc.array(record({ id: nonEmpty, question: fc.string(), reason: fc.string(), proposed_answers: fc.array(record({ label: fc.string(), description: fc.string() })), default_answer: fc.string() })),
+  questions: fc.array(record({ id: nonEmpty, context: fc.string(), question: fc.string(), reason: fc.string(), proposed_answers: fc.array(record({ label: fc.string(), description: fc.string() })), default_answer: fc.string() })),
 });
 
 const roundTrips = <T>(schema: Schema.Codec<T>, value: T): void => {

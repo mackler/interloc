@@ -27,7 +27,7 @@ import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from
 
 const noQuestions = { questions_for_user: [] };
 /** A scripted interview turn; `asked` and `answered` are the ids Claude reports (issue #21). */
-const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: asked, answered_ids: answered, complete, summary });
+const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: asked, answered_ids: answered, complete, summary });
 const LONG = 60;
 /** An analysis of the "decide" scenario: two columns, a counterargument with a defense, one equivalence, a recommendation. */
 const element = (text: string, counterarguments: unknown[] = []) => ({ text, counterarguments });
@@ -67,7 +67,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
     execs: [finished],
   },
   decision: {
-    steps: [{ output: { questions_for_user: [{ question: "Which database should the service use?", options: [] }] }, plan: "1. [ ] the step\n" }, { output: noQuestions }],
+    steps: [{ output: { questions_for_user: [{ context: "c", question: "Which database should the service use?", terms: [], options: [] }] }, plan: "1. [ ] the step\n" }, { output: noQuestions }],
     reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
   },
@@ -77,7 +77,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
   interview: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: { questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
       { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "", ["Q1"]) },
       { output: turn("Anything else?", false, "", ["Q1"], ["Q1"]) },
       { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.", ["Q1"], ["Q1"]) },
@@ -90,7 +90,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
   decideBlank: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: { questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
       { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "", ["Q1"]) },
       { output: { ...DECIDE_ANALYSIS, columns: [{ ...DECIDE_ANALYSIS.columns[1], option: "PostgreSQL" }, { ...DECIDE_ANALYSIS.columns[0], option: "SQLite" }] } },
       { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.", ["Q1"], ["Q1"]) },
@@ -103,7 +103,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
   longChoices: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", question: "How should a message show its time?", reason: "r", proposed_answers: [{ label: "Absolute", description: "a" }, { label: "Relative", description: "r" }], default_answer: "Absolute" }] } },
+      { output: { questions: [{ id: "Q1", context: "c", question: "How should a message show its time?", reason: "r", proposed_answers: [{ label: "Absolute", description: "a" }, { label: "Relative", description: "r" }], default_answer: "Absolute" }] } },
       { output: turn(`How should a message show its time?\n${LONG_ANSWERS.join("\n")}`, false, "", ["Q1"]) },
       { output: turn("Anything else?", false, "") },
       { output: turn("That is all I need.", true, "# Requirements\n\nRelative time.") },
@@ -118,13 +118,13 @@ export const SCENARIOS: Record<string, TestOptions> = {
   questionReview: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: { questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
       {
         output: {
           ...respond([["Q-R1-1", "accepted"]]),
           questions: [
-            { id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" },
-            { id: "Q2", question: "Which port?", reason: "r", proposed_answers: [{ label: "8080", description: "p" }], default_answer: "8080" },
+            { id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" },
+            { id: "Q2", context: "c", question: "Which port?", reason: "r", proposed_answers: [{ label: "8080", description: "p" }], default_answer: "8080" },
           ],
         },
       },
@@ -144,19 +144,19 @@ export const SCENARIOS: Record<string, TestOptions> = {
   },
   // Two decisions in a row, for two tabs and a dropped connection.
   tabs: {
-    steps: [{ output: { questions_for_user: [{ question: "Which database should the service use?", options: [] }, { question: "Which cache should the service use?", options: [] }] }, plan: "1. [ ] the step\n" }],
+    steps: [{ output: { questions_for_user: [{ context: "c", question: "Which database should the service use?", terms: [], options: [] }, { context: "c", question: "Which cache should the service use?", terms: [], options: [] }] }, plan: "1. [ ] the step\n" }],
     reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
   },
   drop: {
-    steps: [{ output: { questions_for_user: [{ question: "Which database should the service use?", options: [] }] }, plan: "1. [ ] the step\n" }],
+    steps: [{ output: { questions_for_user: [{ context: "c", question: "Which database should the service use?", terms: [], options: [] }] }, plan: "1. [ ] the step\n" }],
     reviews: [{ issues: [] }, { issues: [] }],
     execs: [finished],
   },
   // Decision support: a question with two options, one analysis that converges in its first cycle, then the answer.
   decide: {
     steps: [
-      { output: { questions_for_user: [{ question: "Which database should the service use?", options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
+      { output: { questions_for_user: [{ context: "c", question: "Which database should the service use?", terms: [], options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
       { output: DECIDE_ANALYSIS },
       { output: noQuestions },
     ],
@@ -166,7 +166,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
   // W1-R1-3: a long recommendation must not squeeze the columns.
   decideLong: {
     steps: [
-      { output: { questions_for_user: [{ question: "Which database should the service use?", options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
+      { output: { questions_for_user: [{ context: "c", question: "Which database should the service use?", terms: [], options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
       { output: { ...DECIDE_ANALYSIS, recommendation: { option: "SQLite", reason: LONG_RECOMMENDATION } } },
       { output: noQuestions },
     ],
@@ -176,7 +176,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
   // W2-R1-1: the analysis's review raises an issue; Claude's response carries the amended analysis to the page.
   decideRevise: {
     steps: [
-      { output: { questions_for_user: [{ question: "Which database should the service use?", options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
+      { output: { questions_for_user: [{ context: "c", question: "Which database should the service use?", terms: [], options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
       { output: DECIDE_ANALYSIS },
       {
         output: {

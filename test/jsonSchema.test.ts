@@ -8,24 +8,35 @@ import * as legacy from "./fixtures/legacy-schemas.ts";
 
 // The seven schemas that an agent call passes as its output schema.
 // Decision Q1 of the decision-support task: questions_for_user is a list of structured questions; the legacy schemas stay frozen.
+// S3 (issues #36, #59): with its context paragraph and the explanations of its terms.
+const options = { type: "array", items: { type: "object", properties: { label: { type: "string" }, description: { type: "string" } } } };
+const terms = { type: "array", items: { type: "object", properties: { term: { type: "string" }, explanation: { type: "string" } } } };
 const userQuestions = {
   type: "array",
   items: {
     type: "object",
-    properties: {
-      question: { type: "string" },
-      options: { type: "array", items: { type: "object", properties: { label: { type: "string" }, description: { type: "string" } } } },
-    },
+    properties: { context: { type: "string" }, question: { type: "string" }, terms, options },
   },
 };
+/** The legacy question list with the context of each entry (S3), placed after its id. */
+const withContext = <T extends { properties: { questions: { items: { properties: object } } } }>(schema: T): T => ({
+  ...schema,
+  properties: {
+    ...schema.properties,
+    questions: {
+      ...schema.properties.questions,
+      items: { ...schema.properties.questions.items, properties: (({ id, ...rest }) => ({ id, context: { type: "string" }, ...rest }))(schema.properties.questions.items.properties as { id: unknown }) },
+    },
+  },
+});
 const withQuestions = <T extends { properties: object }>(schema: T): T => ({ ...schema, properties: { ...schema.properties, questions_for_user: userQuestions } });
 const agentSchemas = {
   review: { effect: S.Review, legacy: legacy.reviewSchema },
   plannerResponse: { effect: S.PlannerResponse, legacy: withQuestions(legacy.plannerResponseSchema) },
   planWrite: { effect: S.PlanWriteResult, legacy: withQuestions(legacy.planWriteSchema) },
   execReport: { effect: S.ExecReport, legacy: legacy.execReportSchema },
-  questionList: { effect: S.QuestionList, legacy: legacy.questionListSchema },
-  questionListResponse: { effect: S.QuestionListResponse, legacy: withQuestions(legacy.questionListResponseSchema) },
+  questionList: { effect: S.QuestionList, legacy: withContext(legacy.questionListSchema) },
+  questionListResponse: { effect: S.QuestionListResponse, legacy: withContext(withQuestions(legacy.questionListResponseSchema)) },
   // Issue #21 (Q6 follow-up): the interview turn has asked_ids beyond the frozen legacy schema, which stays frozen.
   interviewTurn: {
     effect: S.InterviewTurn,
@@ -34,7 +45,8 @@ const agentSchemas = {
       properties: (({ message_to_user, ...rest }) => ({
         message_to_user,
         // Issue #35 (Q5, Q6): the question the message asks now, its id and its text alone.
-        current_question: { type: "object", properties: { id: { type: "string" }, text: { type: "string" } } },
+        // S3: with its context, terms and options.
+        current_question: { type: "object", properties: { id: { type: "string" }, context: { type: "string" }, text: { type: "string" }, terms, options } },
         asked_ids: { type: "array", items: { type: "string" } },
         ...rest,
       }))(legacy.interviewTurnSchema.properties),
@@ -162,7 +174,7 @@ test("a decision column is an anyOf of an argued column and an unclear column, e
 // another shape.
 test("the prototype's schemas generate what the program sends", async () => {
   const { protoSchemas, protoRaw } = await import("../prototypes/protoSchemas.ts");
-  for (const [name, schema] of [["interviewTurn", S.InterviewTurn], ["decisionAnalysis", S.DecisionAnalysis], ["decisionResponse", S.DecisionResponse], ["decisionApplied", S.DecisionApplied], ["review", S.Review], ["plannerResponse", S.PlannerResponse], ["planWrite", S.PlanWriteResult], ["execReport", S.ExecReport], ["questionList", S.QuestionList], ["questionListResponse", S.QuestionListResponse], ["planReply", S.PlanWrite], ["planResponse", S.PlanResponse]] as const) {
+  for (const [name, schema] of [["interviewTurn", S.InterviewTurn], ["decisionAnalysis", S.DecisionAnalysis], ["decisionResponse", S.DecisionResponse], ["decisionApplied", S.DecisionApplied], ["review", S.Review], ["plannerResponse", S.PlannerResponse], ["planWrite", S.PlanWriteResult], ["execReport", S.ExecReport], ["questionList", S.QuestionList], ["questionListResponse", S.QuestionListResponse], ["planReply", S.PlanWrite], ["planResponse", S.PlanResponse], ["questionContext", S.QuestionContext]] as const) {
     assert.ok(protoSchemas[name] !== undefined, `the prototype does not send ${name}`);
     assert.deepEqual(protoRaw(protoSchemas[name]), rawJsonSchema(schema), name);
   }
@@ -182,7 +194,7 @@ test("the plan's agent schemas are total and closed", () => {
 // Issue #6 (Q1): the files of the plan's schemas in prototypes/proto-schema-output/ are what the program sends; they
 // are unproven until the developer's run of prototypes/proto-schema.ts (CLAUDE.md, "Not yet known").
 test("the plan's schema files in prototypes/proto-schema-output/ are what the program sends", () => {
-  for (const [name, schema] of [["planReply", S.PlanWrite], ["planResponse", S.PlanResponse]] as const) {
+  for (const [name, schema] of [["planReply", S.PlanWrite], ["planResponse", S.PlanResponse], ["questionContext", S.QuestionContext]] as const) {
     assert.deepEqual(rawJsonSchema(schema), proven(name, "raw"), `${name} raw`);
     assert.deepEqual(strict(rawJsonSchema(schema)), proven(name, "strict"), `${name} strict`);
   }

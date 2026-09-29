@@ -16,10 +16,14 @@ const Disposition = Schema.Struct({
   reverses: Str,
 });
 const SelfCorrection = Schema.Struct({ id: Str, new_action: Schema.Literals(["accepted", "rejected", "plan_error"]), explanation: Str });
-const UserQuestion = Schema.Struct({ question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) });
+// S3 of the task of issues #46 and #59 (29 Sep 2026): a question carries its context paragraph and its terms.
+const Term = Schema.Struct({ term: Str, explanation: Str });
+const QuestionOption = Schema.Struct({ label: Str, description: Str });
+const UserQuestion = Schema.Struct({ context: Str, question: Str, terms: Schema.Array(Term), options: Schema.Array(QuestionOption) });
 const plannerFields = { dispositions: Schema.Array(Disposition), self_corrections: Schema.Array(SelfCorrection), reviewer_feedback: Str, questions_for_user: Schema.Array(UserQuestion) };
 const QuestionEntry = Schema.Struct({
   id: Str,
+  context: Str,
   question: Str,
   reason: Str,
   proposed_answers: Schema.Array(Schema.Struct({ label: Str, description: Str })),
@@ -65,12 +69,14 @@ export const protoSchemas: Record<string, Schema.Top> = {
   execReport: Schema.Struct({ status: Schema.Literals(["finished", "needs_input", "blocked"]), summary: Str, question: Str, remaining_work: Str }),
   questionList: Schema.Struct({ questions: Schema.Array(QuestionEntry) }),
   questionListResponse: Schema.Struct({ ...plannerFields, questions: Schema.Array(QuestionEntry) }),
-  interviewTurn: Schema.Struct({ message_to_user: Str, current_question: Schema.Struct({ id: Str, text: Str }), asked_ids: Strings, answered_ids: Strings, complete: Schema.Boolean, summary: Str }),
+  interviewTurn: Schema.Struct({ message_to_user: Str, current_question: Schema.Struct({ id: Str, context: Str, text: Str, terms: Schema.Array(Term), options: Schema.Array(QuestionOption) }), asked_ids: Strings, answered_ids: Strings, complete: Schema.Boolean, summary: Str }),
   decisionAnalysis: DecisionAnalysis,
   decisionResponse: Schema.Struct({ ...plannerFields, analysis: DecisionAnalysis }),
   decisionApplied: Schema.Struct({ analysis: DecisionAnalysis }),
   planReply: Schema.Struct({ plan: Plan, questions_for_user: Schema.Array(UserQuestion) }),
   planResponse: Schema.Struct({ ...plannerFields, plan: Plan }),
+  // S9: the reply of the call that writes the context paragraph and the terms of a question the program composes.
+  questionContext: Schema.Struct({ context: Str, terms: Schema.Array(Term) }),
 };
 
 export type Json = Record<string, any>;

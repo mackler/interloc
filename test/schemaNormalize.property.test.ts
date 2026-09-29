@@ -10,6 +10,7 @@ const record = <T>(shape: { [K in keyof T]: fc.Arbitrary<T[K]> }): fc.Arbitrary<
 const label = fc.stringMatching(/^[a-z]{1,4}$/);
 const arbQuestion = record({
   id: fc.oneof({ weight: 6, arbitrary: fc.stringMatching(/^Q[0-9]{1,2}$/) }, { weight: 1, arbitrary: fc.constant("") }),
+  context: fc.string(),
   question: fc.string(),
   reason: fc.string(),
   proposed_answers: fc.array(record({ label, description: fc.string() }), { maxLength: 3 }),

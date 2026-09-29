@@ -11,6 +11,7 @@ type InterviewTurn = typeof S.InterviewTurn.Type;
 const noQuestions = { questions_for_user: [] };
 const q = (id: string): QuestionEntry => ({
   id,
+  context: "c",
   question: `question ${id}?`,
   reason: "the codebase does not determine it",
   proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }],
@@ -18,7 +19,7 @@ const q = (id: string): QuestionEntry => ({
 });
 const turn = (message: string, answered: string[], summary = ""): InterviewTurn => ({
   message_to_user: message,
-  current_question: { id: "", text: "" },
+  current_question: { id: "", context: "", text: "", terms: [], options: [] },
   asked_ids: answered,
   answered_ids: answered,
   complete: summary !== "",
@@ -177,7 +178,7 @@ test("/done ends the interview early", async () => {
 
 // Issue #21 (Q6): a follow-up question raises the total; Claude reports it in asked_ids with an id of its own.
 test("a follow-up asked during the clarification raises its total", async () => {
-  const withFollowUp = (message: string, asked: string[], answered: string[], summary = ""): InterviewTurn => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: asked, answered_ids: answered, complete: summary !== "", summary });
+  const withFollowUp = (message: string, asked: string[], answered: string[], summary = ""): InterviewTurn => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: asked, answered_ids: answered, complete: summary !== "", summary });
   const { layer, probe } = testLayer(tempRepo(), {
     answers: ["A", "3", ""],
     steps: [

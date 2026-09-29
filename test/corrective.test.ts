@@ -11,7 +11,7 @@ import { respond } from "./helpers.ts";
 const previous: PlannerResponse = respond([["P1-R2-1", "accepted"], ["P1-R2-2", "partially_accepted"], ["P1-R2-3", "rejected"]], {
   self_corrections: [{ id: "", new_action: "plan_error", explanation: "a slip" }],
   reviewer_feedback: "thanks",
-  questions_for_user: [{ question: "Which?", options: [] }],
+  questions_for_user: [{ context: "c", question: "Which?", terms: [], options: [] }],
 });
 const acceptedIds = previous.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
 

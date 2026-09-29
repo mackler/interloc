@@ -67,7 +67,7 @@ test("an interview turn is validated the same way", async () => {
     steps: [
       { output: { questions: [] } },
       { output: { message_to_user: 1 } },
-      { output: { message_to_user: "Noted.", current_question: { id: "", text: "" }, asked_ids: [], answered_ids: [], complete: true, summary: "# Requirements\n\nhello" } },
+      { output: { message_to_user: "Noted.", current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: [], answered_ids: [], complete: true, summary: "# Requirements\n\nhello" } },
       { output: noQuestions, plan: "v1" },
     ],
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],

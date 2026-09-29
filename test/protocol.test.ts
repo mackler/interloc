@@ -20,7 +20,7 @@ const phase = fc.oneof(fc.constant({ kind: "questions" as const }), fc.record({ 
 const agent = fc.constantFrom("claude" as const, "codex" as const);
 const reviewIssue = fc.record({ id: fc.string({ minLength: 1, maxLength: 8 }), severity: fc.constantFrom("blocking" as const, "major" as const, "minor" as const), location: text, problem: text, evidence: text });
 const review = fc.record({ issues: fc.array(reviewIssue, { maxLength: 3 }) });
-const userQuestion = fc.record({ question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 2 }) });
+const userQuestion = fc.record({ context: text, question: text, terms: fc.array(fc.record({ term: text, explanation: text }), { maxLength: 2 }), options: fc.array(fc.record({ label: text, description: text }), { maxLength: 2 }) });
 const disposition = fc.record({ id: text, action: fc.constantFrom("accepted" as const, "rejected" as const, "partially_accepted" as const, "no_change_needed" as const, "clarification_requested" as const), rationale: text, duplicate_of: text, reverses: text });
 const plannerResponse = fc.record({
   dispositions: fc.array(disposition, { maxLength: 3 }),
@@ -28,7 +28,7 @@ const plannerResponse = fc.record({
   reviewer_feedback: text,
   questions_for_user: fc.array(userQuestion, { maxLength: 2 }),
 });
-const questionEntry = fc.record({ id: text, question: text, reason: text, proposed_answers: fc.array(fc.record({ label: text, description: text }), { maxLength: 2 }), default_answer: text });
+const questionEntry = fc.record({ id: text, context: text, question: text, reason: text, proposed_answers: fc.array(fc.record({ label: text, description: text }), { maxLength: 2 }), default_answer: text });
 // Defect A of docs/page-question-phase-defects.md: the question subject's response carries the amended list too.
 const response = fc.oneof(plannerResponse, fc.tuple(plannerResponse, fc.array(questionEntry, { maxLength: 2 })).map(([r, questions]) => ({ ...r, questions })));
 const outcome = fc.record({ status: fc.constantFrom("finished" as const, "needs_input" as const, "blocked" as const, "aborted" as const), summary: text, question: text, remainingWork: text, userInput: fc.option(text, { nil: null }) });
@@ -174,7 +174,7 @@ const questionListResponse: QuestionListResponse = {
   self_corrections: [],
   reviewer_feedback: "",
   questions_for_user: [],
-  questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }], default_answer: "PostgreSQL" }],
+  questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }], default_answer: "PostgreSQL" }],
 };
 const responseEvent = (subject: SubjectId, response: QuestionListResponse | Omit<QuestionListResponse, "questions"> | DecisionResponse): RunEvent => ({ _tag: "Notified", event: { _tag: "ResponseReceived", subject, round: 1, response, resultText: "" } });
 

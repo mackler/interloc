@@ -16,7 +16,7 @@ const run = Effect.runPromise;
 // Plan step 3.4: the server over NodeHttpServer.layerTest, with Node's WebSocket as the scripted client.
 const noQuestions = { questions_for_user: [] };
 const converging: TestOptions = { steps: [{ output: noQuestions, plan: "v1" }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] };
-const withQuestion: TestOptions = { steps: [{ output: { questions_for_user: [{ question: "Which?", options: [] }] }, plan: "v1" }, { output: noQuestions }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] };
+const withQuestion: TestOptions = { steps: [{ output: { questions_for_user: [{ context: "c", question: "Which?", terms: [], options: [] }] }, plan: "v1" }, { output: noQuestions }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] };
 
 const managerOf = async (repo: string, scripts: TestOptions[]): Promise<RunManager> => {
   const queue = [...scripts];

@@ -80,7 +80,7 @@ test("a run: Started, the Ui's events, Ended 0; conversation.md is byte-identica
 
 test("a question is answered through the manager, with the same text the terminal would send", async () => {
   const repo = tempRepo();
-  const h = await harness(repo, [{ steps: [{ output: { questions_for_user: [{ question: "Which database?", options: [] }] }, plan: "v1" }, { output: noQuestions }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] }]);
+  const h = await harness(repo, [{ steps: [{ output: { questions_for_user: [{ context: "c", question: "Which database?", terms: [], options: [] }] }, plan: "v1" }, { output: noQuestions }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] }]);
   const id = await started(h, repo);
   const asked = await pendingAsk(h, id);
   assert.equal(asked.kind, "decision");
@@ -107,7 +107,7 @@ test("start while a run is active is refused; a bad project path is refused with
 
 test("stop interrupts the run like Ctrl+C; answers and stops naming an ended run are refused; a new run gets a new id", async () => {
   const repo = tempRepo();
-  const h = await harness(repo, [{ steps: [{ output: { questions_for_user: [{ question: "Which?", options: [] }] }, plan: "v1" }] }, converging]);
+  const h = await harness(repo, [{ steps: [{ output: { questions_for_user: [{ context: "c", question: "Which?", terms: [], options: [] }] }, plan: "v1" }] }, converging]);
   const first = await started(h, repo);
   const asked = await pendingAsk(h, first);
   assert.equal(await run(h.manager.stop(h.manager.incarnation, first)), null);
@@ -145,7 +145,7 @@ test("the replay during a run holds the last run and the current one", async () 
 
 test("an interview's numbered answer sent through the manager reaches Claude Code as the terminal's text", async () => {
   const repo = tempRepo();
-  const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, current_question: { id: "", text: "" }, asked_ids: [], answered_ids: [], complete, summary });
+  const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: [], answered_ids: [], complete, summary });
   const h = await harness(repo, [
     {
       config: { questionPhase: true },
@@ -272,7 +272,7 @@ test("start interrupted while Started is being delivered leaves a run that can b
 // Finding 12 of docs/gui-review.md: an action of another incarnation is refused even when its numbers match.
 test("a stop and an answer with the current run's numbers but another incarnation are refused, and the run continues", async () => {
   const repo = tempRepo();
-  const withQuestion: TestOptions = { steps: [{ output: { questions_for_user: [{ question: "Which?", options: [] }] }, plan: "v1" }, { output: noQuestions }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] };
+  const withQuestion: TestOptions = { steps: [{ output: { questions_for_user: [{ context: "c", question: "Which?", terms: [], options: [] }] }, plan: "v1" }, { output: noQuestions }], reviews: [{ issues: [] }, { issues: [] }], execs: [finished] };
   const h = await harness(repo, [withQuestion]);
   const id = await started(h, repo);
   const asked = await pendingAsk(h, id);

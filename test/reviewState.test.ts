@@ -108,7 +108,7 @@ test("accepted without a change of the file is the pause; Stop halts", () => {
 test("the pauses ask in the decided order and a decision leads to ApplyDecisions before the log", () => {
   const log = [entry("C", "accepted"), entry("O", "rejected")];
   const dispositions = respond([["A", "clarification_requested"], ["B", "rejected"], ["N", "rejected"]]).dispositions.map((d) => (d.id === "B" ? { ...d, reverses: "C" } : d.id === "N" ? { ...d, duplicate_of: "O" } : d));
-  const resp = { ...respond([]), dispositions, self_corrections: [{ id: "C", new_action: "rejected" as const, explanation: "x" }], questions_for_user: [{ question: "Which?", options: [] }] };
+  const resp = { ...respond([]), dispositions, self_corrections: [{ id: "C", new_action: "rejected" as const, explanation: "x" }], questions_for_user: [{ context: "c", question: "Which?", terms: [], options: [] }] };
   const t = run(afterReview([...log, entry("A", "clarification_requested")], [issue("A"), issue("B"), issue("N")]), { kind: "ResponseDecoded", response: resp, resultText: "", costUsd: null });
   const subjects: string[] = [];
   let step = t;
@@ -389,7 +389,7 @@ test("each disputed pause offers the two positions; a question offers its option
     { id: "B", action: "rejected" as const, rationale: "C must stay", duplicate_of: "", reverses: "C" },
     { id: "N", action: "rejected" as const, rationale: "as before", duplicate_of: "O", reverses: "" },
   ];
-  const question = { question: "Which?", options: [{ label: "X", description: "x" }, { label: "Y", description: "y" }] };
+  const question = { context: "c", question: "Which?", terms: [], options: [{ label: "X", description: "x" }, { label: "Y", description: "y" }] };
   const resp = { ...respond([]), dispositions, self_corrections: [{ id: "C", new_action: "rejected" as const, explanation: "C was wrong" }], questions_for_user: [question] };
   let step = run(afterReview(log.map((e) => (e.id === "O" ? { ...e, rationale: "O is fine" } : e.id === "C" ? { ...e, problem: "C was missing" } : e)), issues), { kind: "ResponseDecoded", response: resp, resultText: "", costUsd: null });
   const seen: (readonly { label: string; description: string }[])[] = [];

@@ -67,7 +67,7 @@ describe("ordering and the panels", () => {
   });
 
   test("a plan write is one program message with its result text and questions, live and after a replay", () => {
-    const events: RunEvent[] = [started, notified({ _tag: "PlanWritten", phase: 1, questions: [{ question: "Which?", options: [] }], resultText: "I wrote the plan." })];
+    const events: RunEvent[] = [started, notified({ _tag: "PlanWritten", phase: 1, questions: [{ context: "c", question: "Which?", terms: [], options: [] }], resultText: "I wrote the plan." })];
     for (const s of [fold(live(events)), replayed(events)]) {
       const m = s.run?.left.at(-1);
       expect(m?.format).toBe("markdown");
@@ -546,7 +546,7 @@ describe("a replay of a question phase", () => {
           self_corrections: [],
           reviewer_feedback: "",
           questions_for_user: [],
-          questions: [{ id: "Q1", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }],
+          questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }],
         },
         resultText: "",
       }),

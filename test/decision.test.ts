@@ -271,7 +271,7 @@ test("a decision inside a decision: a pause of decision 1 opens decision 2 in th
     // "" is no decision at decision 1's idle pause (two cycles without an amendment).
     answers: ["/decide", "/decide", "2", "", "1"],
     steps: [
-      { output: { questions_for_user: [{ question: "Which database?", options: question.options }] }, plan: "v1" },
+      { output: { questions_for_user: [{ context: "c", question: "Which database?", terms: [], options: question.options }] }, plan: "v1" },
       { output: analysis() },
       { output: decisionResponse([["D1-R1-1", "rejected"]], analysis()) },
       { output: twoColumns(prompts.REVIEWER_POSITION, prompts.PLANNER_POSITION) },
@@ -368,7 +368,7 @@ test("a review response with an invalid analysis gets the validation repair turn
 });
 
 test("the application of the user's decisions with an invalid analysis gets the validation repair turn", async () => {
-  const withQuestion = { ...decisionResponse([["D1-R1-1", "accepted"]], analysis("second")), questions_for_user: [{ question: "Which one?", options: [] }] };
+  const withQuestion = { ...decisionResponse([["D1-R1-1", "accepted"]], analysis("second")), questions_for_user: [{ context: "c", question: "Which one?", terms: [], options: [] }] };
   const { layer, probe } = await setUp({
     answers: ["the first"],
     steps: [{ output: analysis() }, { output: withQuestion }, { output: { analysis: misnamed() } }, { output: { analysis: analysis("third") } }],
@@ -420,7 +420,7 @@ test("a decision names its phase by the run's count: Planning in a run of one it
   const { countOfKind, foreseenPhases, phaseName } = await import("../src/uiEvents.ts");
   const { finished } = await import("./helpers.ts");
   const noQuestions = { questions_for_user: [] };
-  const asking = { questions_for_user: [{ question: question.question, options: question.options }] };
+  const asking = { questions_for_user: [{ context: "c", question: question.question, terms: [], options: question.options }] };
   const expected = (iterations: number, n: number) => `The run is in ${phaseName({ kind: "planning", n }, countOfKind(foreseenPhases(false, iterations), "planning"))}.`;
   const analysisPrompt = (prompts: readonly string[]) => prompts.find((p) => p.includes(prompts_.DECISION_FORMAT_AUTHORITY)) ?? "";
   const prompts_ = prompts;

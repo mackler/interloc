@@ -190,7 +190,7 @@ test("a run with the terminal Ui prints every line of a multiline analysis text 
     ],
     recommendation: { option: "", reason: "" },
   };
-  const question = { question: "Which database?", options: [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "a server" }] };
+  const question = { context: "c", question: "Which database?", terms: [], options: [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "a server" }] };
   const io = streams();
   const { wiring } = testWiring(tempRepo(), {
     steps: [{ output: { questions_for_user: [question] }, plan: "1. [ ] the step\n" }, { output: analysis }, { output: { questions_for_user: [] } }],

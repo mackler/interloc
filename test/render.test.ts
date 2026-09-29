@@ -34,7 +34,7 @@ test("renderDecision gives the record line and the conversation line of one deci
 test("renderFeedback and renderQuestions", () => {
   assert.equal(renderFeedback("Planning phase 1", 2, "too strict"), "## Planning phase 1, round 2\ntoo strict\n\n");
   assert.equal(renderQuestions({ questions: [] }), "The list is empty.\n");
-  const list = { questions: [{ id: "Q1", question: "A or B?", reason: "r", proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }], default_answer: "B" }] };
+  const list = { questions: [{ id: "Q1", context: "c", question: "A or B?", reason: "r", proposed_answers: [{ label: "A", description: "a" }, { label: "B", description: "b" }], default_answer: "B" }] };
   assert.equal(renderQuestions(list), "- **[Q1]** A or B?\n  Reason: r\n  - A: a\n  - B: b (default)\n");
   assert.match(renderQuestions({ questions: [{ ...list.questions[0], default_answer: null }] }), /- B: b\n$/);
 });
