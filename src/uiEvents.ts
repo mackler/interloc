@@ -48,6 +48,11 @@ export type UiEvent =
    * (`questionLines` in src/render.ts) and the page shows it with its options. The prompt that asks it follows.
    */
   | Readonly<{ _tag: "QuestionPresented"; question: PresentedQuestion }>
+  /**
+   * The analysis of decision k is being prepared (S21, Q4): check 0 while it is written, then the number of Codex's checks
+   * so far; `question` is the number of the question it is for. The user reads one plain status, not the loop's cycles.
+   */
+  | Readonly<{ _tag: "AnalysisProgress"; decision: number; question: number | null; check: number }>
   /** A decision loop has ended: its analysis, shown before the question is asked again (decision support). */
   | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>
   /** The last answer was rejected (a blank reply where one is required) and the question is asked again (W3-R1-1); for the page. */
@@ -120,6 +125,8 @@ export const describeEvent = (event: UiEvent): string => {
       return `decision ${event.decision} analyzed: ${event.question} (${plural(event.analysis.columns.length, "column")})`;
     case "AnswerRejected":
       return "answer rejected, asked again";
+    case "AnalysisProgress":
+      return `decision ${event.decision}, check ${event.check}`;
     case "PhasesForeseen":
       return `phases foreseen: ${event.phases.map(numberedName).join(", ")}`;
     case "PlanChanged": {

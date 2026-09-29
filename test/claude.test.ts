@@ -577,7 +577,7 @@ test("a relayed question with options offers Help me decide, presents the questi
   const fake = await planner([script], ["/decide", "2"]);
   const { decider, requests } = recordingDecider();
   await run(fake.planner.planning("write the plan", schema), decider);
-  assert.deepEqual(requests, [{ question: "A or B?", options: questions[0].options }]);
+  assert.deepEqual(requests, [{ question: "A or B?", options: questions[0].options, number: 1 }]);
   assert.ok(fake.ui.asked.every((a) => a.startsWith(prompts.OFFER_LINE)));
   assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionPresented").length, 2, "the question is presented again after the analysis");
   assert.ok(fake.ui.notified.some((e) => e._tag === "DecisionAnalyzed"));

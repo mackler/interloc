@@ -7,9 +7,9 @@ import { writeContext } from "./questionContext.ts";
 import { Effect, Layer, Result } from "effect";
 import { validateAnalysis } from "./analysis.ts";
 import type { RunError } from "./errors.ts";
-import { analysisRepairPrompt, decisionAnalysisPrompt, decisionBeganLine } from "./prompts.ts";
+import { analysisRepairPrompt, decisionAnalysisPrompt } from "./prompts.ts";
 import { renderDecisionOpened, renderLabelCorrected, renderReferenceDropped } from "./render.ts";
-import { planningCall, reviewLoop, type Validation } from "./review.ts";
+import { analysisProgress, planningCall, reviewLoop, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
 import type { DecisionAnalysis } from "./schema.ts";
 import { Decider, type DecisionQuestion, type DeciderShape, Planner, type Reviewer, type RunConfig, type Services, Store, Ui } from "./services.ts";
@@ -35,7 +35,7 @@ export const analysisValidation =
     return Result.succeed({ value: validated.success.analysis, notes });
   };
 /** One decision loop: the analysis, its review to convergence (or the user's proceed), and the analysis as it stands. */
-export const decisionLoop = (format: string, task: string, question: DecisionQuestion): Effect.Effect<DecisionEnd, RunError, Services> =>
+export const decisionLoop = (format: string, task: string, question: DecisionQuestion, number: number | null = null): Effect.Effect<DecisionEnd, RunError, Services> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const ui = yield* Ui;
@@ -43,14 +43,15 @@ export const decisionLoop = (format: string, task: string, question: DecisionQue
     const planner = yield* (yield* Planner).fresh;
     const k = yield* store.openDecision(question);
     yield* store.converse(renderDecisionOpened(k, question.question, question.options));
-    yield* ui.say(decisionBeganLine(k));
+    // S21 (Q4): one plain status while the analysis is prepared, from the moment the offer is taken.
+    yield* analysisProgress(k, number, 0);
     const context = { task, ...(yield* store.readContext()) };
     const validate = analysisValidation(question.options);
     const loop = Effect.gen(function* () {
       const written = yield* planningCall(decisionAnalysisPrompt(format, question, context), S.DecisionAnalysis, "planning", "records", validate);
       yield* store.saveAnalysisWrite(k, written.reply);
       yield* store.saveAnalysis(k, written.output);
-      return yield* reviewLoop(decisionSubject(k, phaseNumber(question.phase), format, validate));
+      return yield* reviewLoop({ ...decisionSubject(k, phaseNumber(question.phase), format, validate), question: number });
     }).pipe(Effect.provideService(Planner, planner));
     const end = yield* loop;
     return { decision: k, question, analysis: yield* store.loadAnalysis(k), result: end.result };
@@ -73,7 +74,7 @@ export const makeDecider = (task: string, format: string): Effect.Effect<Decider
       const self: DeciderShape = {
         at,
         decide: (request) =>
-          decisionLoop(format, task, { phase, label, ...request }).pipe(
+          decisionLoop(format, task, { phase, label, question: request.question, options: request.options }, request.number ?? null).pipe(
             Effect.map((end) => ({ decision: end.decision, analysis: end.analysis, result: end.result })),
             Effect.provideService(Decider, self),
             Effect.provideContext(context),

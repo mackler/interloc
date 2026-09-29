@@ -64,6 +64,8 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
    * subject with a value has its file's change measured in the issue log (issue #31).
    */
   onUnchanged: "corrective" | "pause" | null;
+  /** A decision's subject: the number of the question its analysis is for (S21), which its progress names; absent otherwise. */
+  question?: number | null;
   /** Run before every round's Codex turn, before its guard's snapshot (the work review rewrites changes.diff); null otherwise. */
   prepare: Effect.Effect<void, RunError, Services> | null;
 }>;
@@ -270,6 +272,14 @@ export const applyDecisions = <R extends PlannerResponse, D>(subject: Subject<R,
     if (subject.applyDecisions.after !== null) yield* subject.applyDecisions.after(call.output);
   });
 
+/** The one status of an analysis being prepared (S21, Q4): notified for the page, said for the terminal. */
+export const analysisProgress = (decision: number, question: number | null, check: number): Effect.Effect<void, never, Ui> =>
+  Effect.gen(function* () {
+    const ui = yield* Ui;
+    yield* ui.notify({ _tag: "AnalysisProgress", decision, question, check });
+    yield* ui.say(prompts.analysisProgressLine(decision, question, check));
+  });
+
 /**
  * The review procedure, as the interpreter of src/reviewState.ts: every command of a transition is executed
  * against the services, and the command that yields an event (the last of its batch) drives the next
@@ -327,10 +337,12 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
       Effect.gen(function* () {
         switch (command.kind) {
           case "Say":
-            yield* ui.say(command.text);
+            // S21: a decision's loop says the analysis's progress instead of its cycles.
+            if (command.status !== true || within === null) yield* ui.say(command.text);
             return null;
           case "Notify":
             yield* ui.notify(command.event);
+            if (within !== null && command.event._tag === "RoundBegan") yield* analysisProgress(within, subject.question ?? null, command.event.round);
             return null;
           case "Converse":
             yield* store.converse(command.markdown);

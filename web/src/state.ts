@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
-import { clarificationProgress, cycleHeading, reconnectingActivity, retryActivity, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
+import { analysisProgressLine, clarificationProgress, cycleHeading, reconnectingActivity, retryActivity, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, questionMarkdown, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { correctionCount } from "../../src/issueLog.ts";
 import { countOfKind, type LoopResult, type Phase, phaseName, type StepReport, type UiEvent } from "../../src/uiEvents.ts";
@@ -514,6 +514,16 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
         ...withLeft(run, message(run, time, "program", questionMarkdown(event.question), "markdown")),
         questionOptions: event.question.options.flatMap((o) => ("token" in o.answer ? [{ label: o.description === "" ? o.label : `${o.label} — ${o.description}`, sends: o.answer.token }] : [])),
       };
+    case "AnalysisProgress": {
+      // S21 (Q4): one plain status while the analysis is prepared, updated in place; the terminal's line of it that
+      // follows is absorbed.
+      const text = analysisProgressLine(event.decision, event.question, event.check);
+      const key = `${run.id}-analysis-${event.decision}`;
+      const shown = run.left.some((m) => m.key === key)
+        ? { ...run, left: run.left.map((m) => (m.key === key ? { ...m, body: text.trim() } : m)) }
+        : withLeft(run, { ...message(run, time, "program", text.trim(), "text"), key });
+      return { ...shown, absorb: [text] };
+    }
     case "DecisionAnalyzed":
       return { ...run, analysis: { event, prompt: null } };
     case "AnswerRejected":

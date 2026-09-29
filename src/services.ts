@@ -166,7 +166,7 @@ export interface StoreShape {
 export class Store extends Context.Service<Store, StoreShape>()("plan-review/Store") {}
 
 /** A question a decision analyzes, without its phase: the Decider adds the phase it is bound to. */
-export type DecisionRequest = Readonly<{ question: string; options: UserQuestion["options"] }>;
+export type DecisionRequest = Readonly<{ question: string; options: UserQuestion["options"]; /** The displayed number of the question (S21), for the progress the user reads; no record keeps it. */ number?: number | null }>;
 /** How a decision loop ended: its number, the analysis as it stands, and the loop's result. */
 export type DecisionOutcome = Readonly<{ decision: number; analysis: DecisionAnalysis; result: LoopResult }>;
 /**

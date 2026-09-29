@@ -140,7 +140,7 @@ export const askOffering = <E>(
       const answer = yield* ask(prompts.withOffer(hint));
       if (isDecide(answer)) {
         const asked = decisionQuestionOf(draft);
-        const outcome = yield* decider.decide({ question: asked, options });
+        const outcome = yield* decider.decide({ question: asked, options, number: question.number });
         decisions.push(outcome.decision);
         yield* ui.notify({ _tag: "DecisionAnalyzed", decision: outcome.decision, question: asked, options, analysis: outcome.analysis });
         yield* present;

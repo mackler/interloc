@@ -24,7 +24,8 @@ export type DecisionEvent = Readonly<{ subject: string; id: IssueId | null; deci
 
 /** What the loop asks the interpreter to do. A batch ends with at most one command that yields an event. */
 export type ReviewCommand =
-  | Readonly<{ kind: "Say"; text: string }>
+  /** `status`: a line about the loop's own progress (a cycle begins, its count, the response), which a decision's loop does not say (S21). */
+  | Readonly<{ kind: "Say"; text: string; status?: true }>
   | Readonly<{ kind: "Notify"; event: UiEvent }>
   | Readonly<{ kind: "Converse"; markdown: string }>
   | Readonly<{ kind: "RecordDecision"; decision: DecisionEvent }>
@@ -198,6 +199,7 @@ export const initialState = (setup: ReviewSetup, config: Pick<Config, "maxRounds
 // ---- rendering ----------------------------------------------------------------------------------
 
 const say = (text: string): ReviewCommand => ({ kind: "Say", text });
+const status = (text: string): ReviewCommand => ({ kind: "Say", text, status: true });
 /** The prefix of a subject's issue ids, as its review prompt names them (plan 2.5). */
 const idPrefixOf = (subject: SubjectId): string => (subject === "questions" ? "Q" : subject === "terms" ? "T" : subject === "requirements" ? "G" : "plan" in subject ? "P" : "work" in subject ? "W" : "D");
 const notify = (event: UiEvent): ReviewCommand => ({ kind: "Notify", event });
@@ -230,7 +232,7 @@ const startRound = (s: ReviewState): Transition => {
   }
   return {
     state: { ...s, round: n, step: { name: "awaitingReview" }, current: { ...freshRound, startText: s.lastText, startLog: s.log } },
-    commands: [notify({ _tag: "RoundBegan", subject: s.setup.subject, round: n, limit: s.limit }), say(prompts.cycleReviewLine(heading, n)), { kind: "CallReviewer", round: n }],
+    commands: [notify({ _tag: "RoundBegan", subject: s.setup.subject, round: n, limit: s.limit }), status(prompts.cycleReviewLine(heading, n)), { kind: "CallReviewer", round: n }],
   };
 };
 
@@ -250,7 +252,7 @@ const onLimitAnswer = (s: ReviewState, answer: string): Transition => {
 /** After the reraised prompts: the planner's response. */
 const toResponse = (s: ReviewState, before: readonly ReviewCommand[] = []): Transition => ({
   state: { ...s, step: { name: "awaitingResponse" } },
-  commands: [...before, say(prompts.cycleResponseLine(s.setup.heading, s.round)), { kind: "CallPlanner", round: s.round }],
+  commands: [...before, status(prompts.cycleResponseLine(s.setup.heading, s.round)), { kind: "CallPlanner", round: s.round }],
 });
 
 const askEach = (s: ReviewState, queue: readonly Ask[], step: (asking: Ask, rest: readonly Ask[]) => Step, otherwise: (s: ReviewState, before: readonly ReviewCommand[]) => Transition, before: readonly ReviewCommand[] = []): Transition => {
@@ -270,7 +272,7 @@ const onReviewDecoded = (s: ReviewState, review: Review): Transition => {
     { kind: "SaveReview", round: n, review },
     { kind: "SaveRound", record: { kind: "no_response", subject: s.setup.dirName, phase: s.setup.phase, round: n, reconstructed: false, review: checked.success } },
     notify({ _tag: "ReviewReceived", subject: s.setup.subject, round: n, review, counted }),
-    say(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`),
+    status(`Issues: ${review.issues.length} total, ${counted} counted toward convergence.`),
   ];
   if (counted === 0) {
     return done(state, { kind: "Finish", result: "converged" }, [...before, { kind: "Converse", markdown: `## ${heading}, round ${n}\n\n### Codex\n\nNo counted issue. The review of ${fileLabel} has converged.\n\n` }, checkpoint(state, "reviewed"), notify({ _tag: "LoopFinished", subject: s.setup.subject, result: "converged" })]);

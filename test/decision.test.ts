@@ -472,3 +472,20 @@ test("a question raised inside a decision says that it belongs to that decision 
   assert.ok(probe.ui.asked[0].startsWith(prompts.OFFER_LINE), "the question inside the decision lost the offer");
   assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /belongs to Decision 1/);
 });
+
+// S21 (Q4, issue #57): while an analysis is prepared, the user reads one plain status, not the review loop's cycle lines.
+test("a decision loop says one plain status per check of its analysis, not the cycle lines; conversation.md keeps the record", async () => {
+  const { layer, probe } = await setUp({
+    steps: [{ output: analysis() }, { output: decisionResponse([["D1-R1-1", "accepted"]], analysis("second")) }],
+    reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
+  });
+  await Effect.runPromise(decisionLoop(FORMAT, "the task", question, 7).pipe(Effect.provide(layer)));
+  const progress = probe.ui.notified.flatMap((e) => (e._tag === "AnalysisProgress" ? [[e.decision, e.question, e.check]] : []));
+  assert.deepEqual(progress, [[1, 7, 0], [1, 7, 1], [1, 7, 2]]);
+  assert.deepEqual(probe.ui.said.filter((l) => l.includes("analysis")), [0, 1, 2].map((n) => prompts.analysisProgressLine(1, 7, n)));
+  assert.ok(!probe.ui.said.some((l) => /cycle \d|Issues: \d|Codex review|Claude Code response/.test(l)), probe.ui.said.join("\n"));
+  assert.match(prompts.analysisProgressLine(1, 7, 2), /Question 7.*check 2 so far/);
+  assert.doesNotMatch(prompts.analysisProgressLine(1, 7, 2), /cycle|round/);
+  const conversation = fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8");
+  assert.match(conversation, /## Decision 1, round 1/);
+});

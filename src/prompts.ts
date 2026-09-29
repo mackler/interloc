@@ -1050,9 +1050,13 @@ export function decisionApplyDecisionsPrompt(k: number): string {
 Return in 'analysis' the complete analysis of plan-review/${pathOf({ kind: "analysis", decision: k })}, amended where a decision requires it; the program writes it. Do not modify any file.`;
 }
 
-/** The terminal line when a decision loop begins. */
-export function decisionBeganLine(k: number): string {
-  return `\nDecision ${k}: Claude Code works out the arguments for and against each option ...`;
+/**
+ * The one status the user reads while the analysis he asked for is prepared (S21, Q4): check 0 while Claude Code writes
+ * it, then how many times Codex has checked it so far; never the review loop's cycles.
+ */
+export function analysisProgressLine(decision: number, question: number | null, check: number): string {
+  const which = question === null ? `Your analysis (Decision ${decision})` : `Your analysis for Question ${question} (Decision ${decision})`;
+  return check === 0 ? `\n${which} is being written. It will be shown when it is ready.` : `${which} is being written and checked (check ${check} so far). It will be shown when it is ready.`;
 }
 /** The offer's label (docs/decision-support-design.md, section 1): one per question, never one per option. */
 export const HELP_ME_DECIDE = "Help me decide";

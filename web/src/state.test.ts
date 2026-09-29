@@ -795,6 +795,15 @@ describe("decision support", () => {
     expect(s.run?.pending?.options.map((c) => c.label)).toEqual(["A", "B"]);
   });
 
+  // S21 (Q4): while the analysis is prepared, one plain status message, updated in place at every check.
+  test("the analysis's progress is one message, updated in place, live and after a replay", () => {
+    const progress = (check: number): RunEvent => notified({ _tag: "AnalysisProgress", decision: 1, question: 3, check });
+    const events: RunEvent[] = [started, said("a"), progress(0), progress(1), said("b"), progress(2)];
+    for (const s of [fold(live(events)), replayed(events)]) {
+      expect(bodies(s)).toEqual(["program:a", `program:${prompts.analysisProgressLine(1, 3, 2).trim()}`, "program:b"]);
+    }
+  });
+
   test("an analysis is kept for the reasked prompt and cleared by its answer; a decision loop adds nothing to the rail", () => {
     const loop: RunEvent[] = [
       notified({ _tag: "RoundBegan", subject: { decision: 1 }, round: 1, limit: 5 }),

@@ -96,6 +96,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
     step: fc.option(fc.record({ id: text, status: fc.constantFrom("started" as const, "done" as const) }), { nil: null }),
   }),
   fc.record({ _tag: fc.constant("QuestionPresented" as const), question: presentedQuestion }),
+  fc.record({ _tag: fc.constant("AnalysisProgress" as const), decision: nat, question: fc.option(nat, { nil: null }), check: nat }),
   fc.record({
     _tag: fc.constant("DecisionAnalyzed" as const),
     decision: nat,
