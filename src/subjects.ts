@@ -112,7 +112,7 @@ export const savePlan = (phase: number, plan: Plan, previous: RecordedPlan | nul
   Effect.gen(function* () {
     const recorded = yield* Effect.fromResult(validatePlan(previous, plan));
     yield* (yield* Store).savePlan(recorded.value);
-    yield* (yield* Ui).notify({ _tag: "PlanChanged", phase, plan: recorded.value });
+    yield* (yield* Ui).notify({ _tag: "PlanChanged", phase, plan: recorded.value, step: null });
   });
 
 /**

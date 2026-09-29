@@ -77,7 +77,8 @@ export const UiEventSchema = Schema.Union([
   tagged("AnswerRejected", {}),
   tagged("DecisionAnalyzed", { decision: Int, question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })), analysis: S.DecisionAnalysis }),
   tagged("PhasesForeseen", { phases: Schema.Array(PhaseSchema) }),
-  tagged("PlanChanged", { phase: Int, plan: S.RecordedPlan }),
+  // Issue #53 (G-R1-1): the report of a step that caused it, or null for a plan the program wrote.
+  tagged("PlanChanged", { phase: Int, plan: S.RecordedPlan, step: Schema.NullOr(Schema.Struct({ id: Str, status: Schema.Literals(["started", "done"]) })) }),
 ]);
 
 const ChoiceSchema = Schema.Struct({ label: Str, sends: Str });

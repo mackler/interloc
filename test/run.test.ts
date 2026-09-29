@@ -443,6 +443,8 @@ test("a plan write saves plan.json and plan.md and notifies the plan for its pha
   assert.match(fs.readFileSync(path.join(probe.dir, "plan.md"), "utf8"), /second text/);
   const changed = probe.ui.notified.filter((e) => e._tag === "PlanChanged");
   assert.deepEqual(changed.map((e) => (e._tag === "PlanChanged" ? [e.phase, e.plan.stages[0].steps[0].text] : null)), [[1, "first text"], [1, "second text"]]);
+  // Issue #53: a plan written by the program names no report of a step.
+  assert.ok(changed.every((e) => e._tag === "PlanChanged" && e.step === null));
   // The planner's schema carries the plan (F1).
   assert.ok(probe.planner.schemas.slice(0, 2).every((s) => s === S.PlanWrite || s === S.PlanResponse));
 });

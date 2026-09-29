@@ -9,6 +9,7 @@ import { endExecution, recordStep } from "./plan.ts";
 import { stepRecordedText, unknownStepText } from "./prompts.ts";
 import type { RecordedPlan } from "./schema.ts";
 import { type StepReporter, Store, Ui } from "./services.ts";
+import type { StepReport } from "./uiEvents.ts";
 
 /** The reporter of execution phase k, and what is done when its call has ended. */
 export type ExecutionSteps = Readonly<{ report: StepReporter; end: Effect.Effect<void, RunError> }>;
@@ -26,8 +27,9 @@ export const executionSteps = (phase: number): Effect.Effect<ExecutionSteps, Run
     const ui = yield* Ui;
     const held = yield* Ref.make(Option.getOrNull(yield* store.loadPlan()));
     const lock = yield* Semaphore.make(1);
-    const write = (plan: RecordedPlan, notify: boolean) =>
-      store.savePlan(plan).pipe(Effect.andThen(notify ? ui.notify({ _tag: "PlanChanged", phase, plan }) : Effect.void));
+    // Issue #53: the notification names the report that caused it; the end's names none.
+    const write = (plan: RecordedPlan, notify: boolean, step: StepReport | null) =>
+      store.savePlan(plan).pipe(Effect.andThen(notify ? ui.notify({ _tag: "PlanChanged", phase, plan, step }) : Effect.void));
     const report: StepReporter = (id, status) =>
       lock.withPermits(1)(
         Effect.gen(function* () {
@@ -35,7 +37,7 @@ export const executionSteps = (phase: number): Effect.Effect<ExecutionSteps, Run
           const recorded = plan === null ? null : recordStep(plan, id, status);
           if (recorded === null || Result.isFailure(recorded)) return { text: unknownStepText(id, idsOf(plan)), isError: true };
           yield* Ref.set(held, recorded.success);
-          yield* write(recorded.success, true);
+          yield* write(recorded.success, true, { id, status });
           return { text: stepRecordedText(id, status), isError: false };
         }),
       );
@@ -45,7 +47,7 @@ export const executionSteps = (phase: number): Effect.Effect<ExecutionSteps, Run
         if (plan === null) return;
         const ended = endExecution(plan);
         yield* Ref.set(held, ended);
-        yield* write(ended, JSON.stringify(ended) !== JSON.stringify(plan));
+        yield* write(ended, JSON.stringify(ended) !== JSON.stringify(plan), null);
       }),
     );
     return { report, end };

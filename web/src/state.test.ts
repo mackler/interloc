@@ -410,7 +410,7 @@ describe("runs, replay and gaps", () => {
       // Issue #6: the phases ahead, the plan, and nested calls.
       { _tag: "PhasesForeseen", phases: foreseenPhases(true, 1) },
       { _tag: "PhasesForeseen", phases: foreseenPhases(true, 2) },
-      { _tag: "PlanChanged", phase: 1, plan: { stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "l", text: "x", status: "started" }] }] } },
+      { _tag: "PlanChanged", phase: 1, plan: { stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "l", text: "x", status: "started" }] }] }, step: null },
       { _tag: "PhaseBegan", phase: { kind: "execution", n: 1 } },
       { _tag: "AgentCallEnded", agent: "claude", ok: true },
     ).map(notified),
@@ -824,7 +824,7 @@ test("a rejected blank reply keeps the analysis for the retry; an accepted empty
 describe("the plan", () => {
   const planOf = (id: string, status: "pending" | "done") => ({ stages: [{ number: 1, title: "t", steps: [{ id, number: 1, label: "l", text: "x", status }] }] });
   test("PlanChanged keeps the latest plan and its phase, live and after a replay", () => {
-    const events = [started, notified({ _tag: "PlanChanged", phase: 1, plan: planOf("S1", "pending") }), notified({ _tag: "PlanChanged", phase: 2, plan: planOf("S2", "done") })];
+    const events = [started, notified({ _tag: "PlanChanged", phase: 1, plan: planOf("S1", "pending"), step: null }), notified({ _tag: "PlanChanged", phase: 2, plan: planOf("S2", "done"), step: null })];
     const s = fold(live(events));
     expect(s.run?.plan).toEqual({ phase: 2, plan: planOf("S2", "done") });
     expect(replayed(events).run?.plan).toEqual(s.run?.plan);
@@ -903,13 +903,13 @@ describe("the whole run in the timeline", () => {
   });
 
   test("the plan hangs under the Implementation of its phase, and a revision moves it there (Q5, Q9)", () => {
-    const first = [started, foreseen(false, 1), began({ kind: "planning", n: 1 }), notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "pending") })];
+    const first = [started, foreseen(false, 1), began({ kind: "planning", n: 1 }), notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "pending"), step: null })];
     const one = fold(live(first));
     expect(one.run?.timeline.map((e) => e.plan)).toEqual([null, recorded("S1", "pending"), null]);
-    const revised = fold(live([...first, foreseen(false, 2), notified({ _tag: "PlanChanged", phase: 2, plan: recorded("S2", "pending") })]));
+    const revised = fold(live([...first, foreseen(false, 2), notified({ _tag: "PlanChanged", phase: 2, plan: recorded("S2", "pending"), step: null })]));
     expect(revised.run?.timeline.map((e) => e.plan)).toEqual([null, null, null, null, recorded("S2", "pending"), null]);
     // A phase that was not foreseen (a replay of an older run) takes the plan when it begins.
-    const late = fold(live([started, notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "done") }), began({ kind: "execution", n: 1 })]));
+    const late = fold(live([started, notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "done"), step: null }), began({ kind: "execution", n: 1 })]));
     expect(late.run?.timeline[0].plan).toEqual(recorded("S1", "done"));
   });
 
@@ -925,7 +925,7 @@ describe("the whole run in the timeline", () => {
   test("a decision nested in an execution call: the step stays current, busy stays, and the activity returns to the execution", () => {
     const call = (agent: "claude" | "codex", purpose: string) => notified({ _tag: "AgentCallStarted", agent, purpose });
     const end = (agent: "claude" | "codex") => notified({ _tag: "AgentCallEnded", agent, ok: true });
-    const prefix = [started, foreseen(false, 1), began({ kind: "execution", n: 1 }), call("claude", "execution"), notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "started") })];
+    const prefix = [started, foreseen(false, 1), began({ kind: "execution", n: 1 }), call("claude", "execution"), notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "started"), step: null })];
     const executing = fold(live(prefix));
     const nested = fold(live([...prefix, call("claude", "planning"), call("codex", "review")]));
     const resumed = fold(live([...prefix, call("claude", "planning"), call("codex", "review"), end("codex"), end("claude")]));

@@ -39,6 +39,40 @@ test("a started and then a done report are written to plan.json and plan.md and 
   assert.deepEqual(h.changed().map((e) => [e.phase, e.plan]), [[2, plan({ S2: "started" })], [2, plan({ S2: "done" })]]);
 });
 
+// Issue #53 (G-R1-1): PlanChanged names the report that caused it, so that the page can tell which step is current.
+test("a report's PlanChanged names the step and the status reported", async () => {
+  const h = await setup();
+  const steps = await h.run(executionSteps(1));
+  await h.run(steps.report("S1", "started"));
+  await h.run(steps.report("S1", "done"));
+  assert.deepEqual(h.changed().map((e) => e.step), [{ id: "S1", status: "started" }, { id: "S1", status: "done" }]);
+});
+
+test("a step reported started again while it is started is recorded and notified again with its report", async () => {
+  const h = await setup();
+  const steps = await h.run(executionSteps(1));
+  await h.run(steps.report("S1", "started"));
+  assert.deepEqual(await h.run(steps.report("S1", "started")), { text: stepRecordedText("S1", "started"), isError: false });
+  assert.deepEqual(h.changed().map((e) => e.step), [{ id: "S1", status: "started" }, { id: "S1", status: "started" }]);
+});
+
+test("a second step started while another is started is recorded: nothing is refused (issue #53, Q1)", async () => {
+  const h = await setup();
+  const steps = await h.run(executionSteps(1));
+  await h.run(steps.report("S1", "started"));
+  assert.deepEqual(await h.run(steps.report("S2", "started")), { text: stepRecordedText("S2", "started"), isError: false });
+  assert.deepEqual(h.files().json, plan({ S1: "started", S2: "started" }));
+  assert.deepEqual(h.changed().at(-1)?.step, { id: "S2", status: "started" });
+});
+
+test("the end's PlanChanged names no report", async () => {
+  const h = await setup();
+  const steps = await h.run(executionSteps(1));
+  await h.run(steps.report("S1", "started"));
+  await h.run(steps.end);
+  assert.equal(h.changed().at(-1)?.step, null);
+});
+
 test("an id that is not in the plan is an error for Claude Code: nothing is written or notified, and the run goes on", async () => {
   const h = await setup();
   const before = fs.readFileSync(path.join(h.store.dir, "plan.json"), "utf8");

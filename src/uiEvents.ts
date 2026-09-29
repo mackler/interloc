@@ -50,7 +50,10 @@ export type UiEvent =
   /** Every phase known of the run so far, begun or ahead, in order (issue #6): the whole list each time, so folding it twice changes nothing. */
   | Readonly<{ _tag: "PhasesForeseen"; phases: readonly Phase[] }>
   /** The plan with the status of each step (issue #6), after every write and every report of a step; `phase` is the planning and implementation phase it belongs to (Q5). */
-  | Readonly<{ _tag: "PlanChanged"; phase: number; plan: RecordedPlan }>;
+  | Readonly<{ _tag: "PlanChanged"; phase: number; plan: RecordedPlan; step: StepReport | null }>;
+
+/** The report of a step that caused a PlanChanged (issue #53, G-R1-1): what makes a step current in the page. */
+export type StepReport = Readonly<{ id: string; status: "started" | "done" }>;
 
 const AGENT_LABEL: Record<Agent, string> = { claude: "Claude Code", codex: "Codex" };
 /** The name of a phase as the progress display shows it; `count` is how many phases of its kind the run holds (issue #6). */

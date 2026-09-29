@@ -66,6 +66,8 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
         { maxLength: 2 },
       ),
     }),
+    // Issue #53: the report that caused it, or null.
+    step: fc.option(fc.record({ id: text, status: fc.constantFrom("started" as const, "done" as const) }), { nil: null }),
   }),
   fc.record({ _tag: fc.constant("OptionsPresented" as const), question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }) }),
   fc.record({
@@ -233,4 +235,15 @@ test("a ClaudeSaid event survives the round trip, live and in a replay", () => {
   for (const m of [{ type: "event", run: 1, seq: 0, time: T, event }, { type: "replay", runs: [{ id: 1, events: [{ time: T, event }] }] }] as ServerMessage[]) {
     assert.deepEqual(decoded(decodeServer(JSON.stringify(m))), m);
   }
+});
+
+// Issue #53 (G-R1-1): PlanChanged carries the report that caused it, or null for a plan the program wrote.
+test("PlanChanged with and without its report survives the round trip", () => {
+  const plan = { stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "l", text: "x", status: "started" as const }] }] };
+  for (const step of [{ id: "S1", status: "started" as const }, null]) {
+    const event: ServerMessage = { type: "event", run: 1, seq: 0, time: T, event: { _tag: "Notified", event: { _tag: "PlanChanged", phase: 1, plan, step } } };
+    assert.deepEqual(decoded(decodeServer(JSON.stringify(event))), event);
+  }
+  const without = { type: "event", run: 1, seq: 0, time: T, event: { _tag: "Notified", event: { _tag: "PlanChanged", phase: 1, plan } } };
+  assert.ok(Result.isFailure(decodeServer(JSON.stringify(without))), "a PlanChanged without its step field is not a message of this protocol");
 });
