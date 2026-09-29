@@ -8,7 +8,7 @@
   // alike, none filled, because the agent's first option is not a recommended default [consistency and standards];
   // the fixed choices keep the program's primary action filled. A card is a native button that sends only the number.
   import { Button, Card, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
-  import { answerHint, HELP_ME_DECIDE, PROPOSED_ANSWERS_LABEL } from "../../../src/prompts.ts";
+  import { answerHint, END_RUN_LABEL, HELP_ME_DECIDE, PROPOSED_ANSWERS_LABEL } from "../../../src/prompts.ts";
   import type { Widget } from "../state.ts";
 
   // The typed text is the page's draft of this prompt (../draft.ts, finding 5): App keeps it per (incarnation, run,
@@ -23,7 +23,7 @@
     if (!offline) text = "";
     onAnswer(widget.asked.prompt, value);
   };
-  const isQuit = (label: string) => label === "Quit";
+  const isQuit = (label: string) => label === END_RUN_LABEL;
   // "Help me decide" is an offer beside the answer, never the answer itself: tonal wherever it stands (decision support)
   // [consistency and standards: the filled button stays the program's primary action].
   const variantOf = (label: string, i: number): "filled" | "tonal" | "outlined" => (isQuit(label) ? "outlined" : label === HELP_ME_DECIDE ? "tonal" : i === 0 ? "filled" : "tonal");

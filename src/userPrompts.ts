@@ -22,8 +22,8 @@ export type UserPrompt = Readonly<{
   free: "none" | "line" | "message";
 }>;
 
-const QUIT_ASK: Choice = { label: "Quit", sends: "q" };
-const QUIT_MESSAGE: Choice = { label: "Quit", sends: "/quit" };
+const QUIT_ASK: Choice = { label: prompts.END_RUN_LABEL, sends: "q" };
+const QUIT_MESSAGE: Choice = { label: prompts.END_RUN_LABEL, sends: "/quit" };
 const entry = (kind: PromptKind, text: string, mode: UserPrompt["mode"], choices: readonly Choice[], free: UserPrompt["free"]): UserPrompt => ({
   kind,
   text,
@@ -48,7 +48,7 @@ export const HINTS: Readonly<Record<Exclude<PromptKind, "unknown">, string>> = {
 };
 
 const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
-  [HINTS.decision, (t: string) => entry("decision", t, "ask", [{ label: "No decision", sends: "" }], "line")],
+  [HINTS.decision, (t: string) => entry("decision", t, "ask", [{ label: prompts.CONTINUE_WITHOUT_DECIDING, sends: "" }], "line")],
   [HINTS.limit, (t: string) => entry("limit", t, "ask", [], "line")],
   [HINTS.limitNoProceed, (t: string) => entry("limitNoProceed", t, "ask", [], "line")],
   [HINTS.unchanged, (t: string) => entry("unchanged", t, "ask", [], "none")],
@@ -57,8 +57,8 @@ const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
   [HINTS.optionOrText, (t: string) => entry("optionOrText", t, "ask", [], "line")],
   [HINTS.permission, (t: string) => entry("permission", t, "ask", [], "none")],
   [HINTS.interviewMessage, (t: string) => entry("interviewMessage", t, "message", [{ label: prompts.END_CLARIFICATION, sends: "/done" }], "message")],
-  [HINTS.confirmSummary, (t: string) => entry("confirmSummary", t, "message", [{ label: "Confirm", sends: "" }], "message")],
-  [HINTS.startOrTalk, (t: string) => entry("startOrTalk", t, "message", [{ label: "Start planning", sends: "" }], "message")],
+  [HINTS.confirmSummary, (t: string) => entry("confirmSummary", t, "message", [{ label: prompts.CONFIRM_SUMMARY_LABEL, sends: "" }], "message")],
+  [HINTS.startOrTalk, (t: string) => entry("startOrTalk", t, "message", [{ label: prompts.START_PLANNING_LABEL, sends: "" }], "message")],
 ]);
 
 /**

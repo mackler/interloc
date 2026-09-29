@@ -35,21 +35,21 @@ const bodies = (s: ViewState) => s.run?.left.map((m) => `${m.author}:${m.body}`)
 describe("ordering and the panels", () => {
   test("program messages, a prompt and the user's answer appear in order; a blank say is dropped", () => {
     const s = fold(live([started, said("Planning phase 1 ..."), said("\n"), asked(1, prompts.decisionPrompt), { _tag: "Answered", prompt: 1, text: "" }]));
-    expect(bodies(s)).toEqual(["program:Planning phase 1 ...", `program:${prompts.pagePromptText("decision", prompts.decisionPrompt)}`, "user:No decision"]);
+    expect(bodies(s)).toEqual(["program:Planning phase 1 ...", `program:${prompts.pagePromptText("decision", prompts.decisionPrompt)}`, `user:${prompts.CONTINUE_WITHOUT_DECIDING}`]);
     expect(s.run?.pending).toBe(null);
   });
 
   test("a pending prompt carries the catalog's choices; the question's options are apart (issue #12, S5)", () => {
     const decision = fold(live([started, asked(1, prompts.decisionPrompt)]));
-    expect(decision.run?.pending?.choices.map((c) => c.label)).toEqual(["No decision", "Quit"]);
+    expect(decision.run?.pending?.choices.map((c) => c.label)).toEqual([prompts.CONTINUE_WITHOUT_DECIDING, prompts.END_RUN_LABEL]);
     expect(decision.run?.pending?.options).toEqual([]);
     const turn: UiEvent = { _tag: "InterviewTurn", heading: "Interview", message: "Which database?", summary: null, answered: 0, total: 1 };
     const interview = fold(live([started, notified(turn), said("\nWhich database?\n"), notified(presentedEvent("Which database?", [{ label: "PostgreSQL", description: "" }, { label: "SQLite", description: "" }], { kind: "clarification", id: "Q1" })), asked(1, prompts.interviewMessagePrompt)]));
     expect(interview.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["PostgreSQL=1", "SQLite=2"]);
-    expect(interview.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End clarification=/done", "Quit=/quit"]);
+    expect(interview.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual([`${prompts.END_CLARIFICATION}=/done`, `${prompts.END_RUN_LABEL}=/quit`]);
     const relayed = fold(live([started, notified(presentedEvent("A or B?", [{ label: "A", description: "a" }, { label: "B", description: "b" }])), asked(1, prompts.optionOrTextPrompt)]));
     expect(relayed.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["A — a=1", "B — b=2"]);
-    expect(relayed.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["Quit=q"]);
+    expect(relayed.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual([`${prompts.END_RUN_LABEL}=q`]);
   });
 
   test("an answer to an interview shows the chosen option, or the fixed choice's label (issue #12, Q2)", () => {
@@ -57,7 +57,7 @@ describe("ordering and the panels", () => {
     const presented = presentedEvent("Which database?", [{ label: "PostgreSQL", description: "" }, { label: "SQLite", description: "" }], { kind: "clarification", id: "Q1" });
     const answered = (text: string) => fold(live([started, notified(turn), notified(presented), asked(1, prompts.interviewMessagePrompt), { _tag: "Answered", prompt: 1, text }]));
     expect(bodies(answered("2")).at(-1)).toBe("user:SQLite");
-    expect(bodies(answered("/done")).at(-1)).toBe("user:End clarification");
+    expect(bodies(answered("/done")).at(-1)).toBe(`user:${prompts.END_CLARIFICATION}`);
   });
 
   test("an answer that is a choice shows the choice's label", () => {
@@ -591,7 +591,7 @@ describe("a replay of a question phase", () => {
     expect(bodies(s).slice(0, 2)).toEqual([`program:${prompts.interviewHelp("Interview", "page")}`, "claude:Which database should the service use?\n1. PostgreSQL\n2. SQLite"]);
     expect(s.run?.pending?.asked.kind).toBe("interviewMessage");
     expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["PostgreSQL=1", "SQLite=2"]);
-    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["End clarification=/done", "Quit=/quit"]);
+    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual([`${prompts.END_CLARIFICATION}=/done`, `${prompts.END_RUN_LABEL}=/quit`]);
   });
 });
 
@@ -766,7 +766,7 @@ describe("decision support", () => {
   test("presented options become the cards of the next decision prompt; the offer is a choice", () => {
     const s = fold(live([started, notified(presented), asked(1, prompts.withOffer(prompts.decisionPrompt))]));
     expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["Follow Codex — the issue=1", "Follow Claude — the rationale=2"]);
-    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual(["No decision=", `${prompts.HELP_ME_DECIDE}=/decide`, "Quit=q"]);
+    expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual([`${prompts.CONTINUE_WITHOUT_DECIDING}=`, `${prompts.HELP_ME_DECIDE}=/decide`, `${prompts.END_RUN_LABEL}=q`]);
     expect(bodies(s)).toEqual([`program:${questionMarkdown(presentedOf(presented))}`, `program:${prompts.pagePromptText("decision", prompts.decisionPrompt)}`]);
     const helped = fold([{ type: "event", run: 1, seq: 3, time: at(3), event: { _tag: "Answered", prompt: 1, text: "/decide" } }], s);
     expect(bodies(helped).at(-1)).toBe(`user:${prompts.HELP_ME_DECIDE}`);

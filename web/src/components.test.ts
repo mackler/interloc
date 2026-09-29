@@ -238,7 +238,7 @@ describe("PromptWidget", () => {
     expect(sent).toEqual(["2"]);
     // The fixed choices stay buttons below: End clarification the filled primary action, Quit outlined; no option among them.
     const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
-    expect(fixed.map((b) => b.textContent?.trim())).toEqual(["End clarification", "Quit"]);
+    expect(fixed.map((b) => b.textContent?.trim())).toEqual([prompts.END_CLARIFICATION, prompts.END_RUN_LABEL]);
     expect(fixed[0].classList.contains("filled")).toBe(true);
     expect(fixed[1].classList.contains("outlined")).toBe(true);
   });
@@ -253,7 +253,7 @@ describe("PromptWidget", () => {
     cards[2].click();
     expect(sent).toEqual(["3"]);
     const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
-    expect(fixed.map((b) => `${b.textContent?.trim()}:${b.classList.contains("outlined")}`)).toEqual(["Quit:true"]);
+    expect(fixed.map((b) => `${b.textContent?.trim()}:${b.classList.contains("outlined")}`)).toEqual([`${prompts.END_RUN_LABEL}:true`]);
     expect(root.querySelector("input[name=answer]")).not.toBe(null);
   });
 
@@ -262,13 +262,13 @@ describe("PromptWidget", () => {
     const sent: string[] = [];
     const root = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.optionOrTextPrompt), [{ label: "A", sends: "1" }, { label: "B", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
-    expect(fixed.map((b) => b.textContent?.trim())).toEqual([prompts.HELP_ME_DECIDE, "Quit"]);
+    expect(fixed.map((b) => b.textContent?.trim())).toEqual([prompts.HELP_ME_DECIDE, prompts.END_RUN_LABEL]);
     expect(fixed[0].classList.contains("tonal")).toBe(true);
     expect(fixed[0].classList.contains("filled")).toBe(false);
     fixed[0].click();
     expect(sent).toEqual(["/decide"]);
     const decision = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.decisionPrompt)), onAnswer: () => undefined });
-    expect([...decision.querySelectorAll<HTMLButtonElement>(".choices button")].map((b) => `${b.textContent?.trim()}:${b.classList.contains("filled") ? "filled" : b.classList.contains("tonal") ? "tonal" : "outlined"}`)).toEqual(["No decision:filled", `${prompts.HELP_ME_DECIDE}:tonal`, "Quit:outlined"]);
+    expect([...decision.querySelectorAll<HTMLButtonElement>(".choices button")].map((b) => `${b.textContent?.trim()}:${b.classList.contains("filled") ? "filled" : b.classList.contains("tonal") ? "tonal" : "outlined"}`)).toEqual([`${prompts.CONTINUE_WITHOUT_DECIDING}:filled`, `${prompts.HELP_ME_DECIDE}:tonal`, `${prompts.END_RUN_LABEL}:outlined`]);
   });
 
   test("a prompt without options has no group of cards", () => {
@@ -280,7 +280,7 @@ describe("PromptWidget", () => {
     const sent: [number, string][] = [];
     const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: (p: number, t: string) => void sent.push([p, t]) });
     const buttons = [...root.querySelectorAll(".choices button")].map((b) => b.textContent?.trim());
-    expect(buttons).toEqual(["No decision", "Quit"]);
+    expect(buttons).toEqual([prompts.CONTINUE_WITHOUT_DECIDING, prompts.END_RUN_LABEL]);
     (root.querySelectorAll(".choices button")[0] as HTMLButtonElement).click();
     const input = one(root, "input[name=answer]") as HTMLInputElement;
     type(input, "keep the rejection");

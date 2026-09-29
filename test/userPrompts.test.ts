@@ -11,17 +11,17 @@ const labels = (p: UserPrompt): string[] => p.choices.map((c) => `${c.label}=${c
 // Every text of the catalog, with the entry it must map to. S8: the options of a question (a pause's positions, the
 // limit's proceed and stop, a permission's allow and deny) come with the question, not with the prompt text.
 const catalog: [string, Partial<UserPrompt> & { kind: UserPrompt["kind"] }, string[]][] = [
-  [prompts.decisionPrompt, { kind: "decision", mode: "ask", free: "line" }, ["No decision=", "Quit=q"]],
-  [prompts.limitPrompt, { kind: "limit", mode: "ask", free: "line" }, ["Quit=q"]],
-  [prompts.limitNoProceedPrompt, { kind: "limitNoProceed", mode: "ask", free: "line" }, ["Quit=q"]],
-  [prompts.unchangedPrompt, { kind: "unchanged", mode: "ask", free: "none" }, ["Quit=q"]],
-  [prompts.transportPrompt, { kind: "transport", mode: "ask", free: "none" }, ["Quit=q"]],
-  [prompts.execInputPrompt, { kind: "execInput", mode: "ask", free: "line" }, ["Quit=q"]],
-  [prompts.optionOrTextPrompt, { kind: "optionOrText", mode: "ask", free: "line" }, ["Quit=q"]],
-  [prompts.permissionPrompt, { kind: "permission", mode: "ask", free: "none" }, ["Quit=q"]],
-  [prompts.interviewMessagePrompt, { kind: "interviewMessage", mode: "message", free: "message" }, ["End clarification=/done", "Quit=/quit"]],
-  [prompts.confirmSummaryPrompt, { kind: "confirmSummary", mode: "message", free: "message" }, ["Confirm=", "Quit=/quit"]],
-  [prompts.startOrTalkPrompt, { kind: "startOrTalk", mode: "message", free: "message" }, ["Start planning=", "Quit=/quit"]],
+  [prompts.decisionPrompt, { kind: "decision", mode: "ask", free: "line" }, ["Continue without deciding=", "End the run=q"]],
+  [prompts.limitPrompt, { kind: "limit", mode: "ask", free: "line" }, ["End the run=q"]],
+  [prompts.limitNoProceedPrompt, { kind: "limitNoProceed", mode: "ask", free: "line" }, ["End the run=q"]],
+  [prompts.unchangedPrompt, { kind: "unchanged", mode: "ask", free: "none" }, ["End the run=q"]],
+  [prompts.transportPrompt, { kind: "transport", mode: "ask", free: "none" }, ["End the run=q"]],
+  [prompts.execInputPrompt, { kind: "execInput", mode: "ask", free: "line" }, ["End the run=q"]],
+  [prompts.optionOrTextPrompt, { kind: "optionOrText", mode: "ask", free: "line" }, ["End the run=q"]],
+  [prompts.permissionPrompt, { kind: "permission", mode: "ask", free: "none" }, ["End the run=q"]],
+  [prompts.interviewMessagePrompt, { kind: "interviewMessage", mode: "message", free: "message" }, ["Finish clarification and start planning=/done", "End the run=/quit"]],
+  [prompts.confirmSummaryPrompt, { kind: "confirmSummary", mode: "message", free: "message" }, ["Confirm=", "End the run=/quit"]],
+  [prompts.startOrTalkPrompt, { kind: "startOrTalk", mode: "message", free: "message" }, ["Start planning=", "End the run=/quit"]],
 ];
 
 for (const [text, expected, choices] of catalog) {
@@ -46,7 +46,7 @@ test("every kind's hint is recognized as that kind, and no two kinds share a hin
 });
 
 test("an unknown text is free text plus Quit", () => {
-  assert.deepEqual(labels(promptOf("Something new > ")), ["Quit=q"]);
+  assert.deepEqual(labels(promptOf("Something new > ")), ["End the run=q"]);
   assert.equal(promptOf("Something new > ").free, "line");
 });
 
@@ -59,8 +59,8 @@ test("promptOf never throws and always offers exactly one Quit that its input mo
   fc.assert(
     fc.property(texts, (text) => {
       const p = promptOf(text);
-      const quit = p.choices.filter((c) => c.label === "Quit");
-      return quit.length === 1 && quits(p, quit[0].sends) && p.choices.filter((c) => c.label !== "Quit").every((c) => !quits(p, c.sends));
+      const quit = p.choices.filter((c) => c.label === prompts.END_RUN_LABEL);
+      return quit.length === 1 && quits(p, quit[0].sends) && p.choices.filter((c) => c.label !== prompts.END_RUN_LABEL).every((c) => !quits(p, c.sends));
     }),
   );
 });
@@ -76,4 +76,20 @@ test("a prompt with the offer line has the entry of its text plus Help me decide
   }
   assert.equal(prompts.pagePromptText("decision", prompts.withOffer(prompts.decisionPrompt)), "Choose an option, answer in your own words, or continue without deciding.");
   assert.equal(prompts.pagePromptText("unknown", prompts.withOffer("Something > ")), "Something");
+});
+
+// Issue #25 (S23): every control says what it does, in the user's words; each label is a constant of src/prompts.ts,
+// the catalog holds no label of its own, and what each control sends is unchanged.
+test("the controls' labels are the constants of src/prompts.ts, and none is a literal of src/userPrompts.ts", async () => {
+  const fs = await import("node:fs");
+  const source = fs.readFileSync(new URL("../src/userPrompts.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /label: "/);
+  assert.equal(prompts.END_CLARIFICATION, "Finish clarification and start planning");
+  assert.equal(prompts.END_RUN_LABEL, "End the run");
+  assert.equal(prompts.CONTINUE_WITHOUT_DECIDING, "Continue without deciding");
+  assert.equal(prompts.HELP_ME_DECIDE, "Help me decide");
+  assert.deepEqual([prompts.PERMISSION_ALLOW, prompts.PERMISSION_DENY], ["Allow this", "Do not allow this"]);
+  assert.equal(prompts.LIMIT_STOP, "End the run");
+  const sends = Object.values(HINTS).flatMap((h) => promptOf(h).choices.map((c) => c.sends));
+  assert.deepEqual([...new Set(sends)].sort(), ["", "/done", "/quit", "q"]);
 });

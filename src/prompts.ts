@@ -707,8 +707,15 @@ export function clarificationHeading(stage: InterviewStage): string {
       return "Conversation before planning";
   }
 }
-/** The fixed choice that ends a clarification. */
-export const END_CLARIFICATION = "End clarification";
+/**
+ * The labels of the controls that are not options of a question (issue #25, S23), each saying what it does: finishing
+ * the clarification starts planning; ending the run ends it (the records are kept); what each sends is unchanged.
+ */
+export const END_CLARIFICATION = "Finish clarification and start planning";
+export const END_RUN_LABEL = "End the run";
+export const CONTINUE_WITHOUT_DECIDING = "Continue without deciding";
+export const CONFIRM_SUMMARY_LABEL = "Confirm";
+export const START_PLANNING_LABEL = "Start planning";
 /** The interview's opening help (finding 8 of docs/gui-review.md), for the terminal or the page. */
 export function interviewHelp(heading: string, ui: "terminal" | "page"): string {
   return ui === "terminal"
@@ -1099,7 +1106,7 @@ export function unchangedDecisionLine(answer: "retry" | "proceed" | "stop", file
 /** The answers of the cycle limit's options (S8); a whole number above zero adds that many cycles. */
 export const LIMIT_ANSWERS = { proceed: "p", stop: "0" } as const;
 export const LIMIT_PROCEED = "Proceed without convergence";
-export const LIMIT_STOP = "Stop the run";
+export const LIMIT_STOP = "End the run";
 export const LIMIT_MORE = "Continue with more cycles";
 export function limitOptionDescriptions(proceed: string | null): Readonly<{ proceed: string; stop: string; more: string }> {
   return {
@@ -1113,8 +1120,8 @@ export function limitQuestion(heading: string, limit: number): string {
   return `${heading} has completed ${limit} cycles without convergence. How should the run continue?`;
 }
 /** The options of a permission request. */
-export const PERMISSION_ALLOW = "Allow";
-export const PERMISSION_DENY = "Deny";
+export const PERMISSION_ALLOW = "Allow this";
+export const PERMISSION_DENY = "Do not allow this";
 export const PERMISSION_ALLOW_DESCRIPTION = "Claude Code performs the action and continues.";
 export const PERMISSION_DENY_DESCRIPTION = "Claude Code is told that the user denied the action and continues without it.";
 /** A tool's input in prose (S12): each field on its own line, values as text, never the input's JSON. */

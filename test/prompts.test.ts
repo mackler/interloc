@@ -162,7 +162,7 @@ test("the clarification's headings and help", () => {
   assert.equal(prompts.clarificationHeading("conversation"), "Conversation before planning");
   assert.equal(prompts.interviewHelp("Clarification", "page"), "Clarification. /done ends the clarification, /quit ends the run; Shift+Enter starts a new line.");
   assert.equal(prompts.interviewHelp("Clarification", "terminal"), '\nClarification. Commands: /done = end the clarification; /quit = end the run; """ on its own line starts and ends a message of several lines.');
-  assert.equal(prompts.END_CLARIFICATION, "End clarification");
+  assert.equal(prompts.END_CLARIFICATION, "Finish clarification and start planning");
 });
 
 // Issue #14 (Q1, Q2, G-R1-1): a cycle's line and a finished loop's line; no limit anywhere.

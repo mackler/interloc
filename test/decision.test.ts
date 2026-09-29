@@ -220,13 +220,13 @@ test("a question with fewer than two options carries no offer and records nothin
 
 test("a permission request maps y to Allow and anything else to Deny", async () => {
   const q = { question: "Claude Code requests permission: Bash rm -rf build", options: permissionOptions };
-  const permissionAnalysis = { ...analysis(), columns: [{ ...analysis().columns[0], option: "Allow" }, { ...analysis().columns[1], option: "Deny" }] };
+  const permissionAnalysis = { ...analysis(), columns: [{ ...analysis().columns[0], option: prompts.PERMISSION_ALLOW }, { ...analysis().columns[1], option: prompts.PERMISSION_DENY }] };
   const allow = await setUp({ answers: ["/decide", "y"], steps: [{ output: permissionAnalysis }], reviews: [{ issues: [] }] });
   assert.equal(await offering(allow.layer, q), "y");
-  assert.equal(json(allow.probe.dir, "decision-1/chosen.json").option, "Allow");
+  assert.equal(json(allow.probe.dir, "decision-1/chosen.json").option, prompts.PERMISSION_ALLOW);
   const deny = await setUp({ answers: ["/decide", "n"], steps: [{ output: permissionAnalysis }], reviews: [{ issues: [] }] });
   assert.equal(await offering(deny.layer, q), "n");
-  assert.equal(json(deny.probe.dir, "decision-1/chosen.json").option, "Deny");
+  assert.equal(json(deny.probe.dir, "decision-1/chosen.json").option, prompts.PERMISSION_DENY);
 });
 
 test("the cycle limit maps a number to more cycles, p to Proceed where offered, and 0 to Stop", async () => {
