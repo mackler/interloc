@@ -915,3 +915,18 @@ test("the activity line shows retry 2 of 3", () => {
   const root = show(ActivityLine, { text: s.run?.activity ?? "" });
   expect(one(root, "[data-activity]").textContent).toContain("retry 2 of 3");
 });
+
+// W1-R1-4: the activity line shows the indeterminate indicator while the program waits to retry: no value, no estimate.
+test("the activity line shows an indeterminate progressbar only while busy, with the markup of the rail's indicator", () => {
+  const busy = show(ActivityLine, { text: "Codex — connection lost, retry 1 of 3 (x)", busy: true });
+  const bar = one(busy, "[role=progressbar]");
+  expect(bar.hasAttribute("aria-valuenow")).toBe(false);
+  expect(bar.getAttribute("aria-label")).toBe(prompts.RETRY_WAITING_LABEL);
+  const idle = show(ActivityLine, { text: "Codex — review", busy: false });
+  expect(idle.querySelector("[role=progressbar]")).toBe(null);
+  // The seam: the rail's indicator and the activity line's are the same markup.
+  const rail = show(TimelineRail, { timeline: [{ phase: { kind: "planning", n: 1 }, label: "Planning", state: "active", steps: [], plan: null } as unknown as TimelineEntry], busy: true });
+  const railBar = one(rail, "[role=progressbar]");
+  expect(bar.className).toBe(railBar.className);
+  expect(bar.innerHTML.replace(/<!--.*?-->/g, "")).toBe(railBar.innerHTML.replace(/<!--.*?-->/g, ""));
+});

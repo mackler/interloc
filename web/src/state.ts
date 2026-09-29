@@ -73,8 +73,11 @@ export type RunView = Readonly<{
   busy: boolean;
   /** The agent calls that run, the innermost last (P1-R2-1). */
   calls: readonly AgentCall[];
-  /** The program's retry of a transport fault while it lasts (issue #26): shown on the activity line with the retried call. */
-  retry: string | null;
+  /**
+   * The program's retry of a transport fault while it lasts (issue #26): shown on the activity line with the retried call
+   * of its agent; every call's end clears it (W1-R1-3).
+   */
+  retry: Readonly<{ agent: "claude" | "codex"; text: string }> | null;
   timeline: readonly TimelineEntry[];
   ended: number | null;
   /** Internal to the fold: the terminal lines of the last interview turn or relayed question still to absorb, and the options of the last relayed question and interview message. */
@@ -367,7 +370,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       };
     case "AgentCallStarted": {
       const label = `${AGENT[event.agent]} — ${purposeLabel(event.purpose)}`;
-      return { ...run, calls: [...run.calls, { agent: event.agent, purpose: event.purpose, label, startedAt: time }], activity: run.retry === null ? label : `${label} — ${run.retry}`, busy: true };
+      return { ...run, calls: [...run.calls, { agent: event.agent, purpose: event.purpose, label, startedAt: time }], activity: run.retry === null || run.retry.agent !== event.agent ? label : `${label} — ${run.retry.text}`, busy: true };
     }
     case "ToolUsed":
       return { ...run, activity: `${run.calls.at(-1)?.label ?? AGENT[event.agent]} — ${event.tool}: ${event.target}`.replace(/: $/, "") };
@@ -375,8 +378,8 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     case "AgentReconnecting":
       return { ...run, activity: `${run.calls.at(-1)?.label ?? AGENT[event.agent]} — ${reconnectingActivity(event.attempt, event.of, event.detail)}` };
     case "TransportRetrying": {
-      const retry = retryActivity(event.attempt, event.of, event.fault);
-      return { ...run, retry, activity: `${AGENT[event.agent]} — ${retry}` };
+      const text = retryActivity(event.attempt, event.of, event.fault);
+      return { ...run, retry: { agent: event.agent, text }, activity: `${AGENT[event.agent]} — ${text}` };
     }
     case "TransportRecovered":
       return { ...run, retry: null, activity: run.calls.at(-1)?.label ?? "" };
@@ -386,7 +389,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       const calls = run.calls.slice(0, -1);
       const outer = calls.at(-1);
       const activity = outer !== undefined ? outer.label : `${ended?.label ?? AGENT[event.agent]} — ${event.ok ? "done" : "failed"}`;
-      return { ...run, calls, activity, busy: calls.length > 0, retry: event.ok ? null : run.retry };
+      return { ...run, calls, activity, busy: calls.length > 0, retry: null };
     }
     case "ExecutionEnded":
       return run;
@@ -512,3 +515,6 @@ export const progressOf = (run: RunView): string => {
   const detail = running.length > 0 ? latestCycle(running) : step.count === null ? latestCycle(step.groups) : clarificationProgress(step.count.answered, step.count.total);
   return progressLine(stepOfPhase(entry.label, step.label), detail);
 };
+
+/** Whether the program waits to retry a call (issue #26, W1-R1-4): a retry is pending and no call runs. */
+export const waiting = (run: RunView): boolean => run.retry !== null && run.calls.length === 0;

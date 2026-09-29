@@ -8,7 +8,7 @@ import * as path from "node:path";
 import { pathOf } from "./artifacts.ts";
 import { type CallOutcome, decodeQuestions, decodeToolTarget, execReport, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
 import { ClaudeCallFailed, type RunError, TransportFault } from "./errors.ts";
-import { type ClaudeFailure, classifyClaude } from "./transport.ts";
+import { type ClaudeFailure, classifyClaude, errorCode } from "./transport.ts";
 import { withTransportRetry } from "./retry.ts";
 import type { ExecOutcome } from "./schema.ts";
 import { askOffering, numberedOptions, permissionOptions } from "./offer.ts";
@@ -26,11 +26,6 @@ const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
  * data, or the error of a decision loop that the user started from a relayed question or a permission request.
  */
 type CallbackError = RunError;
-/** The code of a thrown value (`ECONNRESET`, …), or null. */
-const errorCode = (e: unknown): string | null => {
-  const code = typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
-  return typeof code === "string" ? code : null;
-};
 /** A failed call: TransportFault when src/transport.ts identifies a transport fault, ClaudeCallFailed otherwise (issue #26). */
 const callFailure = (message: string, failure: ClaudeFailure | null): ClaudeCallFailed | TransportFault =>
   classifyClaude(failure) ? new TransportFault({ agent: "claude", message, status: failure?.apiStatus ?? null }) : new ClaudeCallFailed({ message });

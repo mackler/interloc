@@ -683,6 +683,8 @@ export const PLAN_STEP_STATE_LABEL: Record<"done" | "current" | "unfinished" | "
 };
 /** The accessible name of the busy indicator (issue #42): it says that an agent works, and nothing about how far. */
 export const AGENT_WORKING_LABEL = "An agent is working";
+/** The indicator of the activity line while the program waits to retry a call (issue #26, W1-R1-4). */
+export const RETRY_WAITING_LABEL = "Waiting to retry the connection";
 /** The measured time of the current agent call beside the busy indicator (issue #42, Q7): m:ss, or h:mm:ss from one hour on. */
 export function runningFor(ms: number): string {
   const total = Math.floor(ms / 1000);
@@ -1022,4 +1024,10 @@ export function retryActivity(attempt: number, of: number, fault: string): strin
 export function reconnectingActivity(attempt: number | null, of: number | null, detail: string): string {
   const count = attempt === null ? "" : of === null ? ` ${attempt}` : ` ${attempt} of ${of}`;
   return `reconnecting${count} (${detail})`;
+}
+
+/** The text of a thrown value in a failure message: its text, with its code where the text does not name it (W1-R1-2). */
+export function thrownText(text: string, code: string | null): string {
+  if (code === null || text.includes(code)) return text === "" ? "the call failed without a message" : text;
+  return text === "" ? code : `${text} (${code})`;
 }

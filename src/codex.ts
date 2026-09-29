@@ -3,7 +3,8 @@
 import type { ThreadEvent } from "@openai/codex-sdk";
 import { Effect, Exit, Layer } from "effect";
 import { CodexCallFailed, TransportFault } from "./errors.ts";
-import { classifyCodex } from "./transport.ts";
+import { classifyCodex, errorCode } from "./transport.ts";
+import { thrownText } from "./prompts.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as S from "./schema.ts";
 import { reduceTurn, toolEventOf } from "./codexEvents.ts";
@@ -12,9 +13,15 @@ import { Reviewer, type ReviewerShape, type ReviewSession, RunConfig, Sdk, Store
 
 const failedWith = (e: unknown): CodexCallFailed => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) });
 /** A failure of a turn: TransportFault when src/transport.ts identifies a transport fault, CodexCallFailed otherwise (issue #26). */
-const turnFailure = (message: string): CodexCallFailed | TransportFault =>
-  classifyCodex(message) ? new TransportFault({ agent: "codex", message, status: null }) : new CodexCallFailed({ message });
-const turnFailedWith = (e: unknown): CodexCallFailed | TransportFault => turnFailure(e instanceof Error ? e.message : String(e));
+const turnFailure = (message: string, code: string | null = null): CodexCallFailed | TransportFault =>
+  classifyCodex(message, code) ? new TransportFault({ agent: "codex", message, status: null }) : new CodexCallFailed({ message });
+/** A thrown value's text, with its code where the text does not name it (W1-R1-2). */
+const turnFailedWith = (e: unknown): CodexCallFailed | TransportFault => {
+  const code = errorCode(e);
+  const message = typeof e === "object" && e !== null ? (e as { message?: unknown }).message : undefined;
+  const text = typeof message === "string" ? message : typeof e === "object" && e !== null ? "" : String(e);
+  return turnFailure(thrownText(text, code), code);
+};
 
 /**
  * The session over one thread: the thread is a closed-over value, so a call before the start is impossible.

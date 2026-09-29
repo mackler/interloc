@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Indeterminate from "./Indeterminate.svelte";
   // The progress of the run (decision Q3) [visibility of system status]: the phases in the order they occurred,
   // each done, active or stopped, the cycles of each review loop nested (one line each while the loop runs, one line
   // for the whole loop when it has ended; issue #14), the steps of Gather Requirements with the clarification's count
@@ -87,9 +88,8 @@
           </ol>
         {/if}
         {#if entry.state === "active" && busy}
-          <!-- Issue #42: M3's indeterminate linear progress indicator, by hand (m3-svelte has none): no value, no end. -->
           <div class="busy" data-busy>
-            <div class="indeterminate" role="progressbar" aria-label={AGENT_WORKING_LABEL}><span class="active-indicator"></span></div>
+            <Indeterminate label={AGENT_WORKING_LABEL} />
             {#if callStartedAt !== null}<span class="m3-font-body-small elapsed" data-elapsed>{runningFor(elapsedMs(callStartedAt, now))}</span>{/if}
           </div>
         {/if}

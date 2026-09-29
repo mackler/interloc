@@ -57,6 +57,12 @@ export type ThreadCall = { input: string; turnOptions: TurnOptions | undefined }
  */
 export type TurnAnswer = ThreadEvent[] | Error | ((turnOptions: TurnOptions | undefined) => AsyncGenerator<ThreadEvent>);
 
+/** A turn whose event stream rejects with `value` (any value, not only an Error), as the SDK's stream can (W1-R1-2). */
+export const rejecting = (value: unknown): TurnAnswer => () =>
+  (async function* (): AsyncGenerator<ThreadEvent> {
+    throw value;
+  })();
+
 export class FakeSdk implements AgentSdk {
   readonly calls: Call[] = [];
   readonly threads: { options: ThreadOptions | undefined; calls: ThreadCall[] }[] = [];

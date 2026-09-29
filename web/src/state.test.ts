@@ -4,7 +4,7 @@ import * as prompts from "../../src/prompts.ts";
 import { decodeServer, type RunEvent, type ServerMessage, type Stamped } from "../../src/protocol.ts";
 import { foreseenPhases, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { type Band, bandsOf, callStartedAt, dismissUnsent, initialState, keepUnsent, planStepState, progressOf, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
+import { waiting, type Band, bandsOf, callStartedAt, dismissUnsent, initialState, keepUnsent, planStepState, progressOf, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
 const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
@@ -993,5 +993,41 @@ describe("transport retries on the activity line", () => {
     for (const s of both([started, notified({ _tag: "AgentCallStarted", agent: "claude", purpose: "planning" }), notified(reconnecting)])) {
       expect(s.run?.activity).toBe("Claude — planning — reconnecting 2 of 10 (status 503, server_error)");
     }
+  });
+});
+
+// W1-R1-3: the retry belongs to its agent and ends with every call's end.
+describe("the retry state after the retries are exhausted", () => {
+  const codexCall: UiEvent = { _tag: "AgentCallStarted", agent: "codex", purpose: "review" };
+  const codexFailed: UiEvent = { _tag: "AgentCallEnded", agent: "codex", ok: false };
+  const retrying: UiEvent = { _tag: "TransportRetrying", agent: "codex", attempt: 1, of: 1, delaySeconds: 5, fault: "stream disconnected" };
+  const claudeCall: UiEvent = { _tag: "AgentCallStarted", agent: "claude", purpose: "planning" };
+  const both = (events: readonly RunEvent[]) => [fold(live(events)), replayed(events)];
+
+  test("a Claude call of Help me decide after the exhausted Codex retries shows no retry text", () => {
+    for (const s of both([started, notified(codexCall), notified(codexFailed), notified(retrying), notified(codexCall), notified(codexFailed), notified(claudeCall)])) {
+      expect(s.run?.activity).toBe("Claude — planning");
+    }
+  });
+
+  test("a retried call that fails again: the next call of the same agent shows no retry text either", () => {
+    for (const s of both([started, notified(codexCall), notified(codexFailed), notified(retrying), notified(codexCall), notified(codexFailed), notified(codexCall)])) {
+      expect(s.run?.activity).toBe("Codex — review");
+    }
+  });
+});
+
+// W1-R1-4: while the program waits to retry, the page shows that it is busy.
+describe("waiting during a retry's backoff", () => {
+  const call: UiEvent = { _tag: "AgentCallStarted", agent: "codex", purpose: "review" };
+  const failed: UiEvent = { _tag: "AgentCallEnded", agent: "codex", ok: false };
+  const retrying: UiEvent = { _tag: "TransportRetrying", agent: "codex", attempt: 1, of: 3, delaySeconds: 5, fault: "stream disconnected" };
+  const w = (events: readonly RunEvent[]) => [fold(live(events)), replayed(events)].map((s) => waiting(s.run!));
+  test("waiting holds from TransportRetrying until the retried call starts, the call recovers or a call ends", () => {
+    expect(w([started, notified(call), notified(failed), notified(retrying)])).toEqual([true, true]);
+    expect(w([started, notified(call), notified(failed), notified(retrying), notified(call)])).toEqual([false, false]);
+    expect(w([started, notified(call), notified(failed), notified(retrying), notified({ _tag: "TransportRecovered", agent: "codex" })])).toEqual([false, false]);
+    expect(w([started, notified(call), notified(failed), notified(retrying), notified(call), notified(failed)])).toEqual([false, false]);
+    expect(w([started, notified(call), notified(failed)])).toEqual([false, false]);
   });
 });

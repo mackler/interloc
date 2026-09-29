@@ -211,3 +211,26 @@ test("a rejected runStreamed with ECONNRESET is TransportFault", async () => {
   const session = await run(fake.reviewer.startPhase);
   await assert.rejects(run(session.review("review")), (e: unknown) => (e as { _tag: string })._tag === "TransportFault");
 });
+
+// W1-R1-2: the thrown value's network code is classified, not only its text.
+import { rejecting } from "./fakeSdk.ts";
+const failureOf = async (answer: Parameters<typeof reviewer>[0][number]) => {
+  const fake = await reviewer([answer]);
+  const session = await run(fake.reviewer.startPhase);
+  return typedFailure(session.review("review"));
+};
+
+test("a stream that rejects with a bare { code: ECONNRESET } is TransportFault, and its message names the code", async () => {
+  const error = await failureOf(rejecting({ code: "ECONNRESET" }));
+  assert.equal(error._tag, "TransportFault");
+  assert.match((error as { message: string }).message, /ECONNRESET/);
+  assert.doesNotMatch((error as { message: string }).message, /object Object/);
+});
+
+test("runStreamed rejecting with an Error whose message omits its ETIMEDOUT code is TransportFault", async () => {
+  assert.equal((await failureOf(Object.assign(new Error("socket closed"), { code: "ETIMEDOUT" })))._tag, "TransportFault");
+});
+
+test("a rejection with { code: ENOENT } is CodexCallFailed", async () => {
+  assert.equal((await failureOf(rejecting({ code: "ENOENT" })))._tag, "CodexCallFailed");
+});

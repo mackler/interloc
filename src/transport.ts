@@ -18,20 +18,32 @@ export type ClaudeFailure = Readonly<{
 /** The error codes of Node.js that name a dropped, refused or timed-out connection. */
 export const NETWORK_CODES: readonly string[] = ["ECONNRESET", "ETIMEDOUT", "ECONNREFUSED", "EPIPE", "EAI_AGAIN"];
 
-/** An HTTP status in a message: after "status", "HTTP" or "code", or before its reason phrase. */
-const statusesIn = (message: string): readonly number[] =>
-  [...message.matchAll(/\b(?:status(?: code)?|http(?:\/[\d.]+)?)\s*[:=]?\s*(\d{3})\b|\b(\d{3})\s+(?:Bad Request|Unauthorized|Payment Required|Forbidden|Not Found|Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout)\b/gi)].map((m) =>
-    Number(m[1] ?? m[2]),
-  );
+/**
+ * The HTTP statuses in a message (400 to 599): after "status", "status code" or "HTTP[/version]", or before a reason
+ * phrase of capitalized words ("408 Request Timeout", "501 Not Implemented"). Other numbers are not statuses.
+ */
+const statusesIn = (message: string): readonly number[] => [
+  ...[...message.matchAll(/\b(?:status(?: code)?|http(?:\/[\d.]+)?)\s*[:=]?\s*([45]\d\d)\b/gi)].map((m) => Number(m[1])),
+  ...[...message.matchAll(/\b([45]\d\d)\s+[A-Z][A-Za-z-]*(?:\s+[A-Z][A-Za-z-]*)*\b/g)].map((m) => Number(m[1])),
+];
 
 const codexPermanent = /usage limit|rate limit|quota|invalid_json_schema|outputSchema/i;
 const codexTransport = /stream disconnected|connection reset|connection closed|timed out|timeout|WebSocket protocol error|Reconnecting|socket hang up|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN/i;
 
-/** Whether a failed Codex turn, by its message, is a transport fault that a retry could fix; permanent evidence wins. */
-export const classifyCodex = (message: string): boolean => {
+/** The code of a thrown value (`ECONNRESET`, …), or null: both adapters read it here (W1-R1-2). */
+export const errorCode = (e: unknown): string | null => {
+  const code = typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : null;
+};
+
+/**
+ * Whether a failed Codex turn, by its message and the code of the thrown value if any, is a transport fault that a
+ * retry could fix; permanent evidence in the message wins.
+ */
+export const classifyCodex = (message: string, code: string | null = null): boolean => {
   const statuses = statusesIn(message);
   if (codexPermanent.test(message) || statuses.some((s) => s >= 400 && s <= 499)) return false;
-  return codexTransport.test(message) || statuses.some((s) => s >= 500 && s <= 599);
+  return (code !== null && NETWORK_CODES.includes(code)) || codexTransport.test(message) || statuses.some((s) => s >= 500 && s <= 599);
 };
 
 /** The assistant errors of the Agent SDK (SDKAssistantMessageError) that no retry fixes. */

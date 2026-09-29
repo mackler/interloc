@@ -82,3 +82,19 @@ test("Claude: the stopping subtypes are not retried", () => {
     assert.equal(classifyClaude(f({ subtype: s, streamCode: "ECONNRESET" })), false, s);
   }
 });
+
+// W1-R1-1: any 4xx or 5xx status with its reason phrase, not only the listed ones; permanent evidence still first.
+test("Codex: every 4xx with its reason phrase is permanent, every 5xx retryable; other numbers are not statuses", () => {
+  for (const m of ["408 Request Timeout", "unexpected status 408 Request Timeout", "status 418"]) assert.equal(classifyCodex(m), false, m);
+  for (const m of ["501 Not Implemented", "504 Gateway Timeout"]) assert.equal(classifyCodex(m), true, m);
+  assert.equal(classifyCodex("retry 2 of 500 items"), false);
+  assert.equal(classifyCodex("line 404 of the diff"), false);
+  assert.equal(classifyCodex("stream disconnected at line 404 of the diff"), true);
+});
+
+// W1-R1-2: the code of the thrown value is evidence too; permanent evidence in the text still wins.
+test("Codex: a network code classifies as a transport fault unless the text is permanent", () => {
+  assert.equal(classifyCodex("x", "ECONNRESET"), true);
+  assert.equal(classifyCodex("usage limit", "ECONNRESET"), false);
+  assert.equal(classifyCodex("x", "ENOENT"), false);
+});
