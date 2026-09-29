@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { programWritten } from "../src/questionContext.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -553,6 +554,7 @@ const recordingDecider = (): { decider: DeciderShape; requests: unknown[] } => {
   const requests: unknown[] = [];
   const decider: DeciderShape = {
     at: () => decider,
+    explain: (request) => Effect.succeed(programWritten(request)),
     decide: (request) =>
       Effect.sync(() => {
         requests.push(request);

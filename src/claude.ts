@@ -17,7 +17,7 @@ import { chooseOption } from "./input.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as prompts from "./prompts.ts";
 import * as S from "./schema.ts";
-import { Decider, type DeciderShape, Planner, type PlannerShape, type PlanningCapability, RunConfig, Sdk, Store, Ui } from "./services.ts";
+import { Decider, type DeciderShape, Planner, type PlannerShape, type PlanningCapability, type PlanningPurpose, RunConfig, Sdk, Store, Ui } from "./services.ts";
 
 const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
 
@@ -252,7 +252,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
    * callback still rejects the callback's Promise. The messages are shown and the usage recorded as
    * they arrive; the outcome is the pure reduction of the list at the end.
    */
-  const call = (session: Ref.Ref<string | null>, prompt: string, purpose: "planning" | "interview" | "execution", show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool, callbacks: (inCallback: InCallback) => Options = () => ({})): Effect.Effect<CallOutcome, CallbackError> =>
+  const call = (session: Ref.Ref<string | null>, prompt: string, purpose: PlanningPurpose | "execution", show: "none" | "tools" | "text", options: Options, permission: (inCallback: InCallback) => CanUseTool, callbacks: (inCallback: InCallback) => Options = () => ({})): Effect.Effect<CallOutcome, CallbackError> =>
     Effect.gen(function* () {
       yield* ui.notify({ _tag: "AgentCallStarted", agent: "claude", purpose });
       const controller = new AbortController();

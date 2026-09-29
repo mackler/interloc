@@ -219,7 +219,8 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
             yield* check;
             return yield* Effect.fromResult(result);
           });
-        return yield* withTransportRetry("claude", transportWhat(purpose), attempt, check);
+        // S10: the context call of a question does not ask a question of its own when its retries are exhausted.
+        return yield* withTransportRetry("claude", transportWhat(purpose), attempt, check, purpose === "context" ? "fail" : "ask");
       });
     const first = yield* call(prompt);
     const repairCall = yield* Ref.make<PlanningResult | null>(null);

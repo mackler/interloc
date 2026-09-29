@@ -9,6 +9,8 @@ import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, RecordedPlan, Review, UserQuestion } from "./schema.ts";
 import type { LoopResult, Phase, UiEvent } from "./uiEvents.ts";
+import type { ContextRequest } from "./prompts.ts";
+import type { ContextWritten } from "./question.ts";
 import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
 import type { OwnWrite, RecordsSnapshot, Snapshot } from "./snapshot.ts";
@@ -40,7 +42,8 @@ export interface UiShape {
 export class Ui extends Context.Service<Ui, UiShape>()("plan-review/Ui") {}
 
 /** What a planning call is for, as the activity line names it; the interview also prints its tool use in the terminal. */
-export type PlanningPurpose = "planning" | "interview";
+/** "context": the call that writes a question's context paragraph and terms (S9), in a fresh session, read-only. */
+export type PlanningPurpose = "planning" | "interview" | "context";
 export type PlanningResult = Readonly<{ output: unknown; resultText: string; costUsd: number | null }>;
 /**
  * What a planning call may do (finding 1 of docs/gui-review.md): "records" may edit only under plan-review/ (behaviour 3);
@@ -171,6 +174,11 @@ export type DecisionOutcome = Readonly<{ decision: number; analysis: DecisionAna
 export interface DeciderShape {
   at(phase: Phase, label: string): DeciderShape;
   decide(request: DecisionRequest): Effect.Effect<DecisionOutcome, RunError>;
+  /**
+   * Writes the context paragraph and terms of a question the program composed (S9), in a fresh session over the run's
+   * services, from any place a prompt is asked; the program's own paragraph when that cannot be done (S10).
+   */
+  explain(request: ContextRequest): Effect.Effect<ContextWritten, RunError>;
 }
 export class Decider extends Context.Service<Decider, DeciderShape>()("plan-review/Decider") {}
 

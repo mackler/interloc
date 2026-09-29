@@ -3,6 +3,7 @@
 // Claude Code session (decision Q3). Decisions are numbered across the run; the loop sits inside the phase in which
 // the question was asked and changes nothing about the phases.
 
+import { writeContext } from "./questionContext.ts";
 import { Effect, Layer, Result } from "effect";
 import { validateAnalysis } from "./analysis.ts";
 import type { RunError } from "./errors.ts";
@@ -77,6 +78,7 @@ export const makeDecider = (task: string, format: string): Effect.Effect<Decider
             Effect.provideService(Decider, self),
             Effect.provideContext(context),
           ),
+        explain: (request) => writeContext(task, request).pipe(Effect.provideService(Decider, self), Effect.provideContext(context)),
       };
       return self;
     };

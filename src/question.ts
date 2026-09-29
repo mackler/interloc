@@ -7,8 +7,11 @@ import type { Disposition, Issue, LogEntry, QuestionOption, Term } from "./schem
 
 export type { QuestionOption, Term };
 
-/** The parts of a question that an agent writes: the context paragraph, the question, its terms and its options. */
-export type Question = Readonly<{ context: string; question: string; terms: readonly Term[]; options: readonly QuestionOption[] }>;
+/**
+ * The parts of a question that an agent writes: the context paragraph, the question, its terms and its options; `details`,
+ * what the question is about as the program records it (S11), is text a term may occur in too.
+ */
+export type Question = Readonly<{ context: string; question: string; terms: readonly Term[]; options: readonly QuestionOption[]; details?: string }>;
 
 const WORD = /[\p{L}\p{N}_]/u;
 const escape = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -32,15 +35,18 @@ const bareNumbers = (text: string): readonly string[] =>
   });
 
 /** Every text of a question that its terms may occur in and that is shown to the reader. */
-const textsOf = (q: Question): readonly string[] => [q.context, q.question, ...q.options.flatMap((o) => [o.label, o.description])];
+const textsOf = (q: Question): readonly string[] => [q.context, q.question, ...q.options.flatMap((o) => [o.label, o.description]), q.details ?? ""];
 
-/** The problems of one question; none when it keeps every mechanically checkable rule. */
-export const questionProblems = (q: Question): readonly QuestionProblem[] => {
+/**
+ * The problems of one question; none when it keeps every mechanically checkable rule. `scope` "context" checks only what
+ * a context call writes (S9): the context and the terms; the program's own question and options are not its to change.
+ */
+export const questionProblems = (q: Question, scope: "all" | "context" = "all"): readonly QuestionProblem[] => {
   const texts = textsOf(q);
   const names = q.terms.map((t) => t.term);
   return [
     ...(q.context.trim() === "" ? [{ kind: "blankContext" as const, subject: "" }] : []),
-    ...(/\?["'”’)\]]*$/u.test(q.question.trim()) ? [] : [{ kind: "notLast" as const, subject: "" }]),
+    ...(scope === "context" || /\?["'”’)\]]*$/u.test(q.question.trim()) ? [] : [{ kind: "notLast" as const, subject: "" }]),
     ...q.terms.flatMap((t, i): QuestionProblem[] => {
       if (t.term.trim() === "") return [{ kind: "blankTerm", subject: "" }];
       return [
@@ -49,7 +55,7 @@ export const questionProblems = (q: Question): readonly QuestionProblem[] => {
         ...(names.indexOf(t.term) < i ? [{ kind: "duplicateTerm" as const, subject: t.term }] : []),
       ];
     }),
-    ...texts.flatMap(bareNumbers).map((subject) => ({ kind: "bareNumber" as const, subject })),
+    ...(scope === "context" ? [q.context] : texts).flatMap(bareNumbers).map((subject) => ({ kind: "bareNumber" as const, subject })),
   ];
 };
 
@@ -145,6 +151,8 @@ export type OptionAnswer = Readonly<{ token: string }> | Readonly<{ numeric: tru
 export type PresentedOption = Readonly<{ label: string; description: string; answer: OptionAnswer }>;
 /** Who wrote the context paragraph: an agent, or the program (a fixed paragraph, S7 and S10). */
 export type QuestionContextText = Readonly<{ text: string; by: "agent" | "program" }>;
+/** What the context call gives a question (S9): its context paragraph, by whom, and the explanations of its terms. */
+export type ContextWritten = Readonly<{ context: QuestionContextText; terms: readonly Term[] }>;
 
 /**
  * A question as the user is shown it (S5), the same shape whatever produced it: its number in the run, where it came

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { programWritten } from "../src/questionContext.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
@@ -120,6 +121,7 @@ test("Help me decide at the exhaustion pause runs a decision and asks again", as
   const requests: unknown[] = [];
   const decider: DeciderShape = {
     at: () => decider,
+    explain: (request) => Effect.succeed(programWritten(request)),
     decide: (request) => Effect.sync(() => (requests.push(request), { decision: 1, analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } }, result: "converged" as const })),
   };
   const { layer, ui } = await setup([DECIDE, prompts.TRANSPORT_ANSWERS.retry], decider);
@@ -147,4 +149,29 @@ test("every option of the exhaustion pause sends the answer its label names, and
     assert.deepEqual(options.filter((o) => o.matches(sends)).map((o) => o.label), [option.label]);
   }
   for (const answer of ["", " ", "x", "2", "p"]) assert.equal(parseTransportAnswer(answer), null, answer);
+});
+
+// S10 and S12 (G-R1-1): the exhaustion pause for Codex gets its context from a context call; the pause for Claude Code
+// shows the program's paragraph at once, since a context call would need the agent that cannot be reached.
+test("the exhaustion pause for Codex is explained by a context call; the pause for Claude Code is not", async () => {
+  const explained: unknown[] = [];
+  const decider: DeciderShape = {
+    at: () => decider,
+    decide: () => Effect.die(new Error("no decision was expected")),
+    explain: (request) => Effect.sync(() => (explained.push(request), { context: { text: "Written by Claude Code.", by: "agent" as const }, terms: [] })),
+  };
+  for (const agent of ["codex", "claude"] as const) {
+    explained.length = 0;
+    const { layer, ui } = await setup([prompts.TRANSPORT_ANSWERS.stop], decider);
+    const attempt = () => Effect.fail(new TransportFault({ agent, message: "read ECONNRESET", status: null }));
+    await exitOf(withTransportRetry(agent, "the review", attempt, Effect.void), layer);
+    const [q] = ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : []));
+    if (agent === "codex") {
+      assert.equal(explained.length, 1);
+      assert.deepEqual(q.context, { text: "Written by Claude Code.", by: "agent" });
+    } else {
+      assert.deepEqual(explained, [], "a context call was made for the pause of the unreachable Claude Code");
+      assert.deepEqual(q.context, { text: prompts.fallbackContext(q.origin), by: "program" });
+    }
+  }
 });

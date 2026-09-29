@@ -27,6 +27,11 @@ export const withTransportRetry = <A, E, R>(
   what: string,
   attempt: (n: number) => Effect.Effect<A, E | TransportFault, R>,
   beforeRetry: Effect.Effect<void, RunError, R>,
+  /**
+   * "ask": the exhaustion pause; "fail": AgentUnreachable at once, for a call whose failure the caller handles (the
+   * context call of a question, S10: it must not ask a question of its own before the question it explains).
+   */
+  onExhausted: "ask" | "fail" = "ask",
 ): Effect.Effect<A, Exclude<E, TransportFault> | AgentUnreachable | RunError, R | Ui | Decider | Store | RunConfig> =>
   Effect.gen(function* () {
     const config = yield* RunConfig;
@@ -49,9 +54,14 @@ export const withTransportRetry = <A, E, R>(
         yield* ui.notify({ _tag: "TransportRetrying", agent, attempt: retried, of: delays.length, delaySeconds: delay, fault: error.message });
         yield* say(prompts.transportRetryLine(agent, retried, delays.length, delay, error.message));
         yield* Effect.sleep(Duration.seconds(delay));
+      } else if (onExhausted === "fail") {
+        return yield* Effect.fail(new AgentUnreachable({ agent, attempts: n, lastFault: error.message }));
       } else {
         const origin: QuestionOrigin = { kind: "transport", agent, what, attempts: n, fault: error.message };
-        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.transportExhaustedQuestion(agent, what, n, error.message), options: transportOptions(), decision: null };
+        // S10 (G-R1-1): the context of a pause for Claude Code is the program's own at once, since a context call would
+        // need the agent that cannot be reached; a pause for Codex gets its context from Claude Code (S12).
+        const facts = prompts.transportFacts(agent, what, n, error.message);
+        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.transportExhaustedQuestion(agent, what, n, error.message), options: transportOptions(), ...(agent === "codex" ? { explain: facts } : {}), decision: null };
         const answer = yield* askOffering((p) => ui.ask(p), prompts.transportPrompt, draft, (a) => parseTransportAnswer(a) !== null);
         const choice = parseTransportAnswer(answer) ?? "stop";
         yield* store.converse(prompts.transportDecisionLine(choice, agent, what));

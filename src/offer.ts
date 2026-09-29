@@ -18,7 +18,20 @@ import { Decider, Store, Ui } from "./services.ts";
  */
 export type OfferedOption = Readonly<{ label: string; description: string; answer: OptionAnswer; matches: (answer: string) => boolean }>;
 /** A question before it is numbered (S7): everything the user is shown of it but its number. */
-export type QuestionDraft = Readonly<{ origin: QuestionOrigin; context: QuestionContextText; terms: readonly Term[]; question: string; options: readonly OfferedOption[]; details?: string; decision: number | null }>;
+export type QuestionDraft = Readonly<{
+  origin: QuestionOrigin;
+  context: QuestionContextText;
+  terms: readonly Term[];
+  question: string;
+  options: readonly OfferedOption[];
+  details?: string;
+  /**
+   * A question the program composed asks a context call for its context and terms (S9, decision Q1): the facts of the
+   * case in prose beside `details`. Absent: the draft's own context stands.
+   */
+  explain?: string;
+  decision: number | null;
+}>;
 /** The fixed context paragraph of a question the program composes (S7, S10), marked as the program's. */
 export const programContext = (origin: QuestionOrigin): QuestionContextText => ({ text: prompts.fallbackContext(origin), by: "program" });
 /** An agent's context paragraph; the program's own paragraph where the agent wrote none. */
@@ -80,6 +93,14 @@ export const limitOptions = (proceed: string | null): readonly OfferedOption[] =
   ];
 };
 
+/** The context and terms a context call writes for a question the program composed (S9), before it is presented. */
+const explain = (draft: QuestionDraft, facts: string) =>
+  Effect.gen(function* () {
+    const decider = yield* Decider;
+    const options = draft.options.map((o) => ({ label: o.label, description: o.description }));
+    return yield* decider.explain({ origin: draft.origin, decision: draft.decision, question: draft.question, options, details: draft.details ?? "", facts });
+  });
+
 /**
  * Asks a question (S7), the one way a question reaches the user: it takes the question's number in the run, presents
  * the question (the page's event, which the terminal prints) and records it in conversation.md, then asks with the
@@ -98,7 +119,8 @@ export const askOffering = <E>(
   Effect.gen(function* () {
     const ui = yield* Ui;
     const store = yield* Store;
-    const question = presentedQuestion(draft, yield* ui.nextQuestion);
+    const explained = draft.explain === undefined ? draft : { ...draft, ...(yield* explain(draft, draft.explain)) };
+    const question = presentedQuestion(explained, yield* ui.nextQuestion);
     const present = ui.notify({ _tag: "QuestionPresented", question });
     yield* present;
     yield* store.converse(renderQuestionRecord(question));

@@ -692,7 +692,7 @@ export function phaseLabel(kind: "questions" | "planning" | "execution" | "work"
 }
 /** The purpose of an agent call as the activity line names it: the events keep the program's words (issues #14, #21). */
 export function purposeLabel(purpose: string): string {
-  return purpose === "interview" ? "clarification" : purpose === "execution" ? "implementation" : purpose;
+  return purpose === "interview" ? "clarification" : purpose === "execution" ? "implementation" : purpose === "context" ? "explaining a question" : purpose;
 }
 /** A cycle of a review loop in the user's words (issue #14): the records and the events say "round". */
 export function cycleHeading(heading: string, n: number): string {
@@ -1142,8 +1142,8 @@ export function agentUnreachableText(agent: "claude" | "codex", attempts: number
 }
 
 /** What a retried planning call is, as the exhaustion pause names it. */
-export function transportWhat(purpose: "planning" | "interview"): string {
-  return purpose === "interview" ? "an interview turn" : "a planning call";
+export function transportWhat(purpose: "planning" | "interview" | "context"): string {
+  return purpose === "interview" ? "an interview turn" : purpose === "context" ? "the explanation of a question" : "a planning call";
 }
 /** What a retried Codex turn is, as the exhaustion pause names it. */
 export function transportReviewWhat(heading: string): string {
@@ -1405,3 +1405,46 @@ export function identicalFacts(fileLabel: string, round: number, seen: string): 
   return identicalContentLine(fileLabel, round, seen).trim();
 }
 export const IDLE_ISSUES_HEADING = "The issues of the last cycle that led to no change:";
+
+// ---- the context call (S9, decision Q1) -----------------------------------------------------------------------------
+
+/** What a context call is given: the question the program composed, where it arises, and what the program records of it. */
+export type ContextRequest = Readonly<{
+  origin: QuestionOrigin;
+  decision: number | null;
+  question: string;
+  options: readonly Readonly<{ label: string; description: string }>[];
+  /** What the question is about, as the program records it (a pause's facts, S11), or "". */
+  details: string;
+  /** Further facts of the case in prose (the tool and its input, the counts), or "". */
+  facts: string;
+}>;
+/**
+ * The call that writes the context paragraph and the terms of a question the program composed (S9, decision Q1): a fresh
+ * session, read-only, with the rules of every question; the question and its options are fixed. `validateQuestion`
+ * checks the reply's context and terms under the same rules (questionProblems, scope "context").
+ */
+export function contextPrompt(task: string, request: ContextRequest): string {
+  const options = request.options.length === 0 ? "(none: the user answers in his own words)" : request.options.map((o, i) => optionLine(i, o)).join("\n");
+  const record = [request.details, request.facts].filter((t) => t.trim() !== "").join("\n\n");
+  return `Interloq, the program that runs this task, is about to ask the user the question below. Write the context paragraph that the user reads before it, and list the terms in it that a reader may not know. You may read the project to understand it; do not modify any file, do not use the AskUserQuestion tool, and do not answer or change the question.
+${questionWritingRules()}
+The question and its options are fixed and are shown after your paragraph; the paragraph places the reader before he is asked. Return in context the paragraph and in terms each term with its explanation, the term in the exact words in which it appears in the paragraph, the question, the options or the record below.
+
+The task of the run: ${task}
+
+Where the question arises: ${originLine(request.origin, request.decision)}
+${record === "" ? "" : `What the program records of it:\n${record}\n`}
+The question: ${request.question}
+The options, in this order:
+${options}`;
+}
+/** The fallback's note in conversation.md when no context could be written (S10): the question is shown with the program's paragraph. */
+export function contextFallbackNote(reason: string): string {
+  return `**Context written by Interloq:** the explanation of the next question could not be written (${reason}); it is shown with the program's own paragraph.\n\n`;
+}
+
+/** The facts of the transport pause a context call is given (S12). */
+export function transportFacts(agent: "claude" | "codex", what: string, attempts: number, fault: string): string {
+  return `${agentName(agent)} could not be reached for ${what} after ${attempts} attempts; the last error was: ${fault}. Interloq waited between the attempts, each time twice as long as before. Retry again makes another full set of attempts; Stop the run ends the run and keeps its records.`;
+}

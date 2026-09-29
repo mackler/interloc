@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { PresentedQuestion } from "../src/question.ts";
+import { programWritten } from "../src/questionContext.ts";
 import { recordSubject } from "../src/prompts.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { execFileSync } from "node:child_process";
@@ -156,6 +157,9 @@ export type PlanningStep = { fault?: string; output?: unknown; /** The text of t
 /** `unreachable` fails the call with AgentUnreachable after its reports, as the adapter does when the user stops at the exhaustion pause (issue #26). */
 export type ExecScript = { reports?: readonly (readonly [string, "started" | "done"])[]; onCall?: () => void; after?: () => void; hang?: boolean; unreachable?: boolean };
 
+/** The reply of a context call that a test does not script (S9): a paragraph that keeps the rules, and no term. */
+export const SCRIPTED_CONTEXT = { context: "Interloq, the orchestrator, asks this question on behalf of the run.", terms: [] };
+
 export class ScriptedPlanner implements PlannerShape {
   readonly prompts: string[] = [];
   /** The Effect schema of each planning call, in order. */
@@ -179,6 +183,10 @@ export class ScriptedPlanner implements PlannerShape {
     this.execs = [...execs];
     this.execScripts = [...execScripts];
   }
+  /** The prompts of the context calls (S9), apart from `prompts` so that the scripts of the other calls keep their order. */
+  readonly contextPrompts: string[] = [];
+  /** The scripted replies of the context calls, in order; without one, a context call returns SCRIPTED_CONTEXT. */
+  contexts: PlanningStep[] = [];
   readonly sessionId = Effect.succeed("test-session");
   /** How often a fresh session was started (a decision loop); the fresh planner shares this script. */
   freshSessions = 0;
@@ -187,7 +195,16 @@ export class ScriptedPlanner implements PlannerShape {
     return this;
   });
   /** Returns the scripted output as it is: the caller decodes it, as with the real agent. */
-  planning(prompt: string, schema: Schema.Top, _purpose?: PlanningPurpose, capability: PlanningCapability = "records"): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }, TransportFault> {
+  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability: PlanningCapability = "records"): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }, TransportFault> {
+    if (purpose === "context") {
+      return Effect.suspend(() => {
+        this.contextPrompts.push(prompt);
+        const step = this.contexts.shift();
+        if (step?.fault !== undefined) return Effect.fail(new TransportFault({ agent: "claude", message: step.fault, status: null }));
+        if (step?.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
+        return Effect.succeed({ output: step === undefined ? SCRIPTED_CONTEXT : step.output, resultText: "", costUsd: 0.01 });
+      });
+    }
     return Effect.suspend(() => {
       this.prompts.push(prompt);
       this.schemas.push(schema);
@@ -315,7 +332,7 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
 /** `store` wraps the live store of the test layer (a test that changes the project between the agents' calls). */
-export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; execScripts?: readonly ExecScript[]; config?: Partial<Config>; platform?: Layer.Layer<Platform>; store?: (store: StoreShape) => StoreShape };
+export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; /** The replies of the context calls (S9), in order. */ contexts?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; execScripts?: readonly ExecScript[]; config?: Partial<Config>; platform?: Layer.Layer<Platform>; store?: (store: StoreShape) => StoreShape };
 
 /**
  * The live platform with a file system whose writes and renames can fail: `shouldFail(method, count)` is asked
@@ -351,8 +368,8 @@ export type Probe = {
 export const DECISION_FORMAT_TEXT = fs.readFileSync(new URL("../docs/decision-making.md", import.meta.url), "utf8");
 /** A reporter for execution calls that expect no report_step call: a call is a defect. */
 export const noReporter: StepReporter = (id) => Effect.die(new Error(`no report of a step was expected: ${id}`));
-/** A Decider for tests that expect no decision: a call is a defect. */
-export const noDecider: DeciderShape = { at: () => noDecider, decide: () => Effect.die(new Error("no decision was expected")) };
+/** A Decider for tests that expect no decision: a call is a defect; a question's context is the program's own (S10). */
+export const noDecider: DeciderShape = { at: () => noDecider, decide: () => Effect.die(new Error("no decision was expected")), explain: (request) => Effect.succeed(programWritten(request)) };
 /** The services with the Decider built over them (decision support, D3), as src/program.ts builds it. */
 export const withDecider = (layer: Layer.Layer<DeciderDeps>, task = "task"): Layer.Layer<Services> => Layer.provideMerge(deciderLayer(task, DECISION_FORMAT_TEXT), layer);
 
@@ -362,6 +379,7 @@ export function testLayer(repo: string, options: TestOptions = {}): { layer: Lay
   const config: Config = { ...defaultConfig, questionPhase: false, ...options.config };
   const ui = new ScriptedUi(options.answers ?? []);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? [], options.execScripts ?? []);
+  planner.contexts = [...(options.contexts ?? [])];
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
   const wrap = options.store ?? ((s: StoreShape) => s);
   const store = Layer.effect(Store, makeStore(repo, config.ignorePaths).pipe(Effect.map(wrap))).pipe(Layer.provide(options.platform ?? platformLayer));
@@ -403,6 +421,7 @@ export function testWiring(repo: string, options: TestOptions = {}): { wiring: W
   fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ questionPhase: false, ...options.config }));
   const ui = new ScriptedUi(options.answers ?? []);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? [], options.execScripts ?? []);
+  planner.contexts = [...(options.contexts ?? [])];
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
   const usageLines: string[] = [];
   const wiring: Wiring = {
