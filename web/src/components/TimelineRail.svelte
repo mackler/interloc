@@ -5,9 +5,12 @@
   // for the whole loop when it has ended; issue #14), the steps of Gather Requirements with the clarification's count
   // (issue #21), and a progress indicator while an agent works. Issue #6: the whole run, the phases ahead included, and
   // under the Implementation that carries it out the plan's stages and steps, each step's full text in a rich tooltip.
-  import { AGENT_WORKING_LABEL, clarificationProgress, cycleLine, loopSummary, NO_PHASE_YET, PLAN_LIST_LABEL, PLAN_STEP_STATE_LABEL, planStepLabel, PROGRESS_HEADING, runningFor, stageHeading, TIMELINE_STATE_LABEL } from "../../../src/prompts.ts";
+  // Issue #50: the indicator and the current call's time are on the step that runs (its mark becomes the circular
+  // indicator), the phase keeps an indicator only while none of its steps runs, and each phase shows its own time.
+  import { AGENT_WORKING_LABEL, clarificationProgress, cycleLine, loopSummary, NO_PHASE_YET, phaseElapsed, phaseTook, PLAN_LIST_LABEL, PLAN_STEP_STATE_LABEL, planStepLabel, PROGRESS_HEADING, runningFor, stageHeading, stepWorkingLabel, TIMELINE_STATE_LABEL } from "../../../src/prompts.ts";
   import { elapsedMs } from "../time.ts";
-  import { planStepState, type RoundGroup, type StepState, type TimelineEntry } from "../state.ts";
+  import { bandKey, currentPlanStep, planStepState, type RoundGroup, type StepState, type TimelineEntry } from "../state.ts";
+  import CircularIndeterminate from "./CircularIndeterminate.svelte";
   import StepTooltip from "./StepTooltip.svelte";
 
   /**
@@ -16,10 +19,12 @@
    */
   type Props = { timeline: readonly TimelineEntry[]; busy: boolean; executing?: boolean; callStartedAt?: string | null };
   let { timeline, busy, executing = false, callStartedAt = null }: Props = $props();
-  // The clock of the elapsed time: the edge of the component, ticking once per second while a call runs.
+  // The clock of the elapsed times: the edge of the component, ticking once per second while a phase is active (its
+  // time runs whether or not a call runs) or a call runs.
   let now = $state(Date.now());
+  const ticking = $derived(timeline.some((e) => e.state === "active") || (busy && callStartedAt !== null));
   $effect(() => {
-    if (!busy || callStartedAt === null) return;
+    if (!ticking) return;
     now = Date.now();
     const timer = setInterval(() => (now = Date.now()), 1000);
     return () => clearInterval(timer);
@@ -29,7 +34,16 @@
   const MARK: Record<StepState, string> = { done: "✓", active: "●", stopped: "■", ahead: "○", notReached: "○", skipped: "–" };
   const LABEL = TIMELINE_STATE_LABEL;
   const STEP_MARK: Record<ReturnType<typeof planStepState>, string> = { done: "✓", current: "●", unfinished: "◐", pending: "○" };
+  /** The phase's own time: how long it took once ended, how long it has run while active, nothing before it began. */
+  const phaseTime = (entry: TimelineEntry, at: number): string | null =>
+    entry.began === null ? null : entry.ended !== null ? phaseTook(elapsedMs(entry.began, Date.parse(entry.ended))) : entry.state === "active" ? phaseElapsed(elapsedMs(entry.began, at)) : null;
+  /** Whether a step of the entry runs, so that the step and not the phase carries the indicator. */
+  const stepRuns = (entry: TimelineEntry): boolean => entry.steps.some((st) => st.state === "active") || currentPlanStep(entry, executing) !== null;
 </script>
+
+{#snippet elapsed()}
+  {#if callStartedAt !== null}<span class="m3-font-body-small elapsed" data-elapsed>{runningFor(elapsedMs(callStartedAt, now))}</span>{/if}
+{/snippet}
 
 {#snippet loops(groups: readonly RoundGroup[])}
   {#each groups as group, g (g)}
@@ -56,13 +70,19 @@
       <li class="entry {entry.state}" data-state={entry.state} aria-current={entry.state === "active" ? "step" : undefined}>
         <span class="mark" aria-label={LABEL[entry.state]}>{MARK[entry.state]}</span>
         <span class="m3-font-label-large" data-label>{entry.label}</span>
+        {#if phaseTime(entry, now) !== null}<span class="m3-font-body-small phase-time" data-phase-time>{phaseTime(entry, now)}</span>{/if}
         {@render loops(entry.groups)}
         {#if entry.steps.length > 0}
           <ol class="steps">
             {#each entry.steps as step, s (s)}
               <li class="step {step.state}" data-step={step.state} aria-current={step.state === "active" ? "step" : undefined}>
-                <span class="mark" aria-label={LABEL[step.state]}>{MARK[step.state]}</span>
+                {#if step.state === "active" && busy}
+                  <span class="mark"><CircularIndeterminate label={stepWorkingLabel("phaseStep")} glyph={MARK[step.state]} /></span>
+                {:else}
+                  <span class="mark" aria-label={LABEL[step.state]}>{MARK[step.state]}</span>
+                {/if}
                 <span class="m3-font-label-medium" data-step-label>{step.label}</span>
+                {#if step.state === "active" && busy}{@render elapsed()}{/if}
                 {#if step.count !== null}<span class="m3-font-body-small count" data-count>{clarificationProgress(step.count.answered, step.count.total)}</span>{/if}
                 {@render loops(step.groups)}
               </li>
@@ -78,8 +98,13 @@
                   {#each stage.steps as step (step.id)}
                     {@const state = planStepState(entry, step, executing)}
                     <li class="plan-step {state}" data-plan-step={state} aria-current={state === "current" ? "step" : undefined}>
-                      <span class="mark" aria-label={PLAN_STEP_STATE_LABEL[state]}>{STEP_MARK[state]}</span>
-                      <StepTooltip key={step.id} label={planStepLabel(step.number, step.label)} text={step.text} />
+                      {#if state === "current" && busy}
+                        <span class="mark"><CircularIndeterminate label={stepWorkingLabel("planStep")} glyph={STEP_MARK[state]} /></span>
+                      {:else}
+                        <span class="mark" aria-label={PLAN_STEP_STATE_LABEL[state]}>{STEP_MARK[state]}</span>
+                      {/if}
+                      <StepTooltip key={`${bandKey(entry.phase)}-${step.id}`} label={planStepLabel(step.number, step.label)} text={step.text} />
+                      {#if state === "current" && busy}{@render elapsed()}{/if}
                     </li>
                   {/each}
                 </ol>
@@ -87,10 +112,10 @@
             {/each}
           </ol>
         {/if}
-        {#if entry.state === "active" && busy}
+        {#if entry.state === "active" && busy && !stepRuns(entry)}
           <div class="busy" data-busy>
             <Indeterminate label={AGENT_WORKING_LABEL} />
-            {#if callStartedAt !== null}<span class="m3-font-body-small elapsed" data-elapsed>{runningFor(elapsedMs(callStartedAt, now))}</span>{/if}
+            {@render elapsed()}
           </div>
         {/if}
       </li>
@@ -127,4 +152,6 @@
   .muted { color: var(--m3c-on-surface-variant); }
   .busy { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem; }
   .elapsed { color: var(--m3c-on-surface-variant); font-variant-numeric: tabular-nums; }
+  .step > .elapsed, .plan-step > .elapsed { display: block; }
+  .phase-time { display: block; color: var(--m3c-on-surface-variant); font-variant-numeric: tabular-nums; }
 </style>

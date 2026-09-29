@@ -229,8 +229,9 @@ const place = (run: RunView, side: "left" | "right", m: Unplaced): RunView => {
 const withLeft = (run: RunView, m: Unplaced): RunView => place(run, "left", m);
 const withRight = (run: RunView, m: Unplaced): RunView => place(run, "right", m);
 
+/** The key of a phase: of its band, and of its entry in the rail. */
+export const bandKey = (phase: Phase): string => (phase.kind === "questions" ? "questions" : `${phase.kind}-${phase.n}`);
 /** The band of a phase that began at `time`. */
-const bandKey = (phase: Phase): string => (phase.kind === "questions" ? "questions" : `${phase.kind}-${phase.n}`);
 const bandOf = (phase: Phase, time: string, count: number): Band => ({ key: bandKey(phase), kind: phase.kind, name: phaseName(phase, count), began: time });
 /** How many phases of the kind the run holds, begun or foreseen: the timeline holds both (issue #6). */
 const countIn = (run: RunView, phase: Phase): number => Math.max(1, countOfKind(run.timeline.map((e) => e.phase), phase.kind));

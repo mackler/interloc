@@ -16,7 +16,7 @@ import TopBar from "./components/TopBar.svelte";
 import MessageView from "./components/Message.svelte";
 import ChatPanel from "./components/ChatPanel.svelte";
 import { clockTime, fullTime, TOOLTIP_GRACE_MS } from "./time.ts";
-import { emptyRun, initialState, type Message, reduce, type RoundGroup, type TimelineEntry, type TimelineStep, type Widget } from "./state.ts";
+import { callStartedAt, emptyRun, executing, initialState, type Message, reduce, type RoundGroup, type TimelineEntry, type TimelineStep, type Widget } from "./state.ts";
 
 // Plan step 4.5: the components, mounted in jsdom.
 let mounted: ReturnType<typeof mount>[] = [];
@@ -801,8 +801,9 @@ describe("TimelineRail: the plan", () => {
       `unfinished:${prompts.planStepLabel(1, "The rail")}`,
       `pending:${prompts.planStepLabel(2, "The tooltip")}`,
     ]);
-    const marks = [...root.querySelectorAll("[data-plan-step] .mark")].map((e) => [e.textContent?.trim(), e.getAttribute("aria-label")]);
-    expect(marks).toEqual([["✓", prompts.PLAN_STEP_STATE_LABEL.done], ["●", prompts.PLAN_STEP_STATE_LABEL.current], ["◐", prompts.PLAN_STEP_STATE_LABEL.unfinished], ["○", prompts.PLAN_STEP_STATE_LABEL.pending]]);
+    // A running step's mark is the circular indicator, named for the step's state and the work (issue #50); its glyph stays for reduced motion.
+    const marks = [...root.querySelectorAll("[data-plan-step] > .mark")].map((e) => [e.textContent?.trim(), e.getAttribute("aria-label") ?? e.querySelector("[role=progressbar]")?.getAttribute("aria-label")]);
+    expect(marks).toEqual([["✓", prompts.PLAN_STEP_STATE_LABEL.done], ["●", prompts.stepWorkingLabel("planStep")], ["◐", prompts.PLAN_STEP_STATE_LABEL.unfinished], ["○", prompts.PLAN_STEP_STATE_LABEL.pending]]);
     expect(root.querySelector("[data-plan-step=current]")?.getAttribute("aria-current")).toBe("step");
   });
 
@@ -972,5 +973,155 @@ describe("CircularIndeterminate", () => {
     expect(bar.querySelector("img")).toBe(null);
     expect(one(bar, "[data-glyph]").textContent).toBe("●");
     expect(bar.classList.contains("circular-indeterminate")).toBe(true);
+  });
+});
+
+// Issue #50: the indicator and the current call's time are on the step that runs, not under the phase; the phase shows
+// its own time: how long it has run, or how long it took.
+describe("TimelineRail: where the indicator is", () => {
+  afterEach(() => vi.useRealTimers());
+  const gatherStep = (kind: TimelineStep["kind"], state: TimelineStep["state"]): TimelineStep => ({ kind, label: prompts.stepLabel(kind), state, count: null, base: { answered: 0, total: 0 }, groups: [] });
+  const gather = (steps: TimelineStep[]): TimelineEntry => ({ ...fresh, phase: { kind: "questions" }, label: "Gather Requirements", state: "active", groups: [], steps, plan: null });
+  const planStep = (id: string, number: number, status: "pending" | "started" | "done" | "unfinished") => ({ id, number, label: `step ${id}`, text: `text ${id}`, status });
+  const implementation = (currentStep: string | null, statuses: Record<string, "pending" | "started" | "done" | "unfinished">): TimelineEntry => ({
+    ...fresh,
+    phase: { kind: "execution", n: 1 },
+    label: "Implementation",
+    state: "active",
+    groups: [],
+    steps: [],
+    currentStep,
+    plan: { stages: [{ key: "current-1", number: 1, title: "t", steps: ["S1", "S2"].map((id, i) => planStep(id, i + 1, statuses[id] ?? "pending")) }] },
+  });
+  const CALL = "2026-09-29T10:00:00.000Z";
+  const entryBar = (root: HTMLElement) => root.querySelector(".entry > [data-busy]");
+
+  test("Gather Requirements: the indicator and the call's time are inside the active step, not in the step ahead or under the phase", () => {
+    const root = show(TimelineRail, { busy: true, timeline: [gather([gatherStep("formulate", "active"), gatherStep("clarification", "ahead")])], callStartedAt: CALL });
+    const active = one(root, "[data-step=active]");
+    expect(active.querySelector("[role=progressbar]")).not.toBe(null);
+    expect(active.querySelector("[data-elapsed]")).not.toBe(null);
+    const ahead = one(root, "[data-step=ahead]");
+    expect(ahead.querySelector("[role=progressbar]")).toBe(null);
+    expect(ahead.querySelector("[data-elapsed]")).toBe(null);
+    expect(entryBar(root)).toBe(null);
+    expect(root.querySelectorAll("[role=progressbar]").length).toBe(1);
+  });
+
+  test("Implementation: the indicator and the call's time are inside the current plan step, not under the phase", () => {
+    const root = show(TimelineRail, { busy: true, executing: true, timeline: [implementation("S2", { S1: "done", S2: "started" })], callStartedAt: CALL });
+    const current = one(root, "[data-plan-step=current]");
+    expect(current.querySelector("[role=progressbar]")).not.toBe(null);
+    expect(current.querySelector("[data-elapsed]")).not.toBe(null);
+    expect(entryBar(root)).toBe(null);
+    expect(root.querySelectorAll("[role=progressbar]").length).toBe(1);
+  });
+
+  test("Implementation with no step current: the phase carries the indicator, and a step left open shows as unfinished without one", () => {
+    const cases: Record<string, "pending" | "started" | "done" | "unfinished">[] = [{}, { S1: "started", S2: "done" }];
+    for (const statuses of cases) {
+      const root = show(TimelineRail, { busy: true, executing: true, timeline: [implementation(null, statuses)], callStartedAt: CALL });
+      expect(entryBar(root)?.querySelector("[role=progressbar]")).not.toBe(null);
+      expect(entryBar(root)?.querySelector("[data-elapsed]")).not.toBe(null);
+      expect(root.querySelector("[data-plan-step] [role=progressbar]")).toBe(null);
+    }
+  });
+
+  test("an active step while no call runs shows its static mark and no indicator", () => {
+    const root = show(TimelineRail, { busy: false, timeline: [gather([gatherStep("formulate", "done"), gatherStep("clarification", "active")])] });
+    expect(root.querySelector("[role=progressbar]")).toBe(null);
+    expect(one(root, "[data-step=active] .mark").getAttribute("aria-label")).toBe(prompts.TIMELINE_STATE_LABEL.active);
+  });
+
+  test("the running indicator is named for the step and the work; the step keeps aria-current; the mark's box stays", () => {
+    const idle = show(TimelineRail, { busy: false, timeline: [gather([gatherStep("formulate", "active")])] });
+    const running = show(TimelineRail, { busy: true, timeline: [gather([gatherStep("formulate", "active")])], callStartedAt: CALL });
+    const bar = one(running, "[data-step=active] [role=progressbar]");
+    expect(bar.getAttribute("aria-label")).toBe(prompts.stepWorkingLabel("phaseStep"));
+    expect(one(running, "[data-step=active]").getAttribute("aria-current")).toBe("step");
+    // The glyph's box: the same element, with the same class, holds the static glyph or the indicator.
+    const mark = (root: HTMLElement) => one(root, "[data-step=active] > .mark");
+    expect(mark(running).className).toBe(mark(idle).className);
+    expect(bar.parentElement).toBe(mark(running));
+    const plan = show(TimelineRail, { busy: true, executing: true, timeline: [implementation("S2", { S2: "started" })], callStartedAt: CALL });
+    expect(one(plan, "[data-plan-step=current] [role=progressbar]").getAttribute("aria-label")).toBe(prompts.stepWorkingLabel("planStep"));
+    expect(one(plan, "[data-plan-step=current]").getAttribute("aria-current")).toBe("step");
+    expect(one(plan, "[data-plan-step=current] [role=progressbar]").parentElement?.classList.contains("mark")).toBe(true);
+  });
+
+  test("the active phase shows how long it has run, advancing while no call runs; an ended phase how long it took; others nothing", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-29T10:11:00.000Z"));
+    const at = (iso: string) => `2026-09-29T${iso}.000Z`;
+    const root = show(TimelineRail, {
+      busy: false,
+      timeline: [
+        { ...fresh, phase: { kind: "planning", n: 1 }, label: "Planning", state: "done", groups: [], steps: [], plan: null, began: at("09:00:00"), ended: at("09:11:02") },
+        { ...fresh, phase: { kind: "execution", n: 1 }, label: "Implementation", state: "stopped", groups: [], steps: [], plan: null, began: at("09:11:02"), ended: at("09:12:05") },
+        { ...fresh, phase: { kind: "planning", n: 2 }, label: "Planning 2", state: "active", groups: [], steps: [], plan: null, began: at("10:00:00") },
+        { ...fresh, phase: { kind: "execution", n: 2 }, label: "Implementation 2", state: "ahead", groups: [], steps: [], plan: null },
+      ],
+    });
+    const times = () => [...root.querySelectorAll(".entry")].map((e) => e.querySelector(":scope > [data-phase-time]")?.textContent?.trim() ?? null);
+    expect(times()).toEqual([prompts.phaseTook(662_000), prompts.phaseTook(63_000), prompts.phaseElapsed(660_000), null]);
+    vi.advanceTimersByTime(5_000);
+    flushSync();
+    expect(times()[2]).toBe(prompts.phaseElapsed(665_000));
+  });
+
+  test("a step shown under two Implementations: each tooltip has its own id, and each step is described by its own", () => {
+    const ended: TimelineEntry = { ...implementation(null, { S1: "unfinished" }), state: "done", label: "Implementation 1" };
+    const later: TimelineEntry = { ...implementation(null, { S1: "done" }), phase: { kind: "execution", n: 2 }, label: "Implementation 2" };
+    const root = show(TimelineRail, { busy: false, timeline: [ended, later] });
+    const buttons = [...root.querySelectorAll<HTMLElement>("[data-plan-step] button")].filter((b) => b.textContent?.includes("step S1"));
+    expect(buttons.length).toBe(2);
+    buttons[0].dispatchEvent(new FocusEvent("focus"));
+    buttons[1].dispatchEvent(new MouseEvent("mouseenter"));
+    flushSync();
+    const tips = [...root.querySelectorAll("[role=tooltip]")].map((t) => t.id);
+    expect(tips.length).toBe(2);
+    expect(new Set(tips).size).toBe(2);
+    expect(buttons.map((b) => b.getAttribute("aria-describedby"))).toEqual(tips);
+  });
+
+  test("a stage of the current plan and a stage of removed steps with the same number both render", () => {
+    const entry: TimelineEntry = {
+      ...implementation(null, {}),
+      state: "done",
+      plan: { stages: [{ key: "current-2", number: 2, title: "now", steps: [planStep("S3", 1, "done")] }, { key: "record-2", number: 2, title: "then", steps: [planStep("S1", 1, "unfinished")] }] },
+    };
+    const root = show(TimelineRail, { busy: false, timeline: [entry] });
+    expect([...root.querySelectorAll("[data-stage]")].map((e) => e.textContent?.trim())).toEqual([prompts.stageHeading(2, "now"), prompts.stageHeading(2, "then")]);
+  });
+
+  // The seam of the prompt, the reducer and the rail (P1-R1-5): what executePrompt tells Claude Code to report when it
+  // resumes a step is the report that puts the indicator back on that step.
+  test("the resume sentence of executePrompt, folded as reports, moves the indicator from S2 to the phase and back to S1", () => {
+    expect(prompts.executePrompt.includes(prompts.resumeStepSentence)).toBe(true);
+    expect(prompts.resumeStepSentence.includes(`'${prompts.REPORT_STEP_STATUSES[0]}'`)).toBe(true);
+    const plan = (s1: "started" | "unfinished", s2: "pending" | "started" | "done") => ({ stages: [{ number: 1, title: "t", steps: [planStep("S1", 1, s1), planStep("S2", 2, s2)] }] });
+    const report = (id: string, status: (typeof prompts.REPORT_STEP_STATUSES)[number], p: ReturnType<typeof plan>): UiEvent => ({ _tag: "PlanChanged", phase: 1, plan: p, step: { id, status } });
+    const events: UiEvent[] = [
+      { _tag: "PhaseBegan", phase: { kind: "execution", n: 1 } },
+      { _tag: "AgentCallStarted", agent: "claude", purpose: "execution" },
+      report("S1", "started", plan("started", "pending")),
+      report("S2", "started", plan("started", "started")),
+    ];
+    const done = report("S2", "done", plan("started", "done"));
+    const resumed = report("S1", prompts.REPORT_STEP_STATUSES[0], plan("started", "done"));
+    const rail = (list: UiEvent[]) => {
+      const messages: ServerMessage[] = [
+        { type: "hello", cwd: "/p", current: 1, incarnation: "a" },
+        { type: "replay", runs: [] },
+        { type: "event", run: 1, seq: 0, time: CALL, event: { _tag: "Started", project: "/p", task: "t" } },
+        ...list.map((event, i): ServerMessage => ({ type: "event", run: 1, seq: i + 1, time: CALL, event: { _tag: "Notified", event } })),
+      ];
+      const run = messages.reduce(reduce, initialState).run!;
+      return show(TimelineRail, { timeline: run.timeline, busy: run.busy, executing: executing(run), callStartedAt: callStartedAt(run) });
+    };
+    const where = (root: HTMLElement) => one(root, "[role=progressbar]").closest("[data-plan-step], .entry")?.querySelector("[data-plan-step-label], [data-label]")?.textContent?.trim();
+    expect(where(rail(events))).toBe(prompts.planStepLabel(2, "step S2"));
+    expect(where(rail([...events, done]))).toBe("Implementation");
+    expect(where(rail([...events, done, resumed]))).toBe(prompts.planStepLabel(1, "step S1"));
   });
 });
