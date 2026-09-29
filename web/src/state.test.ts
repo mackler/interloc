@@ -970,3 +970,28 @@ test("the elapsed time's start: the nested call's while it runs, the outer call'
   expect(callStartedAt(after.run!)).toBe(at(10));
   expect(callStartedAt(fold(live([started])).run!)).toBe(null);
 });
+
+// Issue #26 (S21): the retry of a transport fault on the activity line, live and replayed alike.
+describe("transport retries on the activity line", () => {
+  const call: UiEvent = { _tag: "AgentCallStarted", agent: "codex", purpose: "review" };
+  const failed: UiEvent = { _tag: "AgentCallEnded", agent: "codex", ok: false };
+  const retrying: UiEvent = { _tag: "TransportRetrying", agent: "codex", attempt: 2, of: 3, delaySeconds: 10, fault: "stream disconnected" };
+  const both = (events: readonly RunEvent[]) => [fold(live(events)), replayed(events)];
+
+  test("a retry shows the agent, the attempt of the retries and the fault, and the retried call keeps it", () => {
+    for (const s of both([started, notified(call), notified(failed), notified(retrying)])) expect(s.run?.activity).toBe("Codex — connection lost, retry 2 of 3 (stream disconnected)");
+    for (const s of both([started, notified(call), notified(failed), notified(retrying), notified(call)])) expect(s.run?.activity).toBe("Codex — review — connection lost, retry 2 of 3 (stream disconnected)");
+  });
+
+  test("the retry clears when the call recovers or a call ends well", () => {
+    for (const s of both([started, notified(call), notified(failed), notified(retrying), notified(call), notified({ _tag: "TransportRecovered", agent: "codex" })])) expect(s.run?.activity).toBe("Codex — review");
+    for (const s of both([started, notified(call), notified(failed), notified(retrying), notified(call), notified({ _tag: "AgentCallEnded", agent: "codex", ok: true }), notified(call)])) expect(s.run?.activity).toBe("Codex — review");
+  });
+
+  test("the SDK's own reconnection during a call is shown on the activity line", () => {
+    const reconnecting: UiEvent = { _tag: "AgentReconnecting", agent: "claude", by: "sdk", attempt: 2, of: 10, delayMs: 1500, detail: "status 503, server_error" };
+    for (const s of both([started, notified({ _tag: "AgentCallStarted", agent: "claude", purpose: "planning" }), notified(reconnecting)])) {
+      expect(s.run?.activity).toBe("Claude — planning — reconnecting 2 of 10 (status 503, server_error)");
+    }
+  });
+});

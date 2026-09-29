@@ -11,7 +11,7 @@ import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem";
 import * as NodePath from "@effect/platform-node/NodePath";
 import type { Schema } from "effect";
 import type { RunError } from "../src/errors.ts";
-import { describe, UserStopped } from "../src/errors.ts";
+import { AgentUnreachable, describe, TransportFault, UserStopped } from "../src/errors.ts";
 import { parseAskLine, parseMessage } from "../src/input.ts";
 import type { Wiring } from "../src/program.ts";
 import type { SubjectId } from "../src/artifacts.ts";
@@ -64,7 +64,7 @@ export function tempRepo(): string {
 }
 
 /** One scripted answer: the text the user types, or a step that never completes (for interruption tests). */
-export type ScriptedAnswer = string | { readonly wait: true };
+export type ScriptedAnswer = string | { readonly wait: true } | { readonly text: string; readonly before: () => void };
 
 /** A promise that resolves when `signal` is next called; for tests that wait for a double to be reached. */
 const readiness = (): { wait: () => Promise<void>; signal: () => void } => {
@@ -118,8 +118,10 @@ export class ScriptedUi implements UiShape {
       this.asks.signal();
       const answer = this.answers.shift();
       if (answer === undefined) return Effect.die(new Error(`no scripted answer for: ${prompt}`));
-      if (typeof answer !== "string") return Effect.never;
-      return interpret(answer);
+      if (typeof answer === "string") return interpret(answer);
+      if ("wait" in answer) return Effect.never;
+      answer.before();
+      return interpret(answer.text);
     });
   }
 }
@@ -130,10 +132,12 @@ export class ScriptedUi implements UiShape {
  * `editRecord` writes a file under plan-review/ during the call, as an agent that bypassed the hook could (stage A's
  * detection tests); `usage` appends a line to usage.jsonl during the call, as the adapter does.
  */
-export type PlanningStep = { output?: unknown; /** The text of the plan's one step (issue #6): a call whose schema carries the plan returns it as data. */ plan?: string; touchProject?: boolean; hang?: boolean; resultText?: string; onCall?: () => void; editRecord?: { file: string; content: string | null }; usage?: boolean };
+/** `fault` fails the call with a TransportFault of that message after its other effects (issue #26). */
+export type PlanningStep = { fault?: string; output?: unknown; /** The text of the plan's one step (issue #6): a call whose schema carries the plan returns it as data. */ plan?: string; touchProject?: boolean; hang?: boolean; resultText?: string; onCall?: () => void; editRecord?: { file: string; content: string | null }; usage?: boolean };
 
 /** What one scripted execution does besides its outcome (issue #6): report_step calls, and hooks around them. */
-export type ExecScript = { reports?: readonly (readonly [string, "started" | "done"])[]; onCall?: () => void; after?: () => void; hang?: boolean };
+/** `unreachable` fails the call with AgentUnreachable after its reports, as the adapter does when the user stops at the exhaustion pause (issue #26). */
+export type ExecScript = { reports?: readonly (readonly [string, "started" | "done"])[]; onCall?: () => void; after?: () => void; hang?: boolean; unreachable?: boolean };
 
 export class ScriptedPlanner implements PlannerShape {
   readonly prompts: string[] = [];
@@ -166,7 +170,7 @@ export class ScriptedPlanner implements PlannerShape {
     return this;
   });
   /** Returns the scripted output as it is: the caller decodes it, as with the real agent. */
-  planning(prompt: string, schema: Schema.Top, _purpose?: PlanningPurpose, capability: PlanningCapability = "records"): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }> {
+  planning(prompt: string, schema: Schema.Top, _purpose?: PlanningPurpose, capability: PlanningCapability = "records"): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }, TransportFault> {
     return Effect.suspend(() => {
       this.prompts.push(prompt);
       this.schemas.push(schema);
@@ -191,6 +195,7 @@ export class ScriptedPlanner implements PlannerShape {
         }
       }
       if (step.usage) fs.appendFileSync(path.join(records, "usage.jsonl"), JSON.stringify({ version: 2, agent: "claude", session: "test-session", num_turns: 1, total_cost_usd: 0.1 }) + "\n");
+      if (step.fault !== undefined) return Effect.fail(new TransportFault({ agent: "claude", message: step.fault, status: null }));
       return Effect.succeed({ output: this.withPlan(schema, step), resultText: step.resultText ?? "", costUsd: 0.1 });
     });
   }
@@ -223,6 +228,7 @@ export class ScriptedPlanner implements PlannerShape {
       for (const [id, status] of script.reports ?? []) self.stepReplies.push(yield* reporter(id, status));
       script.after?.();
       if (script.hang) return yield* Effect.never;
+      if (script.unreachable) return yield* Effect.fail(new AgentUnreachable({ agent: "claude", attempts: 4, lastFault: "read ECONNRESET" }));
       const outcome = self.execs.shift();
       if (!outcome) return yield* Effect.die(new Error("no scripted execution outcome"));
       fs.appendFileSync(path.join(self.state.project, "a.txt"), "implemented\n");
@@ -240,7 +246,7 @@ export class ScriptedPlanner implements PlannerShape {
  * A scripted review. `plan` makes the reviewer change plan.json, the plan's reviewed file, during its turn, as Codex could.
  * `raw` replaces the reply text, for a reply that is not a review (or not JSON).
  */
-export type ReviewStep = Review & { plan?: string; raw?: string; touchProject?: boolean; editRecord?: string; onCall?: () => void };
+export type ReviewStep = Review & { fault?: string; plan?: string; raw?: string; touchProject?: boolean; editRecord?: string; onCall?: () => void };
 
 export class ScriptedReviewer implements ReviewerShape {
   phases = 0;
@@ -258,21 +264,25 @@ export class ScriptedReviewer implements ReviewerShape {
     const phase = ++this.phases;
     return {
       /** Returns the reply text as Codex would: the caller decodes it. */
-      review: (prompt: string): Effect.Effect<string> =>
-        Effect.sync(() => {
-          this.prompts.push(prompt);
-          this.callPhases.push(phase);
-          const step = this.reviews.shift();
-          if (!step) throw new Error("no scripted review");
-          step.onCall?.();
-          if (step.plan !== undefined) fs.writeFileSync(this.state.planFile, step.plan);
-          if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "codex\n");
-          // A record under plan-review/ that the turn edits, as Codex could (the work review's changes.diff).
-          if (step.editRecord !== undefined) fs.appendFileSync(path.join(this.state.project, "plan-review", step.editRecord), "edited by the reviewer\n");
-          return step.raw ?? JSON.stringify({ issues: step.issues });
-        }),
+      review: (prompt: string): Effect.Effect<string, TransportFault> =>
+        Effect.sync(() => this.turn(prompt, phase)).pipe(
+          Effect.flatMap((reply) => (reply.fault === null ? Effect.succeed(reply.text) : Effect.fail(new TransportFault({ agent: "codex", message: reply.fault, status: null })))),
+        ),
     };
   });
+  /** One scripted turn: its effects on the files, then its reply text, or the fault it fails with. */
+  private turn(prompt: string, phase: number): { text: string; fault: string | null } {
+    this.prompts.push(prompt);
+    this.callPhases.push(phase);
+    const step = this.reviews.shift();
+    if (!step) throw new Error("no scripted review");
+    step.onCall?.();
+    if (step.plan !== undefined) fs.writeFileSync(this.state.planFile, step.plan);
+    if (step.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "codex\n");
+    // A record under plan-review/ that the turn edits, as Codex could (the work review's changes.diff).
+    if (step.editRecord !== undefined) fs.appendFileSync(path.join(this.state.project, "plan-review", step.editRecord), "edited by the reviewer\n");
+    return { text: step.raw ?? JSON.stringify({ issues: step.issues }), fault: step.fault ?? null };
+  }
 }
 
 export const issue = (id: string, problem = "p"): Review["issues"][number] => ({ id, severity: "major", location: "s", problem, evidence: "e" });

@@ -10,6 +10,7 @@ import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
 import { interviewHelp } from "./prompts.ts";
 import { analysisLines, claudeLine } from "./render.ts";
 import { viewOf } from "./analysisView.ts";
+import { describeEvent } from "./uiEvents.ts";
 import { Ui as UiService, type UiShape } from "./services.ts";
 
 /**
@@ -74,6 +75,10 @@ export const terminalUi = (
             return Effect.sync(() => void output.write(interviewHelp(event.heading, "terminal") + "\n"));
           case "ClaudeSaid":
             return Effect.sync(() => void output.write(claudeLine(event.text) + "\n"));
+          // Issue #26: the SDK's own reconnection, and a call that succeeded after a retry (the retry itself is said).
+          case "AgentReconnecting":
+          case "TransportRecovered":
+            return Effect.sync(() => void output.write(describeEvent(event) + "\n"));
           case "DecisionAnalyzed":
             // Decision support: the terminal shows each option's arguments one after another.
             return Effect.sync(() => void output.write(analysisLines(event.decision, event.question, viewOf(event.analysis)).join("\n") + "\n"));

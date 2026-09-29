@@ -93,3 +93,31 @@ test("decodeConfigText returns a Result: ConfigInvalid for bad JSON or a wrong t
   assert.ok(Result.isSuccess(good));
   assert.deepEqual(good.success, { maxRounds: 3 });
 });
+
+// Issue #26, Q1: the transport retry budget, validated under behavior 9.
+import { retryDelays } from "../src/retry.ts";
+
+test("the transport retry keys default to 3 retries and 5 s, and the project's file overrides the shared one", async () => {
+  const { project, shared, projectFile } = setup();
+  const defaults = await load(project, shared);
+  assert.equal(defaults.maxTransportRetries, 3);
+  assert.equal(defaults.transportRetryDelaySeconds, 5);
+  fs.writeFileSync(shared, JSON.stringify({ maxTransportRetries: 4, transportRetryDelaySeconds: 2 }));
+  fs.writeFileSync(projectFile, JSON.stringify({ maxTransportRetries: 6 }));
+  const config = await load(project, shared);
+  assert.equal(config.maxTransportRetries, 6);
+  assert.equal(config.transportRetryDelaySeconds, 2);
+});
+
+test("maxTransportRetries of 0, \"3\" or -1, and a delay of 0, stop the program with ConfigInvalid", async () => {
+  for (const value of [{ maxTransportRetries: 0 }, { maxTransportRetries: "3" }, { maxTransportRetries: -1 }, { maxTransportRetries: 1.5 }, { transportRetryDelaySeconds: 0 }, { transportRetryDelaySeconds: -2 }]) {
+    const { project, shared, projectFile } = setup();
+    fs.writeFileSync(projectFile, JSON.stringify(value));
+    await failsWith(project, shared, "ConfigInvalid", new RegExp(Object.keys(value)[0]));
+  }
+});
+
+test("retryDelays doubles the configured delay on each retry", () => {
+  assert.deepEqual(retryDelays({ maxTransportRetries: 3, transportRetryDelaySeconds: 5 }), [5, 10, 20]);
+  assert.deepEqual(retryDelays({ maxTransportRetries: 2, transportRetryDelaySeconds: 0.01 }), [0.01, 0.02]);
+});

@@ -590,3 +590,16 @@ test("the terminal's phase lines carry numbers only once a second iteration is f
   const lines = probe.ui.said.filter((l) => /^\n?(Planning|Implementation|Work review)( \d)?:/.test(l)).map((l) => l.trim().replace(/:.*/, ""));
   assert.deepEqual(lines, ["Planning", "Implementation", "Work review 1", "Planning 2", "Implementation 2", "Work review 2"]);
 });
+
+// Issue #26 (S20): an execution call whose retries are exhausted and stopped halts the run with AgentUnreachable; the end
+// handling of behavior 4 runs once, so a started step is unfinished in plan.json.
+test("an execution that ends in AgentUnreachable halts the run, and a started step is unfinished", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [{ output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }],
+    execScripts: [{ reports: [["S1", "started"]], unreachable: true }],
+  });
+  await runFails(layer, "AgentUnreachable", /Claude Code could not be reached after 4 attempts: read ECONNRESET\. The records are preserved\./);
+  const plan = JSON.parse(fs.readFileSync(path.join(probe.dir, "plan.json"), "utf8")).plan;
+  assert.equal(plan.stages[0].steps[0].status, "unfinished");
+});

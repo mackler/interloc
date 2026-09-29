@@ -94,3 +94,27 @@ export const compareRecords = (before: RecordsSnapshot, after: RecordsSnapshot):
     if (a === undefined) return [{ kind: "removed", path }];
     return [{ kind: "content_changed", path }];
   });
+
+/**
+ * One write of the program to a guarded record (issue #26): the path's entry immediately before the write and the one it
+ * left, in the form of a RecordsSnapshot ("file:<hash>", "directory", "link:<target>"), null for an absent path.
+ */
+export type OwnWrite = Readonly<{ path: string; before: string | null; after: string | null }>;
+
+/**
+ * The differences between a records baseline and the current records that the program's own writes since the baseline
+ * do not account for. Per path, the writes are replayed in order from the baseline's entry: each write's preimage must be
+ * the state before it, and the current entry must be the last write's result, or the baseline's for a path not written.
+ */
+export const compareJournaled = (baseline: RecordsSnapshot, writes: readonly OwnWrite[], current: RecordsSnapshot): readonly Change[] =>
+  [...new Set([...baseline.keys(), ...current.keys(), ...writes.map((w) => w.path)])].sort().flatMap((path): Change[] => {
+    const replayed = writes
+      .filter((w) => w.path === path)
+      .reduce<Readonly<{ state: string | null; broken: boolean }>>((acc, w) => (acc.broken || w.before !== acc.state ? { state: acc.state, broken: true } : { state: w.after, broken: false }), { state: baseline.get(path) ?? null, broken: false });
+    const now = current.get(path) ?? null;
+    if (replayed.broken) return [{ kind: "content_changed", path }];
+    if (now === replayed.state) return [];
+    if (replayed.state === null) return [{ kind: "added", path }];
+    if (now === null) return [{ kind: "removed", path }];
+    return [{ kind: "content_changed", path }];
+  });

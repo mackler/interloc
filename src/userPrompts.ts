@@ -6,7 +6,7 @@ import { DECIDE } from "./input.ts";
 import * as prompts from "./prompts.ts";
 
 export type Choice = Readonly<{ label: string; sends: string }>;
-export type PromptKind = "decision" | "limit" | "limitNoProceed" | "unchanged" | "execInput" | "optionOrText" | "permission" | "interviewMessage" | "confirmSummary" | "startOrTalk" | "unknown";
+export type PromptKind = "decision" | "limit" | "limitNoProceed" | "unchanged" | "transport" | "execInput" | "optionOrText" | "permission" | "interviewMessage" | "confirmSummary" | "startOrTalk" | "unknown";
 /** Choices that come from the preceding event rather than from the text: a relayed question's options, or the interview's numbered answers. */
 export type Extra = "none" | "questionOptions" | "numberedAnswers";
 export type UserPrompt = Readonly<{
@@ -59,6 +59,20 @@ const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
           { label: prompts.UNCHANGED_RETRY, sends: prompts.UNCHANGED_ANSWERS.retry },
           { label: prompts.UNCHANGED_PROCEED, sends: prompts.UNCHANGED_ANSWERS.proceed },
           { label: prompts.UNCHANGED_STOP, sends: prompts.UNCHANGED_ANSWERS.stop },
+        ],
+        "none",
+      ),
+  ],
+  [
+    prompts.transportPrompt,
+    (t: string) =>
+      entry(
+        "transport",
+        t,
+        "ask",
+        [
+          { label: prompts.TRANSPORT_RETRY_AGAIN, sends: prompts.TRANSPORT_ANSWERS.retry },
+          { label: prompts.TRANSPORT_STOP, sends: prompts.TRANSPORT_ANSWERS.stop },
         ],
         "none",
       ),

@@ -218,3 +218,16 @@ test("a run with the terminal Ui prints every line of a multiline analysis text 
   assert.ok(lines.includes("  It could mean a server."), io.written());
   assert.ok(lines.includes("  Or a hosted service."), io.written());
 });
+
+// Issue #26 (S21): the SDK's own reconnection and the recovery are printed; the program's retry is said by the
+// retry itself, so its event prints nothing more.
+test("notify prints the SDK's reconnection and the recovery, and nothing for the program's retry event", async () => {
+  const io = streams();
+  await withUi(io, (ui) =>
+    ui.notify({ _tag: "AgentReconnecting", agent: "codex", by: "sdk", attempt: null, of: null, delayMs: null, detail: "Reconnecting... 2/5" }).pipe(
+      Effect.andThen(ui.notify({ _tag: "TransportRetrying", agent: "codex", attempt: 1, of: 3, delaySeconds: 5, fault: "x" })),
+      Effect.andThen(ui.notify({ _tag: "TransportRecovered", agent: "codex" })),
+    ),
+  );
+  assert.equal(io.written(), `${prompts.agentReconnectingLine("Codex", null, null, null, "Reconnecting... 2/5")}\n${prompts.transportRecoveredLine("codex")}\n`);
+});

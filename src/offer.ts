@@ -4,7 +4,7 @@
 
 import { Effect } from "effect";
 import type { RunError } from "./errors.ts";
-import { chooseOption, isDecide, parseExtraRounds, parseUnchangedAnswer } from "./input.ts";
+import { chooseOption, isDecide, parseExtraRounds, parseTransportAnswer, parseUnchangedAnswer } from "./input.ts";
 import * as prompts from "./prompts.ts";
 import { renderChoice } from "./render.ts";
 import { Decider, Store, Ui } from "./services.ts";
@@ -30,6 +30,14 @@ export const unchangedOptions = (interview: boolean): readonly OfferedOption[] =
     { label: prompts.UNCHANGED_RETRY, description: d.retry, matches: (answer: string) => parseUnchangedAnswer(answer) === "retry" },
     { label: prompts.UNCHANGED_PROCEED, description: d.proceed, matches: (answer: string) => parseUnchangedAnswer(answer) === "proceed" },
     { label: prompts.UNCHANGED_STOP, description: d.stop, matches: (answer: string) => parseUnchangedAnswer(answer) === "stop" },
+  ];
+};
+/** The pause of issue #26: Retry again and Stop, each chosen by the answers parseTransportAnswer reads as it. */
+export const transportOptions = (): readonly OfferedOption[] => {
+  const d = prompts.transportOptionDescriptions();
+  return [
+    { label: prompts.TRANSPORT_RETRY_AGAIN, description: d.retry, matches: (answer: string) => parseTransportAnswer(answer) === "retry" },
+    { label: prompts.TRANSPORT_STOP, description: d.stop, matches: (answer: string) => parseTransportAnswer(answer) === "stop" },
   ];
 };
 /**

@@ -2,7 +2,7 @@
 // records them, the web Ui turns them into the page's panels, activity line and progress. Pure; types only from src/.
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
-import { agentReconnectingLine, cycleHeading, phaseLabel } from "./prompts.ts";
+import { agentReconnectingLine, cycleHeading, phaseLabel, transportRecoveredLine, transportRetryLine } from "./prompts.ts";
 import type { DecisionAnalysis, DecisionResponse, ExecOutcome, PlannerResponse, PlanResponse, QuestionListResponse, RecordedPlan, Review, UserQuestion } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
@@ -30,6 +30,10 @@ export type UiEvent =
    * SDK's api_retry message (its attempt, its maximum and its delay).
    */
   | Readonly<{ _tag: "AgentReconnecting"; agent: Agent; by: "sdk"; attempt: number | null; of: number | null; delayMs: number | null; detail: string }>
+  /** The program retries a call that failed from a transport fault (issue #26): retry `attempt` of `of`, after `delaySeconds`. */
+  | Readonly<{ _tag: "TransportRetrying"; agent: Agent; attempt: number; of: number; delaySeconds: number; fault: string }>
+  /** A call succeeded after a retry. */
+  | Readonly<{ _tag: "TransportRecovered"; agent: Agent }>
   | Readonly<{ _tag: "QuestionAsked"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
   /** `answered` of `total` questions so far (issue #21): the agreed ones and the follow-ups Claude reports asking. */
   | Readonly<{ _tag: "InterviewTurn"; heading: string; message: string; summary: string | null; answered: number; total: number }>
@@ -92,6 +96,10 @@ export const describeEvent = (event: UiEvent): string => {
       return `${AGENT_LABEL[event.agent]} call ended: ${event.ok ? "ok" : "failed"}`;
     case "AgentReconnecting":
       return agentReconnectingLine(AGENT_LABEL[event.agent], event.attempt, event.of, event.delayMs, event.detail);
+    case "TransportRetrying":
+      return transportRetryLine(event.agent, event.attempt, event.of, event.delaySeconds, event.fault);
+    case "TransportRecovered":
+      return transportRecoveredLine(event.agent);
     case "QuestionAsked":
       return `question: ${event.question} (${plural(event.options.length, "option")})`;
     case "InterviewTurn":

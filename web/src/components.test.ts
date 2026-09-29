@@ -8,6 +8,9 @@ import DirectoryDialog from "./components/DirectoryDialog.svelte";
 import PromptWidget from "./components/PromptWidget.svelte";
 import StartForm from "./components/StartForm.svelte";
 import TimelineRail from "./components/TimelineRail.svelte";
+import ActivityLine from "./components/ActivityLine.svelte";
+import type { ServerMessage } from "../../src/protocol.ts";
+import type { UiEvent } from "../../src/uiEvents.ts";
 import TopBar from "./components/TopBar.svelte";
 import MessageView from "./components/Message.svelte";
 import ChatPanel from "./components/ChatPanel.svelte";
@@ -892,4 +895,23 @@ describe("TimelineRail: the busy indicator", () => {
     expect(Object.keys(sources).length).toBeGreaterThan(0);
     for (const [file, text] of Object.entries(sources)) expect(text.includes("LinearProgressEstimate"), file).toBe(false);
   });
+});
+
+// Issue #26 (S21): the activity line shows a retry as its count of attempts, not as progress.
+test("the activity line shows retry 2 of 3", () => {
+  const events: UiEvent[] = [
+    { _tag: "AgentCallStarted", agent: "codex", purpose: "review" },
+    { _tag: "AgentCallEnded", agent: "codex", ok: false },
+    { _tag: "TransportRetrying", agent: "codex", attempt: 2, of: 3, delaySeconds: 10, fault: "stream disconnected" },
+  ];
+  const time = "2026-09-29T00:00:00Z";
+  const messages: ServerMessage[] = [
+    { type: "hello", cwd: "/p", current: 1, incarnation: "a" },
+    { type: "replay", runs: [] },
+    { type: "event", run: 1, seq: 0, time, event: { _tag: "Started", project: "/p", task: "t" } },
+    ...events.map((event, i): ServerMessage => ({ type: "event", run: 1, seq: i + 1, time, event: { _tag: "Notified", event } })),
+  ];
+  const s = messages.reduce(reduce, initialState);
+  const root = show(ActivityLine, { text: s.run?.activity ?? "" });
+  expect(one(root, "[data-activity]").textContent).toContain("retry 2 of 3");
 });

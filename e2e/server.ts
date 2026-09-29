@@ -222,6 +222,24 @@ SCENARIOS.planSteps = {
   execScripts: [{ reports: [["S1", "started"], ["S1", "done"], ["S2", "started"]] }, { reports: [["S2", "started"]], hang: true }],
 };
 
+// Issue #26: a Codex turn that fails from a transport fault and succeeds on its retry; the wait is long enough to be seen.
+SCENARIOS.transportRetry = {
+  steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }],
+  reviews: [{ issues: [], fault: "stream disconnected before completion" }, { issues: [] }, { issues: [] }],
+  execs: [finished],
+  config: { maxTransportRetries: 3, transportRetryDelaySeconds: 2 },
+};
+// Issue #30: an accepted issue with plan.json unchanged after the corrective turn: the pause, answered Proceed.
+SCENARIOS.unchangedPause = {
+  steps: [
+    { output: noQuestions, plan: "1. [ ] the step\n" },
+    { output: respond([["P1-R1-1", "accepted"]]) },
+    { output: respond([["P1-R1-1", "accepted"]]) },
+  ],
+  reviews: [{ issues: [issue("P1-R1-1", "The step names no file.")] }, { issues: [] }, { issues: [] }],
+  execs: [finished],
+};
+
 const scenario = SCENARIOS[process.env.SCENARIO ?? "converge"] ?? SCENARIOS.converge;
 const port = Number(process.env.PORT ?? "8101");
 const repo = tempRepo();

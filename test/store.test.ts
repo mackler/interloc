@@ -230,3 +230,51 @@ test("saveCorrection writes the corrective reply at the catalog's path", async (
   assert.equal(file, "planning-2/cc-3-corrective-1.json");
   assert.deepEqual(json(repo, file), { dispositions: [] });
 });
+
+// Issue #26 (S19): the journal of the program's own writes to guarded records, with their preimages. Every write
+// operation of the Store is enumerated: each change it makes under plan-review/ is in the journal, and replaying the
+// journal from the snapshot before it gives the snapshot after it (the seam between the journal and recordsSnapshot).
+import { compareJournaled } from "../src/snapshot.ts";
+
+test("every write of the Store to a guarded record is in its journal, with the entry recordsSnapshot gives", async () => {
+  const repo = tempRepo();
+  const store = await storeOf(repo);
+  const plan = { stages: [{ number: 1, title: "t", steps: [{ id: "S1", number: 1, label: "l", text: "x", status: "pending" as const }] }] };
+  const response = { dispositions: [], self_corrections: [], reviewer_feedback: "", questions_for_user: [] };
+  const writes: [string, Effect.Effect<unknown, unknown>][] = [
+    ["init", store.init("task")],
+    ["saveReview", store.saveReview({ plan: 1 }, 1, { issues: [] })],
+    ["saveResponse", store.saveResponse({ plan: 1 }, 1, response)],
+    ["saveCorrection", store.saveCorrection({ plan: 1 }, 1, 1, response)],
+    ["saveRound", store.saveRound({ plan: 1 }, { round: 1, kind: "no_response", review: { issues: [] } } as never)],
+    ["savePlanWrite", store.savePlanWrite(1, { questions_for_user: [] } as never)],
+    ["saveExecution", store.saveExecution(1, { status: "finished", summary: "", question: "", remainingWork: "", userInput: null })],
+    ["saveQuestions", store.saveQuestions("task", [])],
+    ["writeRequirements", store.writeRequirements("# R\n")],
+    ["savePlan", store.savePlan(plan)],
+    ["saveLog", store.saveLog({ plan: 1 }, [])],
+    ["appendDecision", store.appendDecision({ subject: "issue A", id: null, decision: "keep it", phase: 1, round: 1 })],
+    ["recordFeedback", store.recordFeedback({ plan: 1 }, 1, "thanks")],
+    ["converse", store.converse("a line\n")],
+    ["recordUsage", store.recordUsage({ agent: "codex", thread: "t", inputTokens: 1, outputTokens: 1 })],
+    ["checkpoint", store.checkpoint({ subject: "run", phase: 0, round: 0, stage: "started" })],
+    ["changeRecord", store.changeRecord(1)],
+    ["saveInvalidReply", store.saveInvalidReply("claude", "x")],
+    ["openDecision", store.openDecision({ phase: { kind: "planning", n: 1 }, label: "Planning", question: "q?", options: [] } as never)],
+    ["saveAnalysisWrite", store.saveAnalysisWrite(1, {} as never)],
+    ["saveAnalysis", store.saveAnalysis(1, { decision: "d", columns: [], recommendation: { option: "", reason: "" } })],
+    ["saveChoice", store.saveChoice(1, { answer: "a", option: null })],
+    ["init again", store.init("task")],
+  ];
+  for (const [name, write] of writes) {
+    const before = await run(store.recordsSnapshot());
+    const mark = await run(store.journalMark);
+    await run(write as Effect.Effect<unknown>);
+    const after = await run(store.recordsSnapshot());
+    const own = await run(store.ownWritesSince(mark));
+    assert.deepEqual(compareJournaled(before, own, after), [], `${name}: a change the journal does not account for`);
+    for (const change of compareRecords(before, after)) assert.ok(own.some((w) => w.path === change.path), `${name}: ${change.path} is not in the journal`);
+    const last = new Map(own.map((w) => [w.path, w.after]));
+    for (const [p, entry] of last) assert.equal(entry, after.get(p) ?? null, `${name}: the journal's last entry of ${p} is not recordsSnapshot's`);
+  }
+});

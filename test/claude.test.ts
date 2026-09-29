@@ -761,3 +761,78 @@ test("a callback failure wins over a transport fault", async () => {
   const fake = await planner([script]);
   assert.equal(await failedTag(fake), "ClaudeCallFailed");
 });
+
+// Issue #26 (S20, Q4): an execution call that fails from a transport fault resumes its session with the continue prompt,
+// with the same hooks, stop and report_step server; the retry is inside the adapter.
+const econnreset = () => Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+const quickRetry = { maxTransportRetries: 1, transportRetryDelaySeconds: 0.01 };
+
+test("an execution call whose stream drops is resumed with the continue prompt and finishes; S1's report is received once", async () => {
+  const reports: string[] = [];
+  const reporter = (id: string, status: "started" | "done") => Effect.sync(() => (reports.push(`${id}:${status}`), { text: "ok", isError: false }));
+  const first: Script = (call) => (async function* () {
+    yield init("session-exec");
+    await reportStep(call.options, "S1", "done");
+    throw econnreset();
+  })();
+  const second: Script = () => (async function* () {
+    yield init("session-exec");
+    yield success(report);
+  })();
+  const fake = await planner([first, second], [], quickRetry);
+  const outcome = await run(fake.planner.executing("implement the plan", reporter));
+  assert.equal(outcome.status, "finished");
+  assert.equal(fake.sdk.calls.length, 2);
+  assert.equal(fake.sdk.calls[1].prompt, prompts.executionContinuePrompt);
+  assert.equal(fake.sdk.calls[1].options.resume, "session-exec");
+  assert.ok(fake.sdk.calls[1].options.allowedTools?.includes(prompts.REPORT_STEP_TOOL_NAME));
+  assert.ok(prompts.executionContinuePrompt.includes(prompts.REPORT_STEP_TOOL_NAME), "the continue prompt names the tool the call offers");
+  assert.deepEqual(reports, ["S1:done"]);
+  assert.equal(fake.ui.notified.filter((e) => e._tag === "TransportRetrying").length, 1);
+});
+
+test("a valid finished report delivered before the stream drops stands: no second query (P1-R1-3)", async () => {
+  const script: Script = () => (async function* () {
+    yield init();
+    yield success(report);
+    throw econnreset();
+  })();
+  const fake = await planner([script], [], quickRetry);
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
+  assert.equal(outcome.status, "finished");
+  assert.equal(fake.sdk.calls.length, 1);
+});
+
+test("a stop recorded before a transport fault ends the phase: no second query", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }] }];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    throw econnreset();
+  })();
+  const fake = await planner([script], ["A"], quickRetry);
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
+  assert.equal(outcome.status, "needs_input");
+  assert.equal(fake.sdk.calls.length, 1);
+});
+
+test("an execution call that fails for another reason is aborted, as before: no second query", async () => {
+  const script: Script = () => (async function* () {
+    yield init();
+    throw new Error("broke");
+  })();
+  const fake = await planner([script], [], quickRetry);
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter));
+  assert.equal(outcome.status, "aborted");
+  assert.equal(fake.sdk.calls.length, 1);
+});
+
+test("faults beyond the retries, then Stop at the exhaustion pause: executing fails with AgentUnreachable", async () => {
+  const dropping: Script = () => (async function* () {
+    yield init();
+    throw econnreset();
+  })();
+  const fake = await planner([dropping, dropping], [prompts.TRANSPORT_ANSWERS.stop], quickRetry);
+  await assert.rejects(run(fake.planner.executing("implement the plan", noReporter)), (e: unknown) => tag(e) === "AgentUnreachable");
+  assert.equal(fake.sdk.calls.length, 2);
+});

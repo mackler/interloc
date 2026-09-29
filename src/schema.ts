@@ -235,6 +235,10 @@ export const Config = Schema.Struct({
   ignorePaths: Schema.Array(Schema.String),
   maxRounds: PositiveInt,
   maxIdleRounds: PositiveInt,
+  /** Issue #26, Q1: the retries of a call that failed from a transport fault, before the user is asked. */
+  maxTransportRetries: PositiveInt,
+  /** The wait before the first retry in seconds; it doubles on each further retry. */
+  transportRetryDelaySeconds: Schema.Finite.check(Schema.isGreaterThan(0)),
   countMinor: Schema.Boolean,
   execPermissionMode: Schema.Literals(["auto", "acceptEdits", "bypassPermissions", "default"]),
   claudeModel: Schema.NullOr(Schema.String),
@@ -325,6 +329,8 @@ export const defaultConfig: Config = {
   ignorePaths: [],
   maxRounds: 5,
   maxIdleRounds: 2,
+  maxTransportRetries: 3,
+  transportRetryDelaySeconds: 5,
   countMinor: true,
   execPermissionMode: "auto",
   claudeModel: null,

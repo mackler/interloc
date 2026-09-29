@@ -140,6 +140,12 @@ new name. Material online describes v3 in most cases and is not a source.
 | `PlatformError` / `PlatformError.SystemError` | PlatformError.d.ts:141 / 95 | `new PlatformError(reason)`, `new SystemError({ _tag, module, method, description })`: the injected failures of test/helpers.ts `faultyPlatform` |
 | `FileSystem.make` | FileSystem.d.ts:385 | builds a `FileSystem` from an implementation (`exists`, `readFileString`, `writeFileString`, `stream`, `sink` derived); `rename(oldPath, newPath)` at 221 |
 
+## Duration (`effect/dist/Duration.d.ts`; read 29 Sep 2026, issue #26)
+
+| Name | Line | Signature (abridged) |
+|---|---|---|
+| `Duration.seconds` | 407 | `(seconds: number) => Duration`: the backoff of `withTransportRetry` in `src/retry.ts`, passed to `Effect.sleep` (a bare number as `Duration.Input` is milliseconds, so the constructor makes the unit explicit). `Effect.sleep` sleeps on the Clock and is interruptible: Ctrl+C during a backoff ends the run at once |
+
 ## Semaphore (`effect/dist/Semaphore.d.ts`; verified 25 Sep, review stage 4.3)
 
 | Name | Line | Notes |

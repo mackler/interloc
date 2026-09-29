@@ -3,7 +3,7 @@
 
 import { Context, Effect } from "effect";
 import type { Brand, Option, Schema } from "effect";
-import type { CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, TransportFault, UserStopped } from "./errors.ts";
+import type { AgentUnreachable, CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, TransportFault, UserStopped } from "./errors.ts";
 import type { SubjectId } from "./artifacts.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
@@ -11,7 +11,7 @@ import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, 
 import type { LoopResult, Phase, UiEvent } from "./uiEvents.ts";
 import type { UsageLine } from "./usage.ts";
 import type { AgentSdk } from "./sdk.ts";
-import type { RecordsSnapshot, Snapshot } from "./snapshot.ts";
+import type { OwnWrite, RecordsSnapshot, Snapshot } from "./snapshot.ts";
 
 export type StoreError = FileSystemError | StateFileInvalid | GitError;
 /** The question a decision analyzes (decision support): its text and options, the phase in which it was asked and that phase's label (W1-R1-2). */
@@ -53,7 +53,8 @@ export interface PlannerShape {
   planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability?: PlanningCapability): Effect.Effect<PlanningResult, PlannerError | TransportFault, Decider>;
   /** A call in which Claude Code implements the plan. */
   /** An execution call; `reporter` answers its report_step calls (issue #6, Q2). */
-  executing(prompt: string, reporter: StepReporter): Effect.Effect<ExecOutcome, PlannerError, Decider>;
+  /** Declares no TransportFault (issue #26): the adapter retries a transport fault itself, and exhaustion is AgentUnreachable. */
+  executing(prompt: string, reporter: StepReporter): Effect.Effect<ExecOutcome, PlannerError | AgentUnreachable, Decider>;
   readonly sessionId: Effect.Effect<string | null>;
   /** A planner over a new session, with the same hooks and callbacks (a decision loop, D4 of the decision-support plan). */
   readonly fresh: Effect.Effect<PlannerShape>;
@@ -135,6 +136,10 @@ export interface StoreShape {
   projectSnapshot(): Effect.Effect<Snapshot, StoreError>;
   /** The guarded records under plan-review/ (src/artifacts.ts guardedRecord): the second check of a read-only call. */
   recordsSnapshot(): Effect.Effect<RecordsSnapshot, StoreError>;
+  /** The position of the journal of the program's own writes to guarded records (issue #26). */
+  readonly journalMark: Effect.Effect<number>;
+  /** The program's own writes to guarded records since a mark, in order, each with its preimage. */
+  ownWritesSince(mark: number): Effect.Effect<readonly OwnWrite[]>;
   /** Allocates the next decision number k by creating decision-<k>/, and writes decision-<k>/question.json. */
   openDecision(question: DecisionQuestion): Effect.Effect<number, StoreError>;
   /** The raw output of decision k's analysis call (`decision-<k>/cc-0.json`). */

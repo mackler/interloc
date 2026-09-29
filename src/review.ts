@@ -4,9 +4,9 @@
 
 import { Effect, Ref, Result, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
-import { AgentReplyInvalid, ClaudeCallFailed, CodexCallFailed, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
+import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
-import { correctivePrompt, unchangedPrompt, unchangedQuestion, decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
+import { correctivePrompt, transportReviewWhat, transportWhat, unchangedPrompt, unchangedQuestion, decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
 import { correctiveValidation } from "./round.ts";
 import { askOffering, limitOptions, numberedOptions, unchangedOptions } from "./offer.ts";
 import { answerOf, parseUnchangedAnswer } from "./input.ts";
@@ -15,7 +15,8 @@ import { advance, initialState, type Option, type ReviewCommand, type ReviewEven
 import * as S from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import { type Decider, Planner, type PlanningCapability, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
-import { compareRecords, compareSnapshots } from "./snapshot.ts";
+import { compareJournaled, compareSnapshots } from "./snapshot.ts";
+import { withTransportRetry } from "./retry.ts";
 
 /** Codex's reply text, decoded as JSON and then as a review; text that is not JSON is a decode failure. */
 const ReviewText = Schema.fromJsonString(S.Review);
@@ -179,23 +180,35 @@ export type PlanningCall<Out> = Readonly<{ output: Out; reply: unknown; resultTe
  * response). Halts if the project changed; a read-only call, its repair turn included, also halts if a guarded record
  * under plan-review/ changed (RecordsChanged; the program's own writes are not guarded, src/artifacts.ts).
  */
-export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records", validate: Validation<Out["Type"]> | null = null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider> =>
+export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records", validate: Validation<Out["Type"]> | null = null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider | Ui | RunConfig> =>
   Effect.gen(function* () {
     const store = yield* Store;
     const planner = yield* Planner;
+    /**
+     * One call, retried after a transport fault (issue #26). The baselines are taken once, before the first attempt, and
+     * every attempt, failed ones included, and every retry is checked against them; the records guard of a read-only
+     * call replays the program's own writes since then (the Store's journal).
+     */
     const call = (text: string) =>
       Effect.gen(function* () {
         const before = yield* store.projectSnapshot();
         const recordsBefore = capability === "readOnly" ? yield* store.recordsSnapshot() : null;
-        // Until the retry of issue #26 wraps it, a transport fault ends the run as any failed call did.
-        const result = yield* planner.planning(text, schema, purpose, capability).pipe(Effect.catchTag("TransportFault", (f) => Effect.fail(new ClaudeCallFailed({ message: f.message }))));
-        const changes = compareSnapshots(before, yield* store.projectSnapshot());
-        if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "planning", fileLabel: null, changes }));
-        if (recordsBefore !== null) {
-          const records = compareRecords(recordsBefore, yield* store.recordsSnapshot());
-          if (records.length > 0) return yield* Effect.fail(new RecordsChanged({ changes: records }));
-        }
-        return result;
+        const mark = yield* store.journalMark;
+        const check = Effect.gen(function* () {
+          const changes = compareSnapshots(before, yield* store.projectSnapshot());
+          if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "planning", fileLabel: null, changes }));
+          if (recordsBefore !== null) {
+            const records = compareJournaled(recordsBefore, yield* store.ownWritesSince(mark), yield* store.recordsSnapshot());
+            if (records.length > 0) return yield* Effect.fail(new RecordsChanged({ changes: records }));
+          }
+        });
+        const attempt = () =>
+          Effect.gen(function* () {
+            const result = yield* Effect.result(planner.planning(text, schema, purpose, capability));
+            yield* check;
+            return yield* Effect.fromResult(result);
+          });
+        return yield* withTransportRetry("claude", transportWhat(purpose), attempt, check);
       });
     const first = yield* call(prompt);
     const repairCall = yield* Ref.make<PlanningResult | null>(null);
@@ -211,7 +224,7 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
  * The corrective turn (issue #30) as a Repair of its own: a planning call in the current session whose reply has fresh
  * schema and validation budgets, so it takes neither's turn and neither takes its.
  */
-export const repairTurn = <Out extends Schema.Decoder<unknown>>(repair: Repair, schema: Out, capability: PlanningCapability, validate: Validation<Out["Type"]> | null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider> =>
+export const repairTurn = <Out extends Schema.Decoder<unknown>>(repair: Repair, schema: Out, capability: PlanningCapability, validate: Validation<Out["Type"]> | null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider | Ui | RunConfig> =>
   planningCall(repair.prompt, schema, "planning", capability, validate);
 
 /** Two validations in turn: the second sees the first's value, and the notes of both are kept. */
@@ -257,17 +270,25 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
         // The bytes of the reviewed artifact too: a work review's fileHash is recomputed from the project and
         // does not see an edit of changes.diff itself (P1-R2-2).
         const recordBefore = yield* store.recordHash(id);
-        // Until the retry of issue #26 wraps it, a transport fault ends the run as any failed turn did.
-        const reply = yield* session.review(text).pipe(Effect.catchTag("TransportFault", (f) => Effect.fail(new CodexCallFailed({ message: f.message }))));
-        const changes = compareSnapshots(projectBefore, yield* store.projectSnapshot());
-        // The artifact's bytes, or the observed hash without a visible project change (a work review's diff also
-        // changes with a commit); a change of the project itself is reported as ProjectChanged below. For the
-        // other subjects both hashes are the file's content, as before.
-        const recordChanged = (yield* store.recordHash(id)) !== recordBefore;
-        const fileChanged = recordChanged || ((yield* store.fileHash(id)) !== fileBefore && changes.length === 0);
-        if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes: [...changes, { kind: "content_changed", path: fileLabel }] }));
-        if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "review", fileLabel, changes }));
-        return reply;
+        // The baselines hold across the retries of a transport fault (issue #26): every attempt, failed ones included,
+        // and every retry is compared with them.
+        const check = Effect.gen(function* () {
+          const changes = compareSnapshots(projectBefore, yield* store.projectSnapshot());
+          // The artifact's bytes, or the observed hash without a visible project change (a work review's diff also
+          // changes with a commit); a change of the project itself is reported as ProjectChanged below. For the
+          // other subjects both hashes are the file's content, as before.
+          const recordChanged = (yield* store.recordHash(id)) !== recordBefore;
+          const fileChanged = recordChanged || ((yield* store.fileHash(id)) !== fileBefore && changes.length === 0);
+          if (fileChanged) return yield* Effect.fail(new ReviewedFileChanged({ fileLabel, changes: [...changes, { kind: "content_changed", path: fileLabel }] }));
+          if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "review", fileLabel, changes }));
+        });
+        const attempt = () =>
+          Effect.gen(function* () {
+            const reply = yield* Effect.result(session.review(text));
+            yield* check;
+            return yield* Effect.fromResult(reply);
+          });
+        return yield* withTransportRetry("codex", transportReviewWhat(heading), attempt, check);
       });
 
     type Outcome = ReviewEvent | { finished: LoopResult };

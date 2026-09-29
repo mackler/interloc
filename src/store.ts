@@ -2,7 +2,7 @@
 // comparison of the project state (decoded and compared by src/snapshot.ts).
 // API names: docs/effect-v4-api.md.
 
-import { Cause, Clock, Effect, Exit, FileSystem, Layer, Option, Path, type PlatformError, Stream } from "effect";
+import { Cause, Clock, Effect, Exit, FileSystem, Layer, Option, Path, type PlatformError, Ref, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { createHash } from "node:crypto";
 import { type Artifact, guardedRecord, LOG_SUBJECTS, pathOf, recordPath, reviewedFile, type SubjectId } from "./artifacts.ts";
@@ -13,7 +13,7 @@ import type { Platform } from "./platform.ts";
 import { AnalysisFile, Baseline, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
 import { renderDecision, renderFeedback, subjectHeading } from "./render.ts";
 import { type ProjectPath, type RecordPath, Store, type StoreError, type StoreShape } from "./services.ts";
-import { decodeStatusV2, excluded, excludedIndexPaths, type RecordsSnapshot, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
+import { decodeStatusV2, excluded, excludedIndexPaths, type OwnWrite, type RecordsSnapshot, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
 import { decodeText } from "./state.ts";
 
 /** The store of one project. `ignorePaths` are the paths the change detection ignores (config). */
@@ -39,9 +39,46 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       Effect.mapError(effect, (e) => new FileSystemError({ operation, path: file, message: e.message }));
     const exists = (file: string) => io("read", file, fs.exists(file));
     const readText = (file: string) => io("read", file, fs.readFileString(file));
-    const writeText = (file: string, text: string) => io("write", file, fs.writeFileString(file, text));
-    const append = (file: string, text: string) => io("append to", file, fs.writeFileString(file, text, { flag: "a" }));
-    const mkdir = (d: string) => io("create directory", d, fs.makeDirectory(d, { recursive: true }));
+
+    /**
+     * The journal of the program's own writes to guarded records, each with its preimage (issue #26): the records guard of
+     * a read-only call replays it, so that the program's writes during a retry's wait are accepted and an external change
+     * before or after one of them is not. Every write helper below goes through `journaled`.
+     */
+    const journal = yield* Ref.make<readonly OwnWrite[]>([]);
+    /** The path of a file relative to plan-review/ with "/" separators, when it is a guarded record; null otherwise. */
+    const guardedPath = (file: string): string | null => {
+      const relative = path.relative(dir, file).split(path.sep).join("/");
+      return relative === "" || relative.startsWith("..") || path.isAbsolute(relative) || !guardedRecord(relative) ? null : relative;
+    };
+    /** A guarded path's entry as recordsSnapshot gives it; null when it is absent. */
+    const entryOf = (relative: string): Effect.Effect<string | null, FileSystemError> =>
+      inspect(path.join("plan-review", relative)).pipe(
+        Effect.map((entry) => (entry.type === "missing" ? null : entry.type === "file" ? `file:${entry.hash}` : entry.type === "link" ? `link:${entry.target}` : entry.type)),
+      );
+    /** Runs a write of `files`, and journals each guarded one it changed, with its entry before and after. */
+    const journaled = <A, E>(files: readonly string[], write: Effect.Effect<A, E>): Effect.Effect<A, E | FileSystemError> =>
+      Effect.gen(function* () {
+        const guarded = files.flatMap((file) => {
+          const relative = guardedPath(file);
+          return relative === null ? [] : [relative];
+        });
+        const before: (string | null)[] = [];
+        for (const relative of guarded) before.push(yield* entryOf(relative));
+        const result = yield* write;
+        for (const [i, relative] of guarded.entries()) {
+          const after = yield* entryOf(relative);
+          if (after !== before[i]) yield* Ref.update(journal, (writes) => [...writes, { path: relative, before: before[i] ?? null, after }]);
+        }
+        return result;
+      });
+    /** The directory and its ancestors below plan-review/, outermost first: what a recursive creation may create. */
+    const ancestors = (d: string): readonly string[] => (guardedPath(d) === null ? [] : [...ancestors(path.dirname(d)), d]);
+    const writeText = (file: string, text: string) => journaled([file], io("write", file, fs.writeFileString(file, text)));
+    const append = (file: string, text: string) => journaled([file], io("append to", file, fs.writeFileString(file, text, { flag: "a" })));
+    const mkdir = (d: string) => journaled(ancestors(d), io("create directory", d, fs.makeDirectory(d, { recursive: true })));
+    /** Renames a temporary file into place. */
+    const renameInto = (temporary: string, file: string) => journaled([temporary, file], io("rename", file, fs.rename(temporary, file)));
     const list = (d: string) => io("list", d, fs.readDirectory(d));
     /** The current time of the Clock service (finding 22), as an ISO string. */
     const now = Clock.currentTimeMillis.pipe(Effect.map((ms) => new Date(ms).toISOString()));
@@ -63,7 +100,7 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
         yield* mkdir(path.dirname(file));
         const temporary = `${file}.tmp-${process.pid}`;
         yield* writeText(temporary, text + "\n");
-        yield* io("rename", file, fs.rename(temporary, file));
+        yield* renameInto(temporary, file);
       });
     /** plan-review/checkpoint.json: the last committed transition, replaced atomically. */
     const checkpoint = (point: CheckpointPoint) => now.pipe(Effect.flatMap((time) => writeJson(at({ kind: "checkpoint" }), { version: VERSION, ...point, time })));
@@ -184,7 +221,12 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
             let archive = base;
             for (let k = 2; yield* exists(archive); k++) archive = `${base}-${k}`;
             yield* io("create directory", archive, fs.makeDirectory(archive));
-            for (const name of earlier) yield* io("move", path.join(dir, name), fs.rename(path.join(dir, name), path.join(archive, name)));
+            for (const name of earlier) {
+              const source = path.join(dir, name);
+              // A directory takes everything below it along; each of those paths is journaled too.
+              const below = (yield* io("stat", source, fs.stat(source))).type === "Directory" ? (yield* io("list", source, fs.readDirectory(source, { recursive: true }))).map((p) => path.join(source, p)) : [];
+              yield* journaled([source, ...below], io("move", source, fs.rename(source, path.join(archive, name))));
+            }
           }
           for (const subject of LOG_SUBJECTS) yield* saveLog(subject, []);
           yield* writeJson(baselineFile, { version: VERSION, tree: yield* workingTree(), time: yield* now });
@@ -268,7 +310,7 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           yield* mkdir(path.dirname(file));
           const temporary = `${file}.tmp-${process.pid}`;
           yield* writeText(temporary, text);
-          yield* io("rename", file, fs.rename(temporary, file));
+          yield* renameInto(temporary, file);
         }),
       /**
        * Keeps a reply that did not match its schema, as plan-review/invalid-replies/<agent>-<n>.json, and returns
@@ -303,9 +345,12 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           yield* mkdir(dir);
           for (let k = 1; ; k++) {
             const d = path.dirname(at({ kind: "decisionQuestion", decision: k }));
-            const created = yield* fs.makeDirectory(d).pipe(
-              Effect.map(() => true),
-              Effect.catch((e) => (alreadyExists(e) ? Effect.succeed(false) : Effect.fail(new FileSystemError({ operation: "create directory", path: d, message: e.message })))),
+            const created = yield* journaled(
+              [d],
+              fs.makeDirectory(d).pipe(
+                Effect.map(() => true),
+                Effect.catch((e) => (alreadyExists(e) ? Effect.succeed(false) : Effect.fail(new FileSystemError({ operation: "create directory", path: d, message: e.message })))),
+              ),
             );
             if (!created) continue;
             yield* saveRecord({ kind: "decisionQuestion", decision: k }, { version: VERSION, decision: k, phase: question.phase, label: question.label, question: question.question, options: question.options });
@@ -318,7 +363,7 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           // plan.md follows plan.json; a reader of plan.md never sees a plan that plan.json does not hold (F2).
           const temporary = `${plan}.tmp-${process.pid}`;
           yield* writeText(temporary, renderPlanMarkdown(recorded));
-          yield* io("rename", plan, fs.rename(temporary, plan));
+          yield* renameInto(temporary, plan);
         }),
       loadPlan: () => {
         const file = at({ kind: "planFile" });
@@ -347,6 +392,8 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
           for (const record of records) entries.set(record.path, { record, content: yield* inspect(record.path) });
           return { entries };
         }),
+      journalMark: Ref.get(journal).pipe(Effect.map((writes) => writes.length)),
+      ownWritesSince: (mark) => Ref.get(journal).pipe(Effect.map((writes) => writes.slice(mark))),
       /** Every guarded path under plan-review/ with what is there; the relative paths use "/" (guardedRecord). */
       recordsSnapshot: (): Effect.Effect<RecordsSnapshot, StoreError> =>
         Effect.gen(function* () {

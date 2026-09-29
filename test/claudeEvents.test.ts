@@ -122,3 +122,12 @@ test("an assistant error followed by a message without error is cleared; one rig
   assert.equal(reduceMessages([init(), assistantError("server_error"), assistantText("fine")], "broke").failure?.assistantError, null);
   assert.equal(reduceMessages([init(), assistantError("server_error")], "broke").failure?.assistantError, "server_error");
 });
+
+// Issue #26 (S20, P1-R1-3): a valid status report delivered before a transport fault stands.
+test("interpretExecution: a valid report with a transport error stands; with another error it is aborted; a stop wins", () => {
+  const report = { status: "finished", summary: "all done", question: "", remaining_work: "" };
+  const faulted = { ...complete(report), error: "read ECONNRESET", partial: true, failure: { streamCode: "ECONNRESET", apiStatus: null, terminalReason: null, assistantError: null, retrySeen: null, subtype: null } };
+  assert.equal(interpretExecution(faulted, null, true).status, "finished");
+  assert.equal(interpretExecution(faulted, null, false).status, "aborted");
+  assert.equal(interpretExecution(faulted, { question: "A?", input: "A? -> a" }, true).status, "needs_input");
+});

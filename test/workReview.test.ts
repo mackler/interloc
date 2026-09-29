@@ -328,3 +328,80 @@ test("(A) a work response that changes the project halts the run with ProjectCha
   const { layer } = workResponseRun({ touchProject: true });
   await runFails(layer, "ProjectChanged");
 });
+
+// Issue #26 (plan step S19): the work review's Codex turn and its read-only response are retried; the guards hold their
+// baselines across the attempts, and the records guard accounts for the program's own writes through the journal.
+import * as prompts from "../src/prompts.ts";
+import type { Config } from "../src/schema.ts";
+
+const fault = "stream disconnected before completion";
+const quick: Partial<Config> = { maxTransportRetries: 1, transportRetryDelaySeconds: 0.01 };
+const duringBackoff = (effect: () => void) => (s: StoreShape): StoreShape => ({
+  ...s,
+  converse: (markdown) => s.converse(markdown).pipe(Effect.tap(() => Effect.sync(() => (markdown.includes("connection lost, retry") ? effect() : undefined)))),
+});
+const conversation = (repo: string) => path.join(repo, "plan-review", "conversation.md");
+
+test("(d, #26) changes.diff edited during the exhaustion pause, then Retry again: ReviewedFileChanged, and no further turn", async () => {
+  const repo = tempRepo();
+  const { layer, probe } = testLayer(repo, {
+    steps: [planWrite("v1")],
+    reviews: [{ issues: [] }, { issues: [], fault }, { issues: [], fault }, { issues: [] }],
+    execs: [finished],
+    answers: [{ text: prompts.TRANSPORT_ANSWERS.retry, before: () => fs.appendFileSync(path.join(repo, "plan-review", "work-review-1", "changes.diff"), "forged\n") }],
+    config: quick,
+  });
+  await runFails(layer, "ReviewedFileChanged");
+  assert.equal(probe.reviewer.prompts.length, 3);
+});
+
+test("(g, #26) a read-only work response that faults is retried and succeeds, though the retry line was written meanwhile", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [planWrite("v1"), rejectingResponse({ fault }), rejectingResponse()],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+    config: quick,
+  });
+  assert.equal(await runTask(layer), 1);
+  assert.deepEqual(probe.planner.capabilities, ["records", "readOnly", "readOnly"]);
+});
+
+test("(h, #26) a read-only work response whose retries are exhausted, then Help me decide, then Retry again: it succeeds", async () => {
+  const columns = [prompts.TRANSPORT_RETRY_AGAIN, prompts.TRANSPORT_STOP].map((option) => ({ kind: "argued", option, advantages: [], disadvantages: [] }));
+  const { layer, probe } = testLayer(tempRepo(), {
+    steps: [planWrite("v1"), rejectingResponse({ fault }), rejectingResponse({ fault }), { output: { decision: "d", columns, recommendation: { option: "", reason: "" } } }, rejectingResponse()],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    answers: ["/decide", prompts.TRANSPORT_ANSWERS.retry],
+    config: quick,
+  });
+  assert.equal(await runTask(layer), 1);
+  assert.ok(fs.existsSync(path.join(probe.dir, "decision-1", "analysis.json")));
+  assert.ok(probe.ui.notified.some((e) => e._tag === "DecisionAnalyzed"));
+});
+
+test("(i, #26) an external edit of conversation.md during the backoff, after the retry line: RecordsChanged", async () => {
+  const repo = tempRepo();
+  const { layer, probe } = testLayer(repo, {
+    steps: [planWrite("v1"), rejectingResponse({ fault }), rejectingResponse()],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+    config: quick,
+    store: duringBackoff(() => fs.appendFileSync(conversation(repo), "an outside edit\n")),
+  });
+  await runFails(layer, "RecordsChanged", /conversation\.md/);
+  assert.equal(probe.planner.prompts.length, 2);
+});
+
+test("(j, #26) an external edit of conversation.md during the exhaustion pause, before the answer is appended: RecordsChanged", async () => {
+  const repo = tempRepo();
+  const { layer, probe } = testLayer(repo, {
+    steps: [planWrite("v1"), rejectingResponse({ fault }), rejectingResponse({ fault }), rejectingResponse()],
+    reviews: [{ issues: [] }, { issues: [issue("W1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+    answers: [{ text: prompts.TRANSPORT_ANSWERS.retry, before: () => fs.appendFileSync(conversation(repo), "an outside edit\n") }],
+    config: quick,
+  });
+  await runFails(layer, "RecordsChanged", /conversation\.md/);
+  assert.equal(probe.planner.prompts.length, 3);
+});

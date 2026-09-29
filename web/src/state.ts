@@ -3,7 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
-import { clarificationProgress, cycleHeading, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
+import { clarificationProgress, cycleHeading, reconnectingActivity, retryActivity, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, optionLines, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { correctionCount } from "../../src/issueLog.ts";
 import { countOfKind, type LoopResult, type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
@@ -73,6 +73,8 @@ export type RunView = Readonly<{
   busy: boolean;
   /** The agent calls that run, the innermost last (P1-R2-1). */
   calls: readonly AgentCall[];
+  /** The program's retry of a transport fault while it lasts (issue #26): shown on the activity line with the retried call. */
+  retry: string | null;
   timeline: readonly TimelineEntry[];
   ended: number | null;
   /** Internal to the fold: the terminal lines of the last interview turn or relayed question still to absorb, and the options of the last relayed question and interview message. */
@@ -135,6 +137,7 @@ export const emptyRun = (id: number): RunView => ({
   activity: "",
   busy: false,
   calls: [],
+  retry: null,
   timeline: [],
   ended: null,
   absorb: [],
@@ -306,7 +309,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return relabel({ ...next, phase: bandOf(event.phase, time, countIn(next, event.phase)) });
     }
     case "PhaseEnded":
-      return { ...run, activity: "", busy: false, calls: [], timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done" }, "done") : e)) };
+      return { ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done" }, "done") : e)) };
     case "RoundBegan":
       // A decision loop is a loop inside a phase that the progress panel does not show (D12 of the decision-support plan).
       return isDecision(event.subject) ? run : { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
@@ -364,20 +367,26 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       };
     case "AgentCallStarted": {
       const label = `${AGENT[event.agent]} — ${purposeLabel(event.purpose)}`;
-      return { ...run, calls: [...run.calls, { agent: event.agent, purpose: event.purpose, label, startedAt: time }], activity: label, busy: true };
+      return { ...run, calls: [...run.calls, { agent: event.agent, purpose: event.purpose, label, startedAt: time }], activity: run.retry === null ? label : `${label} — ${run.retry}`, busy: true };
     }
     case "ToolUsed":
       return { ...run, activity: `${run.calls.at(-1)?.label ?? AGENT[event.agent]} — ${event.tool}: ${event.target}`.replace(/: $/, "") };
+    // Issue #26: the SDK's own reconnection during a call, and the program's retry while it lasts; neither is progress.
     case "AgentReconnecting":
-      // Issue #26: shown on the activity line from S21 of the plan on.
-      return run;
+      return { ...run, activity: `${run.calls.at(-1)?.label ?? AGENT[event.agent]} — ${reconnectingActivity(event.attempt, event.of, event.detail)}` };
+    case "TransportRetrying": {
+      const retry = retryActivity(event.attempt, event.of, event.fault);
+      return { ...run, retry, activity: `${AGENT[event.agent]} — ${retry}` };
+    }
+    case "TransportRecovered":
+      return { ...run, retry: null, activity: run.calls.at(-1)?.label ?? "" };
     case "AgentCallEnded": {
       // P1-R2-1: a nested call ends and the one it ran in is shown again.
       const ended = run.calls.at(-1);
       const calls = run.calls.slice(0, -1);
       const outer = calls.at(-1);
       const activity = outer !== undefined ? outer.label : `${ended?.label ?? AGENT[event.agent]} — ${event.ok ? "done" : "failed"}`;
-      return { ...run, calls, activity, busy: calls.length > 0 };
+      return { ...run, calls, activity, busy: calls.length > 0, retry: event.ok ? null : run.retry };
     }
     case "ExecutionEnded":
       return run;
@@ -433,7 +442,7 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
       case "Notified":
         return notifiedEvent(r, event.event, time);
       case "Ended":
-        return { ...r, ended: event.code, pending: null, activity: "", busy: false, calls: [], timeline: r.timeline.map((e) => endEntry(e, event.code)) };
+        return { ...r, ended: event.code, pending: null, activity: "", busy: false, calls: [], retry: null, timeline: r.timeline.map((e) => endEntry(e, event.code)) };
     }
   })();
   return { ...next, nextSeq: run.nextSeq + 1 };

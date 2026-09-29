@@ -1,10 +1,10 @@
 import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
-import { HELP_ME_DECIDE, loopSummary, PLAN_STEP_STATE_LABEL, planStepLabel, stageHeading, stepLabel } from "../src/prompts.ts";
+import { HELP_ME_DECIDE, loopSummary, transportRetryLine, UNCHANGED_PROCEED, PLAN_STEP_STATE_LABEL, planStepLabel, stageHeading, stepLabel } from "../src/prompts.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
 // fails on an uncaught error or a console error in any of its pages (e2e/fixtures.ts, finding 10 of docs/gui-review.md).
-const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113, decideBlank: 8114, planSteps: 8115 } as const;
+const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113, decideBlank: 8114, planSteps: 8115, transportRetry: 8116, unchangedPause: 8117 } as const;
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
@@ -348,4 +348,18 @@ test("(16) the plan in the rail: its stages and steps under the Implementation t
   await expect(page.locator("button[name=new]")).toBeVisible();
   // After the stop no execution runs: the started step is unfinished.
   await expect(step(planStepLabel(2, "The store"))).toHaveAttribute("data-plan-step", "unfinished");
+});
+
+test("(17) a Codex turn that loses its connection: the page shows the retry, and the run converges (issue #26)", async ({ page }) => {
+  await startTask(page, "transportRetry", "Document the service");
+  await expect(page.locator("[data-activity]")).toContainText("retry 1 of 3");
+  await expect(left(page).getByText(transportRetryLine("codex", 1, 3, 2, "stream disconnected before completion"))).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+});
+
+test("(18) the pause of an accepted issue with the file unchanged: Proceed continues the review (issue #30)", async ({ page }) => {
+  await startTask(page, "unchangedPause", "Document the service");
+  await page.getByRole("button", { name: UNCHANGED_PROCEED, exact: true }).click();
+  await expect(left(page).locator("[data-author=user]").getByText(UNCHANGED_PROCEED)).toBeVisible();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });

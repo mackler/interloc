@@ -961,3 +961,65 @@ export function agentReconnectingLine(agent: string, attempt: number | null, of:
 export function apiRetryDetail(status: number | null, error: string): string {
   return status === null ? `no response, ${error}` : `status ${status}, ${error}`;
 }
+
+/**
+ * The pause when the retries of a transport fault are exhausted (issue #26, Q2). Its answers are parsed by
+ * parseTransportAnswer in src/input.ts, and its widget and options derive from these constants.
+ */
+export const TRANSPORT_RETRY_AGAIN = "Retry again";
+export const TRANSPORT_STOP = "Stop the run";
+export const TRANSPORT_ANSWERS = { retry: "r", stop: "s" } as const;
+export const transportPrompt = `${TRANSPORT_ANSWERS.retry} = retry again; ${TRANSPORT_ANSWERS.stop} = stop the run > `;
+const agentName = (agent: "claude" | "codex"): string => (agent === "claude" ? "Claude Code" : "Codex");
+export function transportOptionDescriptions(): Readonly<{ retry: string; stop: string }> {
+  return {
+    retry: "Make the call again, with another full set of retries and the waits between them starting again from the shortest.",
+    stop: "End the run here; its records are kept.",
+  };
+}
+/** A retry of the program after a transport fault, as the terminal and conversation.md show it. */
+export function transportRetryLine(agent: "claude" | "codex", attempt: number, of: number, delaySeconds: number, fault: string): string {
+  return `${agentName(agent)}: connection lost, retry ${attempt} of ${of} in ${delaySeconds} s (${fault})`;
+}
+/** A call that succeeded after a retry. */
+export function transportRecoveredLine(agent: "claude" | "codex"): string {
+  return `${agentName(agent)}: connection restored`;
+}
+/** The question of the pause when the retries are exhausted. */
+export function transportExhaustedQuestion(agent: "claude" | "codex", what: string, attempts: number, fault: string): string {
+  return `${agentName(agent)} could not be reached for ${what} after ${attempts} attempts (${fault}). Retry again, or stop the run?`;
+}
+export function transportDecisionLine(answer: "retry" | "stop", agent: "claude" | "codex", what: string): string {
+  return `**User decision:** ${answer === "retry" ? "retry again" : "stop the run"} after ${agentName(agent)} could not be reached for ${what}.\n\n`;
+}
+/** The halt of AgentUnreachable. */
+export function agentUnreachableText(agent: "claude" | "codex", attempts: number, lastFault: string): string {
+  return `${agentName(agent)} could not be reached after ${attempts} attempts: ${lastFault}. The records are preserved.`;
+}
+
+/** What a retried planning call is, as the exhaustion pause names it. */
+export function transportWhat(purpose: "planning" | "interview"): string {
+  return purpose === "interview" ? "an interview turn" : "a planning call";
+}
+/** What a retried Codex turn is, as the exhaustion pause names it. */
+export function transportReviewWhat(heading: string): string {
+  return `the review in ${heading}`;
+}
+
+/** What a retried execution call is, as the exhaustion pause names it. */
+export const TRANSPORT_WHAT_EXECUTION = "the implementation";
+/**
+ * The prompt of a resumed execution call after a transport fault (issue #26, Q4): the session continues where it was, and
+ * the steps are reported with report_step as before.
+ */
+export const executionContinuePrompt = `The connection to the model dropped during this execution phase. The work done so far is in the project, and the steps you reported so far are recorded. Continue from where you were: call the tool ${REPORT_STEP_TOOL_NAME} as before when a step begins and when it is done, and return the status report at the end.`;
+
+/** The program's retry on the page's activity line, after the agent's name: a count of attempts, not progress. */
+export function retryActivity(attempt: number, of: number, fault: string): string {
+  return `connection lost, retry ${attempt} of ${of} (${fault})`;
+}
+/** The SDK's own reconnection on the page's activity line, after the call's label. */
+export function reconnectingActivity(attempt: number | null, of: number | null, detail: string): string {
+  const count = attempt === null ? "" : of === null ? ` ${attempt}` : ` ${attempt} of ${of}`;
+  return `reconnecting${count} (${detail})`;
+}

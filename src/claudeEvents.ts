@@ -104,7 +104,7 @@ export const reduceMessages = (messages: readonly SDKMessage[], streamError: str
 
 const decodeExecReport = Schema.decodeUnknownResult(S.ExecReport);
 /** The status report of an execution call, or null if there is none or it does not match its schema. */
-const execReport = (structured: unknown): ExecReport | null => {
+export const execReport = (structured: unknown): ExecReport | null => {
   const decoded = decodeExecReport(structured);
   return Result.isSuccess(decoded) ? decoded.success : null;
 };
@@ -112,13 +112,16 @@ const execReport = (structured: unknown): ExecReport | null => {
 /**
  * The outcome of an execution phase. A recorded stop takes precedence over any report; an invalid
  * report is treated as a missing one (status aborted). Execution calls never get a repair turn (decision Q5).
+ * `transport` is whether the call's error is a transport fault (src/transport.ts): a valid report before one stands.
  */
-export const interpretExecution = (outcome: CallOutcome, stop: Stop | null): ExecOutcome => {
+export const interpretExecution = (outcome: CallOutcome, stop: Stop | null, transport = false): ExecOutcome => {
   const report = execReport(outcome.structured);
   if (stop !== null) {
     return { status: "needs_input", summary: report?.summary ?? "", question: stop.question, remainingWork: report?.remaining_work ?? "", userInput: stop.input };
   }
-  if (outcome.error !== null || report === null) {
+  // A valid report delivered before a transport fault stands (issue #26, P1-R1-3): it is the call's last act.
+  const reportStands = report !== null && (outcome.error === null || transport);
+  if (!reportStands) {
     const reason = outcome.error ?? (outcome.structured === null || outcome.structured === undefined ? "no structured output" : "the status report does not match its schema");
     return { status: "aborted", summary: outcome.resultText, question: `The execution call ended without a status report: ${reason}`, remainingWork: "", userInput: null };
   }

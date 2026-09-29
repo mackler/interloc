@@ -1,6 +1,6 @@
 // Pure interpretation of what the user types. No I/O; used by the terminal Ui and the agent adapters.
 
-import { UNCHANGED_ANSWERS } from "./prompts.ts";
+import { TRANSPORT_ANSWERS, UNCHANGED_ANSWERS } from "./prompts.ts";
 
 /**
  * The option a reply chooses, as a zero-based index, or null when the reply is not a whole number in
@@ -35,6 +35,13 @@ export const parseUnchangedAnswer = (reply: string): "retry" | "proceed" | "stop
   const t = reply.trim().toLowerCase();
   const answers = ["retry", "proceed", "stop"] as const;
   return answers.find((a) => t === UNCHANGED_ANSWERS[a] || t === a) ?? null;
+};
+
+/** The answer at the pause of issue #26 (prompts.transportPrompt): its letter or its word; anything else is no answer. */
+export const parseTransportAnswer = (reply: string): "retry" | "stop" | null => {
+  const t = reply.trim().toLowerCase();
+  const answers = ["retry", "stop"] as const;
+  return answers.find((a) => t === TRANSPORT_ANSWERS[a] || t === a) ?? null;
 };
 
 export const chooseOption = (reply: string, count: number): number | null => {

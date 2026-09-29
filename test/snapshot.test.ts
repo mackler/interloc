@@ -92,3 +92,31 @@ test("excludedIndexPaths selects plan-review/ and the ignorePaths entries litera
     "vendor/lib/a.js",
   ]);
 });
+
+// Issue #26 (S19): the records guard of a read-only call replays the program's own writes since its baseline.
+import { compareJournaled } from "../src/snapshot.ts";
+
+test("compareJournaled: the program's own writes are accepted when each preimage is the state before it", () => {
+  const baseline = new Map([["conversation.md", "file:a"], ["plan.md", "file:p"]]);
+  const writes = [
+    { path: "conversation.md", before: "file:a", after: "file:b" },
+    { path: "conversation.md", before: "file:b", after: "file:c" },
+    { path: "decision-1", before: null, after: "directory" },
+  ];
+  const current = new Map([["conversation.md", "file:c"], ["plan.md", "file:p"], ["decision-1", "directory"]]);
+  assert.deepEqual(compareJournaled(baseline, writes, current), []);
+});
+
+test("compareJournaled: an external edit before a program write is a preimage mismatch", () => {
+  const baseline = new Map([["conversation.md", "file:a"]]);
+  const writes = [{ path: "conversation.md", before: "file:x", after: "file:y" }];
+  assert.deepEqual(compareJournaled(baseline, writes, new Map([["conversation.md", "file:y"]])), [{ kind: "content_changed", path: "conversation.md" }]);
+});
+
+test("compareJournaled: an edit after the last program write, or of a path the program did not write, is reported", () => {
+  const baseline = new Map([["conversation.md", "file:a"], ["plan.md", "file:p"]]);
+  const writes = [{ path: "conversation.md", before: "file:a", after: "file:b" }];
+  assert.deepEqual(compareJournaled(baseline, writes, new Map([["conversation.md", "file:z"], ["plan.md", "file:p"]])), [{ kind: "content_changed", path: "conversation.md" }]);
+  assert.deepEqual(compareJournaled(baseline, writes, new Map([["conversation.md", "file:b"]])), [{ kind: "removed", path: "plan.md" }]);
+  assert.deepEqual(compareJournaled(baseline, [], new Map([...baseline, ["notes.md", "file:n"]])), [{ kind: "added", path: "notes.md" }]);
+});

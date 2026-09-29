@@ -38,7 +38,7 @@ const reviewEntry = { id: "A", phase: 1, round: 2, source: "review", severity: "
 const selfEntry = { id: "P1-S2-1", phase: 1, round: 2, source: "self_correction", problem: "p", action: "plan_error", rationale: "r", superseded: false, file_change: null };
 const userEntry = { id: "A", phase: 1, round: 2, source: "user", problem: "p", action: "decided_by_user", rationale: "r", superseded: true };
 const usage = { version: 2, agent: "claude", time: "2026-09-24T00:00:00.000Z", session: null, num_turns: 0, total_cost_usd: 0 };
-const config: legacy.Config = { questionPhase: true, ignorePaths: ["a.txt"], maxRounds: 5, maxIdleRounds: 2, countMinor: true, execPermissionMode: "auto", claudeModel: null, codexModel: null };
+const config: typeof S.Config.Type = { questionPhase: true, ignorePaths: ["a.txt"], maxRounds: 5, maxIdleRounds: 2, maxTransportRetries: 3, transportRetryDelaySeconds: 5, countMinor: true, execPermissionMode: "auto", claudeModel: null, codexModel: null };
 
 test("each schema decodes a valid sample and its type matches the legacy type", () => {
   assert.deepEqual(decode(S.Issue, issue), issue);
@@ -73,7 +73,8 @@ test("each schema decodes a valid sample and its type matches the legacy type", 
   sameType<Equals<DeepMutable<typeof S.InterviewTurn.Type>, DeepMutable<legacy.InterviewTurn & { asked_ids: readonly string[] } & CurrentQuestion>>>();
   sameType<Equals<DeepMutable<typeof S.ExecReport.Type>, DeepMutable<legacy.ExecReport>>>();
   sameType<Equals<DeepMutable<typeof S.ExecOutcome.Type>, DeepMutable<legacy.ExecOutcome>>>();
-  sameType<Equals<DeepMutable<typeof S.Config.Type>, DeepMutable<legacy.Config>>>();
+  // Issue #26, Q1: the transport retry budget.
+  sameType<Equals<DeepMutable<typeof S.Config.Type>, DeepMutable<legacy.Config & { maxTransportRetries: number; transportRetryDelaySeconds: number }>>>();
 });
 
 test("each schema rejects a wrong enum value, a missing field and a wrong type", () => {
@@ -124,6 +125,8 @@ test("the program's record schemas constrain counts, costs and ids", () => {
     rejects(S.Config, { ...config, maxIdleRounds: bad }, `maxIdleRounds ${bad}`);
   }
   assert.equal(decode(S.Config, { ...config, maxRounds: 1, maxIdleRounds: 1 }).maxRounds, 1);
+  for (const bad of [0, -1, 1.5, "3"]) rejects(S.Config, { ...config, maxTransportRetries: bad }, `maxTransportRetries ${bad}`);
+  for (const bad of [0, -1, "5"]) rejects(S.Config, { ...config, transportRetryDelaySeconds: bad }, `transportRetryDelaySeconds ${bad}`);
   rejects(S.LogEntry, { ...reviewEntry, phase: -1 }, "phase -1");
   rejects(S.LogEntry, { ...reviewEntry, round: 0.5 }, "round 0.5");
   rejects(S.LogEntry, { ...reviewEntry, id: "" }, "an empty log entry id");

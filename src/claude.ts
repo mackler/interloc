@@ -6,9 +6,11 @@ import { Deferred, Effect, Exit, Layer, Ref, Result } from "effect";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { pathOf } from "./artifacts.ts";
-import { type CallOutcome, decodeQuestions, decodeToolTarget, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
+import { type CallOutcome, decodeQuestions, decodeToolTarget, execReport, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
 import { ClaudeCallFailed, type RunError, TransportFault } from "./errors.ts";
 import { type ClaudeFailure, classifyClaude } from "./transport.ts";
+import { withTransportRetry } from "./retry.ts";
+import type { ExecOutcome } from "./schema.ts";
 import { askOffering, numberedOptions, permissionOptions } from "./offer.ts";
 import { chooseOption } from "./input.ts";
 import { relayedQuestionSays } from "./render.ts";
@@ -364,24 +366,43 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       Effect.gen(function* () {
         const decider = yield* Decider;
         const stop = yield* Ref.make<Stop | null>(null);
-        const outcome = yield* call(
-          session,
-          prompt,
-          "execution",
-          "text",
-          {
-            permissionMode: config.execPermissionMode,
-            outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
-            hooks: { PreToolUse: [{ hooks: [denyAfterStop(stop)] }, { matcher: EDIT_TOOLS.join("|"), hooks: [denyPlanFileEdits] }] },
-            allowedTools: [prompts.REPORT_STEP_TOOL_NAME],
-          },
-          (inCallback) => executionPermission(stop, decider, inCallback),
-          // report_step (issue #6, Q2): each report runs the phase's reporter; a failure to write aborts the call.
-          (inCallback) => ({
-            mcpServers: { [prompts.REPORT_STEP_SERVER]: sdk.stepReporter((r) => inCallback(reporter(r.id, r.status), { text: prompts.STEP_NOT_RECORDED, isError: true })) },
-          }),
+        /**
+         * One attempt of the call (issue #26, Q4): the first sends the prompt, a retry resumes the session with the continue
+         * prompt, with the same hooks, stop and report_step server. It fails with TransportFault only for a transport fault
+         * without a recorded stop and without a valid report; otherwise the outcome is interpreted.
+         */
+        const attempt = (n: number): Effect.Effect<ExecOutcome, CallbackError | TransportFault> =>
+          Effect.gen(function* () {
+            const outcome = yield* call(
+              session,
+              n === 1 ? prompt : prompts.executionContinuePrompt,
+              "execution",
+              "text",
+              {
+                permissionMode: config.execPermissionMode,
+                outputFormat: { type: "json_schema", schema: agentJsonSchema(S.ExecReport) },
+                hooks: { PreToolUse: [{ hooks: [denyAfterStop(stop)] }, { matcher: EDIT_TOOLS.join("|"), hooks: [denyPlanFileEdits] }] },
+                allowedTools: [prompts.REPORT_STEP_TOOL_NAME],
+              },
+              (inCallback) => executionPermission(stop, decider, inCallback),
+              // report_step (issue #6, Q2): each report runs the phase's reporter; a failure to write aborts the call.
+              (inCallback) => ({
+                mcpServers: { [prompts.REPORT_STEP_SERVER]: sdk.stepReporter((r) => inCallback(reporter(r.id, r.status), { text: prompts.STEP_NOT_RECORDED, isError: true })) },
+              }),
+            );
+            const recorded = yield* Ref.get(stop);
+            const transport = outcome.error !== null && classifyClaude(outcome.failure);
+            if (transport && recorded === null && execReport(outcome.structured) === null) {
+              return yield* Effect.fail(new TransportFault({ agent: "claude", message: outcome.error ?? "", status: outcome.failure?.apiStatus ?? null }));
+            }
+            return interpretExecution(outcome, recorded, transport);
+          });
+        // The retry lives here, where the call's session, stop and reporter are (P2-R2-1): no TransportFault leaves.
+        return yield* withTransportRetry("claude", prompts.TRANSPORT_WHAT_EXECUTION, attempt, Effect.void).pipe(
+          Effect.provideService(Ui, ui),
+          Effect.provideService(Store, store),
+          Effect.provideService(RunConfig, config),
         );
-        return interpretExecution(outcome, yield* Ref.get(stop));
       }),
     sessionId: Ref.get(session),
     fresh: Ref.make<string | null>(null).pipe(Effect.map(plannerOver)),

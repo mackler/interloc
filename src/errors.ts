@@ -2,7 +2,7 @@
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
 import { Data, Result, Schema } from "effect";
 import { type Change, renderChange } from "./snapshot.ts";
-import { analysisInvalidText, correctionInvalidText, cycleInvalidText, cycleLimitStopText, decisionFormatUnreadableText, planInvalidText } from "./prompts.ts";
+import { agentUnreachableText, analysisInvalidText, correctionInvalidText, cycleInvalidText, cycleLimitStopText, decisionFormatUnreadableText, planInvalidText } from "./prompts.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
 export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: readonly Change[] }> {}
@@ -30,6 +30,8 @@ export class CodexCallFailed extends Data.TaggedError("CodexCallFailed")<{ reado
  * A failure of an agent call that src/transport.ts identifies as a dropped connection, a reset, a timeout or a 5xx
  * (issue #26). Not a RunError: the callers retry it (src/retry.ts), and only AgentUnreachable leaves a run.
  */
+/** The retries of a transport fault were exhausted and the user chose to stop (issue #26, Q2). */
+export class AgentUnreachable extends Data.TaggedError("AgentUnreachable")<{ readonly agent: "claude" | "codex"; readonly attempts: number; readonly lastFault: string }> {}
 export class TransportFault extends Data.TaggedError("TransportFault")<{ readonly agent: "claude" | "codex"; readonly message: string; readonly status: number | null }> {}
 export class AgentReplyInvalid extends Data.TaggedError("AgentReplyInvalid")<{ readonly agent: string; readonly issue: string; readonly files: string[] }> {}
 export class ConfigInvalid extends Data.TaggedError("ConfigInvalid")<{ readonly file: string; readonly path: string; readonly message: string }> {}
@@ -89,6 +91,7 @@ export type RunError =
   | AnalysisInvalid
   | PlanInvalid
   | CorrectionInvalid
+  | AgentUnreachable
   | Interrupted;
 
 const indent = (changes: readonly Change[]): string => changes.map((change) => `\n  ${renderChange(change)}`).join("");
@@ -130,6 +133,8 @@ export const describe = (error: RunErrorFields): string => {
       return `Claude Code planning call failed: ${error.message}`;
     case "CodexCallFailed":
       return `Codex review failed: ${error.message}`;
+    case "AgentUnreachable":
+      return agentUnreachableText(error.agent, error.attempts, error.lastFault);
     case "AgentReplyInvalid":
       return `the reply of ${error.agent} does not match its schema: ${error.issue}. The reply is kept in ${error.files.join(", ")}`;
     case "ConfigInvalid":
@@ -211,6 +216,7 @@ const RunErrorData = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.Literal("CorrectionInvalid"), changedIds: Strings, other: Strings }),
   Schema.Struct({ _tag: Schema.Literal("PlanInvalid"), duplicateIds: Strings, emptyIds: Schema.Number, removedDone: Strings, changedDone: Strings }),
+  Schema.Struct({ _tag: Schema.Literal("AgentUnreachable"), agent: Schema.Literals(["claude", "codex"]), attempts: Schema.Number, lastFault: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("Interrupted"), where: Schema.String }),
 ]);
 /** The fields of one of the program's errors; every `RunError` instance is one. */
