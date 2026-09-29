@@ -74,7 +74,7 @@ export const makeDecider = (task: string, format: string): Effect.Effect<Decider
       const self: DeciderShape = {
         at,
         decide: (request) =>
-          decisionLoop(format, task, { phase, label, question: request.question, options: request.options }, request.number ?? null).pipe(
+          decisionLoop(format, task, { phase, label, question: request.question, options: request.options, ...(request.shown === undefined ? {} : { shown: request.shown }) }, request.number ?? null).pipe(
             Effect.map((end) => ({ decision: end.decision, analysis: end.analysis, result: end.result })),
             Effect.provideService(Decider, self),
             Effect.provideContext(context),

@@ -494,3 +494,40 @@ test("a decision loop says one plain status per check of its analysis, not the c
   const conversation = fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8");
   assert.match(conversation, /## Decision 1, round 1/);
 });
+
+// S37 (W1-R1-5): Help me decide gives the analysis the question as the user was shown it: its context, terms and details.
+const analysisPromptOf = (prompts_: readonly string[]) => prompts_.find((p) => p.includes(prompts.DECISION_FORMAT_AUTHORITY)) ?? "";
+const decideOn = async (draft: QuestionDraft) => {
+  const { layer, probe } = await setUp({ answers: ["/decide", "1"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
+  await Effect.runPromise(Effect.gen(function* () {
+    const ui = yield* Ui;
+    return yield* askOffering((p) => ui.ask(p), prompts.decisionPrompt, draft);
+  }).pipe(Effect.provide(layer)));
+  return { prompt: analysisPromptOf(probe.planner.prompts), probe };
+};
+
+test("a relayed question in the shape gives the analysis its context paragraph and its terms", async () => {
+  const { parseRelayedQuestion } = await import("../src/question.ts");
+  const text = prompts.relayedQuestionText({ context: "The service keeps its data in a database, which Interloq, the orchestrator, starts with it.", terms: [{ term: "service", explanation: "The program this task builds." }], question: "Which database should the service use?" });
+  const parsed = parseRelayedQuestion(text, question.options);
+  assert.ok(parsed !== null);
+  const { prompt, probe } = await decideOn({ origin: { kind: "relayed" }, context: { text: parsed.context, by: "agent" }, terms: parsed.terms, question: parsed.question, options: offered, decision: null });
+  assert.ok(prompt.includes(parsed.context), prompt.slice(-1500));
+  assert.ok(prompt.includes("service: The program this task builds."));
+  const { shown: _shown, ...recorded } = json(probe.dir, "decision-1/question.json");
+  assert.deepEqual(Object.keys(recorded).sort(), ["decision", "label", "options", "phase", "question", "version"]);
+});
+
+test("an agreed question gives the analysis its reviewed context, reason and terms; a pause its details", async () => {
+  const { turnDraft } = await import("../src/conversation.ts");
+  const { normalizeTurn } = await import("../src/schemaNormalize.ts");
+  const agreed = { id: "Q1", context: "The service stores orders in a database.", question: "Which database?", reason: "the schema depends on it", proposed_answers: question.options, default_answer: "SQLite" };
+  const turn = normalizeTurn({ message_to_user: "", current_question: { id: "Q1", context: "", text: "", terms: [], options: [] }, asked_ids: ["Q1"], answered_ids: [], complete: false, summary: "" });
+  const draft = turnDraft(turn, { questions: [agreed], terms: [{ id: "Q1", terms: [{ term: "orders", explanation: "What customers buy." }] }] });
+  const { prompt } = await decideOn(draft);
+  for (const part of [agreed.context, "the schema depends on it", "orders: What customers buy."]) assert.ok(prompt.includes(part), part);
+  const { decisionDraft } = await import("../src/review.ts");
+  const facts = { pause: "reraised" as const, id: "P1-R1-1", history: [], issue: { id: "P1-R1-1", severity: "major" as const, location: "S1", problem: "The migration is missing.", evidence: "S1 never migrates." } };
+  const pause = await decideOn({ ...decisionDraft("Planning phase 1", { kind: "pause", facts }, question.options, null), explain: undefined });
+  assert.ok(pause.prompt.includes("Codex says: The migration is missing."), pause.prompt.slice(-1500));
+});

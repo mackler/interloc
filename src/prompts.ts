@@ -945,7 +945,19 @@ export type DecisionPromptQuestion = Readonly<{
   label: string;
   question: string;
   options: readonly Readonly<{ label: string; description: string }>[];
+  /** What the user was shown with the question (S37): its context, terms and details. */
+  shown?: Readonly<{ context: string; terms: readonly Readonly<{ term: string; explanation: string }>[]; details: string }>;
 }>;
+/** What the user was shown with a question, as the analysis prompt carries it under the options (S37); "" when nothing. */
+export function shownWithQuestion(shown: DecisionPromptQuestion["shown"]): string {
+  if (shown === undefined) return "";
+  const parts = [
+    ...(shown.context.trim() === "" ? [] : [`The context paragraph:\n${shown.context.trim()}`]),
+    ...(shown.details.trim() === "" ? [] : [shown.details.trim()]),
+    ...(shown.terms.length === 0 ? [] : [`${TERMS_HEADING}\n${shown.terms.map((t) => `${t.term}: ${t.explanation}`).join("\n")}`]),
+  ];
+  return parts.length === 0 ? "" : `\nWhat the user was shown with the question:\n${parts.join("\n\n")}\n`;
+}
 /** What the run knows at the moment of the decision (decision Q3): the task, and requirements.md and plan.md where they exist. */
 export type DecisionContext = Readonly<{ task: string; requirements: string | null; plan: string | null }>;
 
@@ -984,7 +996,7 @@ ${format}
 The decision: ${question.question}
 The options, in this order:
 ${options}
-
+${shownWithQuestion(question.shown)}
 The context of the decision. The run is in ${question.label}.
 The task of the run: ${context.task}
 ${requirements}

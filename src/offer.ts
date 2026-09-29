@@ -149,7 +149,9 @@ export const askOffering = <E>(
       const answer = yield* ask(prompts.withOffer(hint));
       if (isDecide(answer)) {
         const asked = decisionQuestionOf(draft);
-        const outcome = yield* decider.decide({ question: asked, options, number: question.number });
+        // S37: the analysis is given the question as the user was shown it, after the context call.
+        const shown = { context: explained.context.text, terms: explained.terms, details: explained.details ?? "" };
+        const outcome = yield* decider.decide({ question: asked, options, number: question.number, shown });
         decisions.push(outcome.decision);
         yield* ui.notify({ _tag: "DecisionAnalyzed", decision: outcome.decision, question: asked, presented: question, options, analysis: outcome.analysis });
         yield* present;
