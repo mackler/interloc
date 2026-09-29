@@ -3,6 +3,7 @@
 
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
+import type { PresentedQuestion } from "../../src/question.ts";
 import { analysisProgressLine, clarificationProgress, cycleHeading, reconnectingActivity, retryActivity, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, questionMarkdown, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { correctionCount } from "../../src/issueLog.ts";
@@ -88,7 +89,11 @@ export type AgentCall = Readonly<{ agent: "claude" | "codex"; purpose: string; l
 /** The prompt the run waits on, with every choice it offers (the catalog's and those of the preceding event). */
 /** A pending prompt: the agent's options (an interview turn's numbered answers or a relayed question's options,
  * rendered as cards) apart from the catalog's fixed choices (buttons), issue #12. */
-export type Widget = Readonly<{ asked: Asked; options: readonly Choice[]; choices: readonly Choice[] }>;
+/**
+ * S26: `question`, the question the prompt asks, as it was last presented, and `hint`, the prompt's text in the page's
+ * words; neither is a transcript message while the prompt is pending. `presentedAt`, the time it was presented, or the prompt asked when it has no question.
+ */
+export type Widget = Readonly<{ asked: Asked; options: readonly Choice[]; choices: readonly Choice[]; question: PresentedQuestion | null; presentedAt: string | null; hint: string }>;
 
 export type RunView = Readonly<{
   id: number;
@@ -115,6 +120,8 @@ export type RunView = Readonly<{
   /** Internal to the fold: the terminal lines of the last interview turn still to absorb, and the options of the last question presented (S5). */
   absorb: readonly string[];
   questionOptions: readonly Choice[];
+  /** The question presented last and not yet asked (S26), with the time it was presented. */
+  presented: Readonly<{ question: PresentedQuestion; time: string }> | null;
   /** The band of the phase the next message belongs to (issue #15): set when a phase begins, kept until the next one. */
   phase: Band | null;
   /** The last time each panel displays, a message's or a band label's: what the next message's time is measured from. */
@@ -176,6 +183,7 @@ export const emptyRun = (id: number): RunView => ({
   ended: null,
   absorb: [],
   questionOptions: [],
+  presented: null,
   phase: null,
   lastShown: { left: null, right: null },
   analysis: null,
@@ -510,8 +518,10 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return run;
     case "QuestionPresented":
       // S5: every question in the one shape; its options with an exact answer are the next prompt's cards.
+      // S26: the question stays out of the transcript until its prompt is answered.
       return {
-        ...withLeft(run, message(run, time, "program", questionMarkdown(event.question), "markdown")),
+        ...run,
+        presented: { question: event.question, time },
         questionOptions: event.question.options.flatMap((o) => ("token" in o.answer ? [{ label: o.description === "" ? o.label : `${o.label} — ${o.description}`, sends: o.answer.token }] : [])),
       };
     case "AnalysisProgress": {
@@ -562,14 +572,18 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
         const extra = r.questionOptions;
         // Presented options belong to this prompt alone (P1-R1-2); an analysis waiting for its prompt gets this one.
         const analysis = r.analysis !== null && r.analysis.prompt === null ? { ...r.analysis, prompt: event.prompt } : r.analysis;
-        return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, options: extra, choices: event.choices }, questionOptions: [], analysis, dismissed: null };
+        const hint = pagePromptText(event.kind, event.text);
+        return { ...r, pending: { asked: event, options: extra, choices: event.choices, question: r.presented?.question ?? null, presentedAt: r.presented?.time ?? time, hint }, questionOptions: [], presented: null, analysis, dismissed: null };
       }
       case "Answered": {
         const chosen = r.pending !== null && r.pending.asked.prompt === event.prompt ? [...r.pending.options, ...r.pending.choices].find((c) => c.sends === event.text) : undefined;
         const dismisses = r.analysis !== null && r.analysis.prompt === event.prompt;
         const analysis = dismisses ? null : r.analysis;
         const dismissed = dismisses ? r.analysis : r.dismissed;
-        return { ...withLeft(r, message(r, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt], analysis, dismissed };
+        // S26: the question joins the transcript with its answer, as an ordinary exchange.
+        const own = r.pending !== null && r.pending.asked.prompt === event.prompt ? r.pending : null;
+        const asked = own === null ? r : own.question !== null ? withLeft(r, { ...message(r, own.presentedAt ?? time, "program", questionMarkdown(own.question), "markdown"), key: `${r.id}-${r.nextSeq}-question` }) : withLeft(r, { ...message(r, own.presentedAt ?? time, "program", own.hint, "text"), key: `${r.id}-${r.nextSeq}-question` });
+        return { ...withLeft(asked, message(asked, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt], analysis, dismissed };
       }
       case "Notified":
         return notifiedEvent(r, event.event, time);

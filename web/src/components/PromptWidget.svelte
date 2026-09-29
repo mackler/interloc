@@ -10,6 +10,8 @@
   import { Button, Card, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
   import { answerHint, END_RUN_LABEL, HELP_ME_DECIDE, PROPOSED_ANSWERS_LABEL } from "../../../src/prompts.ts";
   import type { Widget } from "../state.ts";
+  import { render } from "../markdown.ts";
+  import { questionMarkdown } from "../../../src/render.ts";
 
   // The typed text is the page's draft of this prompt (../draft.ts, finding 5): App keeps it per (incarnation, run,
   // prompt) and withdraws it with a notice when another tab answers first [error prevention].
@@ -33,6 +35,11 @@
 
 {#if widget !== null}
   <div class="prompt" role="group" aria-label="Your answer">
+    <!-- S26: the question the run waits on, kept out of the transcript until it is answered. -->
+    {#if widget.question !== null}
+      <div class="question markdown m3-font-body-medium">{@html render(questionMarkdown(widget.question))}</div>
+    {/if}
+    <p class="asks m3-font-body-medium">{widget.hint}</p>
     {#if widget.options.length > 0}
       <div class="options m3-font-body-medium" role="group" aria-label={PROPOSED_ANSWERS_LABEL}>
         {#each widget.options as option, i (i)}
@@ -67,6 +74,8 @@
      paragraphs scroll within the group, so that the field, Send and the fixed choices stay in a phone's window. */
   .options { display: flex; flex-direction: column; gap: 0.5rem; max-height: 25dvh; overflow-y: auto; }
   .options > :global(button) { width: 100%; min-width: 0; overflow-wrap: anywhere; }
+  .question { max-height: 40dvh; overflow-y: auto; }
+  .asks { margin: 0; }
   .choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   /* The field has the full width in every window (finding 7); the hint and Send share the row below it. */
   .send-row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; }

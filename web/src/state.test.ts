@@ -143,13 +143,12 @@ describe("Markdown in the left panel", () => {
     }
   });
 
-  test("a presented question is one Markdown message with its options, live and after a replay (S5)", () => {
+  test("a presented question is held with its options by the pending prompt, live and after a replay (S5, S26)", () => {
     const events: RunEvent[] = [started, notified(question), asked(1, prompts.optionOrTextPrompt)];
     for (const s of [fold(live(events)), replayed(events)]) {
-      expect(s.run?.left.map((m) => [m.author, m.format, m.body])).toEqual([
-        ["program", "markdown", questionMarkdown(presentedOf(question))],
-        ["program", "text", prompts.pagePromptText("optionOrText", prompts.optionOrTextPrompt)],
-      ]);
+      // S26: while pending, the question is the widget's, not the transcript's.
+      expect(s.run?.left).toEqual([]);
+      expect(s.run?.pending?.question).toEqual(presentedOf(question));
       expect(s.run?.pending?.options.map((c) => c.sends)).toEqual(["1", "2"]);
     }
   });
@@ -170,8 +169,9 @@ describe("Markdown in the left panel", () => {
       notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 }),
       notified({ _tag: "PlanWritten", phase: 1, resultText: "" }),
       asked(1, prompts.decisionPrompt),
+      { _tag: "Answered", prompt: 1, text: "" },
     ];
-    expect(formats(fold(live(events)))).toEqual(["program:text", "program:text", "claude:markdown", "program:markdown", "program:text"]);
+    expect(formats(fold(live(events)))).toEqual(["program:text", "program:text", "claude:markdown", "program:markdown", "program:text", "user:markdown"]);
   });
 });
 
@@ -180,11 +180,11 @@ describe("Markdown in the left panel", () => {
 test("every prompt is shown in the page's words, without the terminal's key conventions", () => {
   const texts = [prompts.decisionPrompt, prompts.limitPrompt, prompts.limitNoProceedPrompt, prompts.execInputPrompt, prompts.optionOrTextPrompt, prompts.permissionPrompt, prompts.interviewMessagePrompt, prompts.confirmSummaryPrompt, prompts.startOrTalkPrompt];
   for (const text of texts) {
-    const body = fold(live([started, asked(1, text)])).run?.left.at(-1)?.body ?? "";
+    const body = fold(live([started, asked(1, text)])).run?.pending?.hint ?? "";
     expect(body, text).not.toMatch(/>\s*$|\bq = quit|Enter =|= stop|p = /);
     expect(body.trim(), text).not.toBe("");
   }
-  expect(fold(live([started, asked(1, "Something new > ")])).run?.left.at(-1)?.body).toBe("Something new");
+  expect(fold(live([started, asked(1, "Something new > ")])).run?.pending?.hint).toBe("Something new");
 });
 
 describe("activity and timeline", () => {
@@ -767,9 +767,10 @@ describe("decision support", () => {
     const s = fold(live([started, notified(presented), asked(1, prompts.withOffer(prompts.decisionPrompt))]));
     expect(s.run?.pending?.options.map((c) => `${c.label}=${c.sends}`)).toEqual(["Follow Codex — the issue=1", "Follow Claude — the rationale=2"]);
     expect(s.run?.pending?.choices.map((c) => `${c.label}=${c.sends}`)).toEqual([`${prompts.CONTINUE_WITHOUT_DECIDING}=`, `${prompts.HELP_ME_DECIDE}=/decide`, `${prompts.END_RUN_LABEL}=q`]);
-    expect(bodies(s)).toEqual([`program:${questionMarkdown(presentedOf(presented))}`, `program:${prompts.pagePromptText("decision", prompts.decisionPrompt)}`]);
+    expect(bodies(s)).toEqual([]);
+    expect(s.run?.pending?.hint).toBe(prompts.pagePromptText("decision", prompts.decisionPrompt));
     const helped = fold([{ type: "event", run: 1, seq: 3, time: at(3), event: { _tag: "Answered", prompt: 1, text: "/decide" } }], s);
-    expect(bodies(helped).at(-1)).toBe(`user:${prompts.HELP_ME_DECIDE}`);
+    expect(bodies(helped)).toEqual([`program:${questionMarkdown(presentedOf(presented))}`, `user:${prompts.HELP_ME_DECIDE}`]);
   });
 
   test("options never outlive their prompt: a pause without options after one with options shows no cards", () => {
@@ -1290,5 +1291,40 @@ describe("the steps an Implementation acted on", () => {
   test("shownPlan of an entry that is not an Implementation is null", () => {
     const s = fold(live(implementation1));
     expect(shownPlan(entry(s, "Planning"), s.run!.plan)).toBe(null);
+  });
+});
+
+// S26: the question the run waits on stays out of the transcript until it is answered; then the question and the
+// answer are appended as an ordinary exchange. Replay and live events fold alike.
+describe("the pending question", () => {
+  const presented = presentedEvent("Which database?", [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "" }]);
+  const pendingEvents: RunEvent[] = [started, said("a"), notified(presented), asked(1, prompts.withOffer(prompts.optionOrTextPrompt))];
+  test("while pending, neither the question nor the prompt's text is a transcript message; the widget holds both", () => {
+    for (const s of [fold(live(pendingEvents)), replayed(pendingEvents)]) {
+      expect(bodies(s)).toEqual(["program:a"]);
+      expect(s.run?.pending?.question).toEqual(presentedOf(presented));
+      expect(s.run?.pending?.hint).toBe(prompts.pagePromptText("optionOrText", prompts.withOffer(prompts.optionOrTextPrompt)));
+    }
+  });
+  test("when answered, the question and the answer are appended as an exchange", () => {
+    const events: RunEvent[] = [...pendingEvents, { _tag: "Answered", prompt: 1, text: "1" }];
+    for (const s of [fold(live(events)), replayed(events)]) {
+      expect(bodies(s)).toEqual(["program:a", `program:${questionMarkdown(presentedOf(presented))}`, "user:SQLite — a file"]);
+      expect(s.run?.pending).toBe(null);
+    }
+  });
+  test("a question presented again after a rejected answer is the next prompt's question", () => {
+    const again = presentedEvent("Which database, again?", []);
+    const s = fold(live([...pendingEvents, { _tag: "Answered", prompt: 1, text: "" }, notified({ _tag: "AnswerRejected" }), notified(again), asked(2, prompts.optionOrTextPrompt)]));
+    expect(s.run?.pending?.question?.question).toBe("Which database, again?");
+  });
+  test("property: while a prompt is pending, its question's text is in no transcript message", () => {
+    fc.assert(
+      fc.property(fc.array(fc.string({ minLength: 1, maxLength: 6 }).map((t) => said(`s ${t}`)), { maxLength: 4 }), fc.string({ minLength: 3, maxLength: 12 }), (before, text) => {
+        const q = presentedEvent(`Q? ${text}`, []);
+        const s = fold(live([started, ...before, notified(q), asked(1, prompts.optionOrTextPrompt)]));
+        return (s.run?.left ?? []).every((m) => !m.body.includes(`Q? ${text}`));
+      }),
+    );
   });
 });
