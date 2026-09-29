@@ -329,18 +329,26 @@ test("(15) a rejected empty reply keeps the analysis shown; the answer that foll
 
 test("(16) the plan in the rail: its stages and steps under the Implementation that carries it out, the current step, the revision", async ({ page }) => {
   await startTask(page, "planSteps", "Build the rail");
-  const step = (label: string) => rail(page).locator("[data-plan-step]", { has: page.locator("[data-plan-step-label]", { hasText: label }) });
+  const entry = (label: string) => rail(page).locator("[data-state]", { has: page.locator("[data-label]", { hasText: new RegExp(`^${label}$`) }) });
+  const step = (label: string, within = entry("Implementation 2")) => within.locator("[data-plan-step]", { has: page.locator("[data-plan-step-label]", { hasText: label }) });
+  const implementation1 = entry("Implementation 1");
+  const implementation2 = entry("Implementation 2");
   // The run waits in its second execution: the stop of the first foresaw the second iteration, so every phase is numbered.
   await expect(step(planStepLabel(2, "The store"))).toHaveAttribute("data-plan-step", "current");
+  // Issue #50: the indicator is on the step that runs, not under the phase.
+  await expect(step(planStepLabel(2, "The store")).getByRole("progressbar")).toBeVisible();
+  await expect(rail(page).getByRole("progressbar")).toHaveCount(1);
   for (const phase of ["Planning 1", "Implementation 1", "Work review 1", "Planning 2", "Implementation 2", "Work review 2"]) await expect(rail(page).getByText(phase, { exact: true })).toBeVisible();
-  // The revised plan hangs under Implementation 2 alone (Q5, Q9), with its new stage and step.
-  const implementation2 = rail(page).locator("[data-state]", { has: page.locator("[data-label]", { hasText: /^Implementation 2$/ }) });
+  // The revised plan hangs under Implementation 2 (Q5, Q9), with its new stage and step, without the step done before it.
   await expect(implementation2.getByText(stageHeading(2, "the page"), { exact: true })).toBeVisible();
-  await expect(rail(page).locator("[data-plan-step]")).toHaveCount(3);
-  await expect(step(planStepLabel(1, "Structured user questions (Q1)")).locator(".mark")).toHaveAttribute("aria-label", PLAN_STEP_STATE_LABEL.done);
+  await expect(implementation2.locator("[data-plan-step]")).toHaveCount(2);
   await expect(step(planStepLabel(1, "The long step"))).toHaveAttribute("data-plan-step", "pending");
+  // Issue #54: Implementation 1 keeps the steps it acted on after the revision: the one it finished and the one it left.
+  await expect(implementation1.locator("[data-plan-step]")).toHaveCount(2);
+  await expect(step(planStepLabel(1, "Structured user questions (Q1)"), implementation1).locator(".mark")).toHaveAttribute("aria-label", PLAN_STEP_STATE_LABEL.done);
+  await expect(step(planStepLabel(2, "The store"), implementation1)).toHaveAttribute("data-plan-step", "unfinished");
   // The step's full text by keyboard.
-  await step(planStepLabel(1, "Structured user questions (Q1)")).locator("button").focus();
+  await step(planStepLabel(1, "Structured user questions (Q1)"), implementation1).locator("button").focus();
   await expect(rail(page).getByRole("tooltip")).toContainText("Add the schema of a question.");
   await page.keyboard.press("Escape");
   await expect(rail(page).getByRole("tooltip")).toHaveCount(0);
