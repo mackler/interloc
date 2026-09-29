@@ -31,8 +31,85 @@ function laterRound(file: string, logFile: string, idPrefix: string, round: numb
 Read both files again and review plan-review/${file} again under the same rules as before. New issues receive ids of the form ${idPrefix}-R${round}-1, ${idPrefix}-R${round}-2, and so on.`;
 }
 
-/** How a question for the user is filled (decision Q1 of the decision-support task). */
-export const QUESTION_OPTIONS_RULE = `Each entry of questions_for_user has a question and options. When the question is a choice, give two or more mutually exclusive options, each with a short label and a description; otherwise return an empty options array.`;
+/** One rule for a question put to the user: its id, the writer's imperative, and the reviewer's criterion (S1). */
+export type QuestionRule = Readonly<{ id: string; rule: string; criterion: string }>;
+/**
+ * The one statement of the rules for every question put to the user (issues #34, #36, #58, #59; requirements items 2 and
+ * 3). The prompt that asks an agent for a question carries `questionWritingRules()`, and the review that approves one
+ * carries `questionReviewCriteria()`, both rendered from this array; `validateQuestion` in src/question.ts checks the
+ * mechanical part under the same ids.
+ */
+export const QUESTION_RULES: readonly QuestionRule[] = [
+  {
+    id: "selfContained",
+    rule: "Make every question self-contained: it depends on nothing outside itself and its own options. Use no 'also', 'that', 'the above', 'as discussed' or other pointer to earlier material; where the question depends on an earlier decision, state that decision in its own words.",
+    criterion: "a question depends on something outside itself and its own options: an 'also', 'that', 'the above' or 'as discussed', or an earlier decision pointed at instead of stated.",
+  },
+  {
+    id: "nameThings",
+    rule: "Name every thing the question is about at its first mention: not 'the file', 'the response', 'the reviewer' or 'the call' where the reader cannot know which one is meant, but 'the file being reviewed, the plan' or 'Claude Code's response to a review'.",
+    criterion: "a question leaves a thing unnamed at its first mention ('the file', 'the response', 'the call') where the reader cannot know which one is meant.",
+  },
+  {
+    id: "noIdentifiers",
+    rule: "Do not use an identifier of a program (a tool name, a field name, a type, a file name, a status value, a function) without explaining it in ordinary words in the text itself.",
+    criterion: "a question uses an identifier of a program (a tool name, a field name, a type, a file name, a status value, a function) without explaining it in ordinary words.",
+  },
+  {
+    id: "noLiterals",
+    rule: "Do not use a literal from the code where a word of English is meant: write 'running', not 'started'.",
+    criterion: "a question uses a literal from the code where a word of English is meant, such as 'started' for 'running'.",
+  },
+  {
+    id: "kindBeforeNumber",
+    rule: "Never refer to an issue, a question, an option, a decision, a phase, a cycle or a commit by its number alone: the kind comes first and the identifier second ('Issue #6', 'phase 2', 'commit 44d39a9'). Where the reader cannot follow a reference, say what it is instead of pointing at it.",
+    criterion: "a question refers to an issue, a question, an option, a decision, a phase, a cycle or a commit by its number alone, without the kind before it, or points at a reference the reader cannot follow instead of saying what it is.",
+  },
+  {
+    id: "oneWord",
+    rule: "Use one word for one thing within a question.",
+    criterion: "a question uses two different words for one thing.",
+  },
+  {
+    id: "noInternalTerms",
+    rule: "Do not use a term of the program's internals (a report, a refusal, a disposition, a cycle, a phase, a session, a call) as though it were ordinary English. Where the program's behavior is the subject, state it in ordinary words.",
+    criterion: "a question uses a term of the program's internals (a report, a refusal, a disposition, a cycle, a phase, a session, a call) as though it were ordinary English.",
+  },
+  {
+    id: "questionLast",
+    rule: "Put what the reader needs first and the question last: the interrogative sentence is the last sentence, the one the reader reaches immediately before the options, and it ends with a question mark.",
+    criterion: "the interrogative sentence of a question is not its last sentence, immediately before the options.",
+  },
+  {
+    id: "context",
+    rule: "Precede every question with a context paragraph that states: the software components involved, each named with a description of one to three words; what each does, or could do, in the situation the question and its options describe; where in the application they are; when, during the operation of the program, they act or would act; and the purpose of that behavior, in computing terms and in human terms.",
+    criterion: "a question's context paragraph is missing, or omits one of its five points: the software components involved, each with a description of one to three words; what each does, or could do, in the situation the question and its options describe; where in the application they are; when, during the operation of the program, they act or would act; the purpose of that behavior, in computing terms and in human terms.",
+  },
+  {
+    id: "determinateOptions",
+    rule: "Give every option a meaning that cannot be taken two ways and that says what produces its outcome, so that the arguments for and against it can be worked out from what the option says, as docs/decision-making.md requires of an analysis.",
+    criterion: "an option could be taken two ways, or states an outcome without saying what produces it, so that the arguments for and against it cannot be worked out from what it says, as docs/decision-making.md requires of an analysis.",
+  },
+  {
+    id: "terms",
+    rule: "List in terms every word or phrase that a reader who has never seen this codebase may not know (the program's vocabulary, an SDK's, a third-party library's), each with its exact words as they appear in the text and a plain, non-empty explanation: a definition in ordinary words, not a cross-reference.",
+    criterion: "a word or phrase that a reader who has never seen this codebase may not know is not listed in terms, or its explanation is empty, a cross-reference, or does not make it intelligible.",
+  },
+];
+/** The rules as the writer of a question reads them. */
+export function questionWritingRules(): string {
+  return `Rules for every question put to the user. A reader who has never seen this codebase must be able to understand and answer it; the rules apply to its context, its question, its options and its terms alike.
+${QUESTION_RULES.map((r) => `- ${r.rule}`).join("\n")}`;
+}
+/** The rules as the reviewer of a question reads them. */
+export function questionReviewCriteria(): string {
+  return `A reader who has never seen this codebase must be able to understand and answer every question put to the user. Raise an issue when:
+${QUESTION_RULES.map((r) => `- ${r.criterion}`).join("\n")}`;
+}
+
+/** How a question for the user is filled (decision Q1 of the decision-support task), with the rules of every question (S1). */
+export const QUESTION_OPTIONS_RULE = `Each entry of questions_for_user has a question and options. When the question is a choice, give two or more mutually exclusive options, each with a short label and a description; otherwise return an empty options array.
+${questionWritingRules()}`;
 
 /** Rules for Claude Code's answer to a review. 'amendment' names what an accepted issue requires. */
 function respondRules(amendment: string): string {
