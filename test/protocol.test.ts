@@ -101,6 +101,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
     _tag: fc.constant("DecisionAnalyzed" as const),
     decision: nat,
     question: text,
+    presented: presentedQuestion,
     options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }),
     analysis: fc.record({ decision: text, columns: fc.array(fc.oneof(fc.record({ kind: fc.constant("argued" as const), option: text, advantages: fc.constant([]), disadvantages: fc.constant([]) }), fc.record({ kind: fc.constant("unclear" as const), option: text, unclear: text })), { maxLength: 2 }), recommendation: fc.record({ option: text, reason: text }) }),
   }),

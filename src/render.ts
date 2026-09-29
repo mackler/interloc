@@ -115,7 +115,7 @@ export const renderChoice = (k: number, answer: string, option: string | null): 
  * option carries OPPOSES_MARKER after its indentation, where the page uses the error color (issue #35, Q9). An unclear
  * option shows what is unclear in place of its headings.
  */
-export const analysisLines = (k: number, question: string, view: AnalysisView): readonly string[] => {
+export const analysisLines = (k: number, question: PresentedQuestion, view: AnalysisView): readonly string[] => {
   const marked = (text: string, symbol: string | null) => (symbol === null ? text : `${text} ${symbol}`);
   // Every physical line of a text (W1-R1-2): its indentation, the marker where it opposes the option, and the first-line
   // prefix ("- " for an element), whose width indents the continuation lines so that they align under the text.
@@ -134,7 +134,9 @@ export const analysisLines = (k: number, question: string, view: AnalysisView): 
     "",
   ]);
   const recommendation = view.recommendation === null ? [] : [recommendedOption(view.recommendation.option), view.recommendation.reason];
-  return ["", decisionViewHeading(k, question), "", ...columns, ...recommendation];
+  // S22: the question as the user was shown it, with its context and terms, between the heading and the columns.
+  const head = ["", decisionViewHeading(k, question.number), "", ...questionContextLines(question), "", ...question.question.split("\n"), ""];
+  return [...head, ...columns, ...recommendation];
 };
 
 // ---- the one presentation of a question (S8) --------------------------------------------------------------------------
@@ -145,6 +147,12 @@ export const optionLine = (o: PresentedOption): string => {
   return "token" in o.answer ? `  ${o.answer.token}. ${o.label}${description}` : `  ${o.label} (type the number)${description}`;
 };
 const indented = (text: string, by: string): readonly string[] => text.split("\n").map((line) => (line.trim() === "" ? "" : `${by}${line}`));
+/** A question's context, the details it is about and its terms, indented and set apart (S8, S11, S22). */
+const questionContextLines = (q: PresentedQuestion): readonly string[] => [
+  ...indented(q.context.by === "program" ? `${q.context.text} (${CONTEXT_BY_PROGRAM})` : q.context.text, "    "),
+  ...(q.details.trim() === "" ? [] : ["", ...indented(q.details, "    ")]),
+  ...(q.terms.length === 0 ? [] : ["", `    ${TERMS_HEADING}`, ...q.terms.flatMap((t) => indented(`${t.term}: ${t.explanation}`, "      "))]),
+];
 /**
  * A question as the terminal prints it (S8), the same shape whatever produced it: the heading with its number and the
  * line saying where it came from; the context paragraph, indented and set apart, marked when the program wrote it; what
@@ -156,9 +164,7 @@ export const questionLines = (q: PresentedQuestion): readonly string[] => [
   questionTitle(q.number),
   ...indented(originLine(q.origin, q.decision), "  "),
   "",
-  ...indented(q.context.by === "program" ? `${q.context.text} (${CONTEXT_BY_PROGRAM})` : q.context.text, "    "),
-  ...(q.details.trim() === "" ? [] : ["", ...indented(q.details, "    ")]),
-  ...(q.terms.length === 0 ? [] : ["", `    ${TERMS_HEADING}`, ...q.terms.flatMap((t) => indented(`${t.term}: ${t.explanation}`, "      "))]),
+  ...questionContextLines(q),
   "",
   ...q.question.split("\n"),
   ...(q.options.length === 0 ? [] : ["", ...q.options.map(optionLine)]),

@@ -142,7 +142,7 @@ export const askOffering = <E>(
         const asked = decisionQuestionOf(draft);
         const outcome = yield* decider.decide({ question: asked, options, number: question.number });
         decisions.push(outcome.decision);
-        yield* ui.notify({ _tag: "DecisionAnalyzed", decision: outcome.decision, question: asked, options, analysis: outcome.analysis });
+        yield* ui.notify({ _tag: "DecisionAnalyzed", decision: outcome.decision, question: asked, presented: question, options, analysis: outcome.analysis });
         yield* present;
         continue;
       }

@@ -577,7 +577,7 @@ describe("App and the draft", () => {
   // W2-R1-3: the conversation shown for run 1's decision 1 does not hide run 2's decision 1.
   test("the conversation toggle of one run's decision leaves the next run's decision of the same number displayed", async () => {
     const { root, ws } = await openPage();
-    const analyzed = { _tag: "Notified", event: { _tag: "DecisionAnalyzed", decision: 1, question: "Which?", options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } } };
+    const analyzed = { _tag: "Notified", event: { _tag: "DecisionAnalyzed", decision: 1, question: "Which?", presented: { number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: "", decision: null }, options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } } };
     ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, analyzed, asked(1)]) }] });
     expect(root.querySelector('section[aria-label^="Decision 1"]')).not.toBe(null);
     one(root, "button[name=conversation]").click();
@@ -693,10 +693,12 @@ describe("DecisionView", () => {
     extent: { per_person: el(`pp ${id}`), persons_affected: el(`pa ${id}`), likelihood: el(`l ${id}`), timing: el(`w ${id}`) },
   });
   const arg = (id: string, equivalent_to = "", replies: unknown[] = []) => ({ id, text: `But ${id}.`, equivalent_to, replies });
+  const presented = { number: 4, origin: { kind: "relayed" }, context: { text: "The service keeps its data in a database.", by: "agent" }, terms: [], question: "Which database?", options: [], details: "", decision: null };
   const event = {
     _tag: "DecisionAnalyzed" as const,
     decision: 2,
     question: "Which database?",
+    presented,
     options: [{ label: "SQLite", description: "" }, { label: "PostgreSQL", description: "" }],
     analysis: {
       decision: "Which database?",
@@ -707,6 +709,15 @@ describe("DecisionView", () => {
       recommendation: { option: "SQLite", reason: "It serves every user sooner." },
     },
   } as never;
+
+  // S22: the question beside its analysis, as the user was shown it: its number in the heading, its context and itself.
+  test("the view's heading names the decision and the question's number; the context and the question follow it", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const root = show(DecisionView, { event, narrow: false, onShowConversation: () => undefined });
+    expect(root.querySelector("h2")?.textContent?.trim()).toBe(prompts.decisionViewHeading(2, 4));
+    expect(root.querySelector(".question-context")?.textContent).toMatch(/keeps its data in a database/);
+    expect(root.querySelector(".question-text")?.textContent?.trim()).toBe("Which database?");
+  });
 
   test("one column per option in order, the heading Disadvantages: in each, arguments offset by level, symbols, the recommendation", async () => {
     const { default: DecisionView } = await import("./components/DecisionView.svelte");

@@ -15,7 +15,7 @@
   // message asks for a wider window; the prompt below stays usable [help users recognize and recover]. The
   // conversation is one click away and back [user control and freedom].
   import { Button } from "m3-svelte";
-  import { decisionViewHeading, ENLARGE_WINDOW_NOTICE, recommendedOption, RECOMMENDATION_HEADING, SCROLL_SIDEWAYS_HINT, SHOW_CONVERSATION } from "../../../src/prompts.ts";
+  import { CONTEXT_BY_PROGRAM, decisionViewHeading, ENLARGE_WINDOW_NOTICE, recommendedOption, RECOMMENDATION_HEADING, SCROLL_SIDEWAYS_HINT, SHOW_CONVERSATION } from "../../../src/prompts.ts";
   import { type EntryView, viewOf } from "../../../src/analysisView.ts";
   import type { UiEvent } from "../../../src/uiEvents.ts";
 
@@ -55,10 +55,16 @@
   </div>
 {/snippet}
 
-<section class="decision" aria-label={decisionViewHeading(event.decision, event.question)}>
+<section class="decision" aria-label={decisionViewHeading(event.decision, event.presented.number)}>
   <div class="head">
-    <h2 class="m3-font-title-medium">{decisionViewHeading(event.decision, event.question)}</h2>
+    <h2 class="m3-font-title-medium">{decisionViewHeading(event.decision, event.presented.number)}</h2>
     <Button variant="tonal" type="button" name="conversation" onclick={onShowConversation}>{SHOW_CONVERSATION}</Button>
+  </div>
+  <!-- S22: the question the analysis is for, as the user was shown it: its context apart, then the question itself
+       [recognition rather than recall: what is being decided stays beside the arguments]. -->
+  <div class="question">
+    <p class="question-context m3-font-body-medium">{event.presented.context.text}{#if event.presented.context.by === "program"} <span class="by">({CONTEXT_BY_PROGRAM})</span>{/if}</p>
+    <p class="question-text m3-font-title-small">{event.presented.question}</p>
   </div>
   {#if narrow}
     <p class="narrow m3-font-body-medium" role="alert">{ENLARGE_WINDOW_NOTICE}</p>
@@ -96,6 +102,11 @@
   .decision { display: flex; flex-direction: column; gap: 0.5rem; flex: 1; min-height: 0; min-width: 0; overflow: hidden; padding: 0.75rem; border-radius: var(--m3-shape-medium); background: var(--m3c-surface-container-lowest); }
   .head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
   .head h2 { margin: 0; }
+  /* The question beside its analysis: bounded, and scrolling on its own when its context is long. */
+  .question { flex-shrink: 0; max-height: 25dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+  .question-context { margin: 0; padding: 0.5rem 0.75rem; border-radius: var(--m3-shape-small); background: var(--m3c-surface-container); color: var(--m3c-on-surface-variant); white-space: pre-wrap; }
+  .question-context .by { font-style: italic; }
+  .question-text { margin: 0; }
   .hint, .narrow { margin: 0; color: var(--m3c-on-surface-variant); }
   /* The columns and the recommendation scroll in both directions within the area, so that the question and the prompt stay in view. */
   .scroll { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 0.75rem; }

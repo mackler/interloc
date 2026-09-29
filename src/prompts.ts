@@ -1163,9 +1163,9 @@ export function advantageLabel(n: number): string {
 export function disadvantageLabel(n: number): string {
   return `Disadvantage ${n}:`;
 }
-/** The page's heading of a decision's analysis. */
-export function decisionViewHeading(k: number, question: string): string {
-  return `Decision ${k}: ${question}`;
+/** The heading of a decision's analysis in the page and the terminal (S22): the decision and the number of its question. */
+export function decisionViewHeading(k: number, question: number): string {
+  return `Decision ${k}: the analysis of ${questionTitle(question)}`;
 }
 export const RECOMMENDATION_HEADING = "Recommendation";
 /** The terminal's heading of an option's arguments. */

@@ -155,8 +155,9 @@ test("notify renders Claude Code's prose in the terminal with the [claude] prefi
 test("notify prints a decision's analysis in the terminal", async () => {
   const io = streams();
   const analysis = { decision: "d", columns: [{ kind: "argued" as const, option: "A", advantages: [], disadvantages: [] }, { kind: "argued" as const, option: "B", advantages: [], disadvantages: [] }], recommendation: { option: "", reason: "" } };
-  await withUi(io, (ui) => ui.notify({ _tag: "DecisionAnalyzed", decision: 1, question: "A or B?", options: [], analysis }));
-  assert.equal(io.written(), ["", "Decision 1: A or B?", "", "Option 1: A", "", "  Advantages:", "", "  Disadvantages:", "", "Option 2: B", "", "  Advantages:", "", "  Disadvantages:", ""].join("\n") + "\n");
+  await withUi(io, (ui) => ui.notify({ _tag: "DecisionAnalyzed", decision: 1, question: "A or B?", presented: { number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: "", decision: null }, options: [], analysis }));
+  // S22: the heading names the question's number, and the question as the user was shown it precedes the options.
+  assert.equal(io.written(), ["", prompts.decisionViewHeading(1, 1), "", "    c", "", "Q?", "", "Option 1: A", "", "  Advantages:", "", "  Disadvantages:", "", "Option 2: B", "", "  Advantages:", "", "  Disadvantages:", ""].join("\n") + "\n");
 });
 
 // W3-R1-1: the rejection of a reply is for the page; the terminal prints nothing for it.

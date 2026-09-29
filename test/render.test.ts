@@ -7,6 +7,9 @@ import type { Argument, DecisionAnalysis, Entry, LogEntry } from "../src/schema.
 import { OPPOSES_MARKER } from "../src/prompts.ts";
 import * as prompts from "../src/prompts.ts";
 
+/** A question as the user was shown it, for an analysis's header (S22). */
+const presentedOf = (question: string, number: number) => ({ number, origin: { kind: "relayed" as const }, context: { text: "Claude Code, the coding agent, asks.", by: "agent" as const }, terms: [{ term: "Claude Code", explanation: "the coding agent" }], question, options: [], details: "", decision: null });
+
 // Finding 27 / recommendation D: the Store writes; the text of the records is composed here.
 test("subject headings", () => {
   assert.deepEqual([subjectHeading("questions"), subjectHeading("requirements"), subjectHeading({ plan: 3 })], ["Question review", "Requirements review", "Planning phase 3"]);
@@ -88,9 +91,12 @@ test("analysisLines: each option in turn, Disadvantages:, arguments indented by 
     ],
     recommendation: { option: "SQLite", reason: "It is sooner." },
   };
-  const lines = analysisLines(2, "Which database?", viewOf(analysis));
+  const all = analysisLines(2, presentedOf("Which database?", 5), viewOf(analysis));
   const m = OPPOSES_MARKER;
-  assert.deepEqual(lines.slice(0, 11), ["", "Decision 2: Which database?", "", "Option 1: SQLite", "", "  Advantages:", "", "  Advantage 1: Title E1.", "    - c E1", `        ${m}But x.`, "          On the other hand y. *"]);
+  // S22: the header names the decision and the question's number; the question's context, terms and text follow it.
+  assert.deepEqual(all.slice(0, 2), ["", prompts.decisionViewHeading(2, 5)]);
+  const lines = ["", all[1], ...all.slice(all.indexOf("Which database?") + 1)];
+  assert.deepEqual(lines.slice(0, 11), ["", prompts.decisionViewHeading(2, 5), "", "Option 1: SQLite", "", "  Advantages:", "", "  Advantage 1: Title E1.", "    - c E1", `        ${m}But x.`, "          On the other hand y. *"]);
   const second = lines.indexOf("Option 2: PostgreSQL");
   assert.ok(second > 0);
   assert.equal(lines.filter((l) => l === "  Advantages:").length, 2);
@@ -139,7 +145,8 @@ test("analysisLines marks exactly the texts that oppose the column's option, and
           ...e.elements.flatMap((x) => [...physical(4, "- ", x.text, x.opposes), ...x.arguments.flatMap((a) => physical(6 + 2 * a.level, "", marked(a.text, a.symbol), a.opposes))]),
         ]),
   );
-  const lines = analysisLines(1, "Which?", view);
+  const all = analysisLines(1, presentedOf("Which?", 1), view);
+  const lines = all.slice(all.indexOf("Which?") + 1);
   const rendered = ([indent, text, opposes]: readonly [number, string, boolean]) => `${" ".repeat(indent)}${opposes ? OPPOSES_MARKER : ""}${text}`;
   const items = lines.filter((l) => l !== "" && !/^(Decision|Option) \d/.test(l) && l.trim() !== "Advantages:" && l.trim() !== "Disadvantages:");
   assert.deepEqual(items, expected.map(rendered));
@@ -231,4 +238,15 @@ test("pauseProse writes every kind of pause as prose, without the record's field
   assert.match(all[0], /you decided: Add it to S3\./);
   assert.match(all[1], /accepted it in part: Only the index\./);
   assert.match(all[5], /I tidied it\./);
+});
+
+// S22: the question beside its analysis is the one the user was shown: its number, its context and its terms.
+test("an analysis's terminal header carries the question's number, context and terms before the question", () => {
+  const analysis: DecisionAnalysis = { decision: "d", columns: [], recommendation: { option: "", reason: "" } };
+  const lines = analysisLines(3, presentedOf("Which?", 9), viewOf(analysis));
+  const at = (text: string) => lines.findIndex((l) => l.includes(text));
+  assert.equal(lines[1], prompts.decisionViewHeading(3, 9));
+  assert.match(prompts.decisionViewHeading(3, 9), /Decision 3.*Question 9/);
+  const order = [at("Claude Code, the coding agent, asks."), at(prompts.TERMS_HEADING), at("Claude Code: the coding agent"), lines.indexOf("Which?")];
+  assert.ok(order.every((i, n) => i > 1 && (n === 0 || i > order[n - 1])), JSON.stringify(lines));
 });

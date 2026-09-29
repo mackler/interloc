@@ -761,7 +761,7 @@ describe("decision support", () => {
   const positions = [{ label: "Follow Codex", description: "the issue" }, { label: "Follow Claude", description: "the rationale" }];
   const presented: UiEvent = presentedEvent("Should Codex's position or Claude Code's position stand?", positions, { kind: "pause", heading: "Planning phase 1", pause: "reraised", id: "A" });
   const analysis = { decision: "d", columns: [], recommendation: { option: "", reason: "" } };
-  const analyzed = (decision: number): UiEvent => ({ _tag: "DecisionAnalyzed", decision, question: "issue A", options: positions, analysis });
+  const analyzed = (decision: number): UiEvent => ({ _tag: "DecisionAnalyzed", decision, question: "issue A", presented: { number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: "", decision: null }, options: positions, analysis });
 
   test("presented options become the cards of the next decision prompt; the offer is a choice", () => {
     const s = fold(live([started, notified(presented), asked(1, prompts.withOffer(prompts.decisionPrompt))]));
@@ -851,7 +851,7 @@ test("a decision's ResponseReceived is one Claude message in the right panel, li
 // W3-R1-1: a reply the run rejects (a blank answer where one is required) keeps the analysis for the prompt asked again.
 test("a rejected blank reply keeps the analysis for the retry; an accepted empty answer and the retry's answer dismiss it", () => {
   const options = [{ label: "A", description: "" }, { label: "B", description: "" }];
-  const analyzedEvent: UiEvent = { _tag: "DecisionAnalyzed", decision: 1, question: "A or B?", options, analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } };
+  const analyzedEvent: UiEvent = { _tag: "DecisionAnalyzed", decision: 1, question: "A or B?", presented: { number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: "", decision: null }, options, analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } };
   const question: UiEvent = presentedEvent("A or B?", options);
   const rejected: RunEvent[] = [
     started,

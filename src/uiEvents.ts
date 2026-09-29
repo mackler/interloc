@@ -54,7 +54,8 @@ export type UiEvent =
    */
   | Readonly<{ _tag: "AnalysisProgress"; decision: number; question: number | null; check: number }>
   /** A decision loop has ended: its analysis, shown before the question is asked again (decision support). */
-  | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>
+  /** S22: `presented`, the question as the user was shown it, which the analysis is shown beside: its number, context and terms. */
+  | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; presented: PresentedQuestion; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>
   /** The last answer was rejected (a blank reply where one is required) and the question is asked again (W3-R1-1); for the page. */
   | Readonly<{ _tag: "AnswerRejected" }>
   /** Every phase known of the run so far, begun or ahead, in order (issue #6): the whole list each time, so folding it twice changes nothing. */

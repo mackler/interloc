@@ -6,6 +6,7 @@ import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { decisionLoop } from "../src/decision.ts";
 import { askOffering, limitOptions, numberedOptions, type OfferedOption, permissionOptions, type QuestionDraft } from "../src/offer.ts";
 import * as prompts from "../src/prompts.ts";
+import type { UiEvent } from "../src/uiEvents.ts";
 import { withOffer } from "../src/prompts.ts";
 import type { RunError } from "../src/errors.ts";
 import type { ArguedColumn, Column, DecisionAnalysis, Entry } from "../src/schema.ts";
@@ -188,7 +189,11 @@ test("/decide runs a decision, shows it, restores the presentation and asks agai
   assert.equal(presentations(probe), 2, "presented first, and again before the reask, once");
   const shown = analyzed(probe);
   assert.equal(shown.length, 1);
-  assert.deepEqual(shown[0], { _tag: "DecisionAnalyzed", decision: 1, question: question.question, options: question.options, analysis: analysis() });
+  const { presented, ...rest } = shown[0] as Extract<UiEvent, { _tag: "DecisionAnalyzed" }>;
+  assert.deepEqual(rest, { _tag: "DecisionAnalyzed", decision: 1, question: question.question, options: question.options, analysis: analysis() });
+  // S22: the analysis is shown beside the question as the user was shown it.
+  assert.equal(presented.question, question.question);
+  assert.equal(presented.number, 1);
   assert.deepEqual(json(probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "2", option: "PostgreSQL" });
   assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /\*\*User choice\*\* after decision 1: 2 \(PostgreSQL\)/);
 });

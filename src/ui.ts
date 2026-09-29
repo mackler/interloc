@@ -85,7 +85,7 @@ export const terminalUi = (
             return Effect.sync(() => void output.write(questionLines(event.question).join("\n") + "\n"));
           case "DecisionAnalyzed":
             // Decision support: the terminal shows each option's arguments one after another.
-            return Effect.sync(() => void output.write(analysisLines(event.decision, event.question, viewOf(event.analysis)).join("\n") + "\n"));
+            return Effect.sync(() => void output.write(analysisLines(event.decision, event.presented, viewOf(event.analysis)).join("\n") + "\n"));
           default:
             return Effect.void;
         }
