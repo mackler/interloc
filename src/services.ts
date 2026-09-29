@@ -3,7 +3,7 @@
 
 import { Context, Effect } from "effect";
 import type { Brand, Option, Schema } from "effect";
-import type { CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, UserStopped } from "./errors.ts";
+import type { CodexCallFailed, FileSystemError, GitError, RunError, StateFileInvalid, TransportFault, UserStopped } from "./errors.ts";
 import type { SubjectId } from "./artifacts.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
@@ -50,7 +50,7 @@ export interface PlannerShape {
    * A call in which Claude Code may write only under plan-review/ ("records", the default), or call no tool but the
    * structured output ("readOnly"). The output is returned as produced; the caller decodes it.
    */
-  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability?: PlanningCapability): Effect.Effect<PlanningResult, PlannerError, Decider>;
+  planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability?: PlanningCapability): Effect.Effect<PlanningResult, PlannerError | TransportFault, Decider>;
   /** A call in which Claude Code implements the plan. */
   /** An execution call; `reporter` answers its report_step calls (issue #6, Q2). */
   executing(prompt: string, reporter: StepReporter): Effect.Effect<ExecOutcome, PlannerError, Decider>;
@@ -63,7 +63,7 @@ export class Planner extends Context.Service<Planner, PlannerShape>()("plan-revi
 /** One review loop's thread (behaviour 5). Every call goes to the thread the session was started with. */
 export interface ReviewSession {
   /** One review turn. Returns the reply text as Codex produced it; the caller decodes it. */
-  review(prompt: string): Effect.Effect<string, ReviewerError>;
+  review(prompt: string): Effect.Effect<string, ReviewerError | TransportFault>;
 }
 export interface ReviewerShape {
   /** Starts a new thread and returns the session bound to it. Called at the start of every review loop. A start failure is a typed error (finding 11). */

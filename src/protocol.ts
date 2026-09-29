@@ -66,6 +66,7 @@ export const UiEventSchema = Schema.Union([
   tagged("AgentCallStarted", { agent: AgentSchema, purpose: Str }),
   tagged("ToolUsed", { agent: AgentSchema, tool: Str, target: Str }),
   tagged("AgentCallEnded", { agent: AgentSchema, ok: Schema.Boolean }),
+  tagged("AgentReconnecting", { agent: AgentSchema, by: Schema.Literal("sdk"), attempt: Schema.NullOr(Int), of: Schema.NullOr(Int), delayMs: Schema.NullOr(Int), detail: Str }),
   tagged("QuestionAsked", { question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) }),
   tagged("InterviewTurn", { heading: Str, message: Str, summary: Schema.NullOr(Str), answered: Int, total: Int }),
   tagged("InterviewOpened", { heading: Str, stage: Schema.Literals(["clarification", "followUp", "conversation"]), total: Int }),

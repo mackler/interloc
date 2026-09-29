@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { test } from "node:test";
-import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput } from "@anthropic-ai/claude-agent-sdk";
+import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Fiber, Layer } from "effect";
 import { makeClaudePlanner, toSdkAnswers } from "../src/claude.ts";
 import { relayedQuestionSays } from "../src/render.ts";
@@ -695,4 +695,69 @@ test("the execution prompt names report_step and its statuses as the tool define
   for (const status of prompts.REPORT_STEP_STATUSES) assert.ok(prompts.executePrompt.includes(`'${status}'`), status);
   assert.match(prompts.executePrompt, /plan-review\/plan\.json/);
   assert.doesNotMatch(prompts.executePrompt, /marker/);
+});
+
+// Issue #26: a failed planning call is TransportFault when src/transport.ts says so, ClaudeCallFailed otherwise, and
+// neither reaches the decoding, so neither spends a repair turn.
+const throwing = (error: unknown, before: SDKMessage[] = []): Script => () => (async function* () {
+  yield init();
+  for (const m of before) yield m;
+  throw error;
+})();
+const isErrorResult = (status: number): SDKMessage =>
+  ({ type: "result", subtype: "success", is_error: true, api_error_status: status, terminal_reason: "api_error", result: `API Error: ${status}`, structured_output: null, total_cost_usd: 0.1, num_turns: 1 }) as unknown as SDKMessage;
+const failedTag = async (fake: Awaited<ReturnType<typeof planner>>): Promise<string> => {
+  const result = await run(Effect.result(fake.planner.planning("write the plan", schema)));
+  assert.ok(result._tag === "Failure", "the planning call succeeded");
+  return (result.failure as { _tag: string })._tag;
+};
+
+test("a stream that throws ECONNRESET makes planning fail with TransportFault", async () => {
+  const fake = await planner([throwing(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }))]);
+  assert.equal(await failedTag(fake), "TransportFault");
+});
+
+test("a success result with is_error and status 503 is TransportFault; with 400 it is ClaudeCallFailed; one call each", async () => {
+  const f503 = await planner([messages(init(), isErrorResult(503))]);
+  assert.equal(await failedTag(f503), "TransportFault");
+  assert.equal(f503.sdk.calls.length, 1);
+  const f400 = await planner([messages(init(), isErrorResult(400))]);
+  assert.equal(await failedTag(f400), "ClaudeCallFailed");
+  assert.equal(f400.sdk.calls.length, 1);
+});
+
+test("error_max_turns is ClaudeCallFailed", async () => {
+  assert.equal(await failedTag(await planner([messages(init(), failure("error_max_turns"))])), "ClaudeCallFailed");
+});
+
+test("progress after an api_retry or an assistant error clears it: a later stream error without a code is ClaudeCallFailed", async () => {
+  const retry = { type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 503, error: "server_error" } as unknown as SDKMessage;
+  const serverError = { type: "assistant", error: "server_error", message: { content: [] } } as unknown as SDKMessage;
+  assert.equal(await failedTag(await planner([throwing(new Error("broke"), [retry, assistantText("resumed")])])), "ClaudeCallFailed");
+  assert.equal(await failedTag(await planner([throwing(new Error("broke"), [serverError, assistantText("fine")])])), "ClaudeCallFailed");
+  assert.equal(await failedTag(await planner([throwing(new Error("broke"), [serverError])])), "TransportFault");
+});
+
+test("an api_retry with 429 before an ECONNRESET is ClaudeCallFailed (P1-R1-2)", async () => {
+  const retry = { type: "system", subtype: "api_retry", attempt: 1, max_retries: 10, retry_delay_ms: 500, error_status: 429, error: "rate_limit" } as unknown as SDKMessage;
+  assert.equal(await failedTag(await planner([throwing(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }), [retry])])), "ClaudeCallFailed");
+});
+
+test("an api_retry message is notified as AgentReconnecting", async () => {
+  const retry = { type: "system", subtype: "api_retry", attempt: 2, max_retries: 10, retry_delay_ms: 1500, error_status: 503, error: "server_error" } as unknown as SDKMessage;
+  const fake = await planner([messages(init(), retry, success({ questions_for_user: [] }))]);
+  await run(fake.planner.planning("write the plan", schema));
+  assert.deepEqual(fake.ui.notified.filter((e) => e._tag === "AgentReconnecting"), [
+    { _tag: "AgentReconnecting", agent: "claude", by: "sdk", attempt: 2, of: 10, delayMs: 1500, detail: "status 503, server_error" },
+  ]);
+});
+
+test("a callback failure wins over a transport fault", async () => {
+  const script: Script = ({ options }) => (async function* () {
+    yield init();
+    await permission(options)("AskUserQuestion", { questions: "nope" }, callContext());
+    throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+  })();
+  const fake = await planner([script]);
+  assert.equal(await failedTag(fake), "ClaudeCallFailed");
 });

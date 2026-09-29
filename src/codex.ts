@@ -2,7 +2,8 @@
 
 import type { ThreadEvent } from "@openai/codex-sdk";
 import { Effect, Exit, Layer } from "effect";
-import { CodexCallFailed } from "./errors.ts";
+import { CodexCallFailed, TransportFault } from "./errors.ts";
+import { classifyCodex } from "./transport.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as S from "./schema.ts";
 import { reduceTurn, toolEventOf } from "./codexEvents.ts";
@@ -10,6 +11,10 @@ import type { SdkThread } from "./sdk.ts";
 import { Reviewer, type ReviewerShape, type ReviewSession, RunConfig, Sdk, Store, type StoreShape, Ui, type UiShape } from "./services.ts";
 
 const failedWith = (e: unknown): CodexCallFailed => new CodexCallFailed({ message: e instanceof Error ? e.message : String(e) });
+/** A failure of a turn: TransportFault when src/transport.ts identifies a transport fault, CodexCallFailed otherwise (issue #26). */
+const turnFailure = (message: string): CodexCallFailed | TransportFault =>
+  classifyCodex(message) ? new TransportFault({ agent: "codex", message, status: null }) : new CodexCallFailed({ message });
+const turnFailedWith = (e: unknown): CodexCallFailed | TransportFault => turnFailure(e instanceof Error ? e.message : String(e));
 
 /**
  * The session over one thread: the thread is a closed-over value, so a call before the start is impossible.
@@ -23,16 +28,19 @@ const session = (store: StoreShape, ui: UiShape, thread: SdkThread): ReviewSessi
       const controller = new AbortController();
       const streamed = yield* Effect.tryPromise({
         try: () => thread.runStreamed(prompt, { outputSchema: agentJsonSchema(S.Review), signal: controller.signal }),
-        catch: failedWith,
+        catch: turnFailedWith,
       }).pipe(Effect.onInterrupt(() => Effect.sync(() => controller.abort())));
       const events = streamed.events;
       const seen: ThreadEvent[] = [];
       const reported = new Set<string>();
       const consume = Effect.gen(function* () {
         for (;;) {
-          const step = yield* Effect.tryPromise({ try: () => events.next(), catch: failedWith });
+          const step = yield* Effect.tryPromise({ try: () => events.next(), catch: turnFailedWith });
           if (step.done === true) return;
           seen.push(step.value);
+          if (step.value.type === "error") {
+            yield* ui.notify({ _tag: "AgentReconnecting", agent: "codex", by: "sdk", attempt: null, of: null, delayMs: null, detail: step.value.message });
+          }
           const tool = toolEventOf(reported, step.value);
           if (tool !== null) {
             reported.add(tool.id);
@@ -46,7 +54,7 @@ const session = (store: StoreShape, ui: UiShape, thread: SdkThread): ReviewSessi
       });
       yield* consume.pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.void : close)));
       const outcome = reduceTurn(seen);
-      if (outcome.kind === "failed") return yield* Effect.fail(new CodexCallFailed({ message: outcome.message }));
+      if (outcome.kind === "failed") return yield* Effect.fail(turnFailure(outcome.message));
       if (outcome.usage !== null) yield* store.recordUsage({ agent: "codex", thread: thread.id, inputTokens: outcome.usage.input_tokens, outputTokens: outcome.usage.output_tokens });
       return outcome.finalResponse;
     }).pipe(Effect.onExit((exit) => ui.notify({ _tag: "AgentCallEnded", agent: "codex", ok: Exit.isSuccess(exit) }))),

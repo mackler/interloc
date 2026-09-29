@@ -368,6 +368,9 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     }
     case "ToolUsed":
       return { ...run, activity: `${run.calls.at(-1)?.label ?? AGENT[event.agent]} — ${event.tool}: ${event.target}`.replace(/: $/, "") };
+    case "AgentReconnecting":
+      // Issue #26: shown on the activity line from S21 of the plan on.
+      return run;
     case "AgentCallEnded": {
       // P1-R2-1: a nested call ends and the one it ran in is shown again.
       const ended = run.calls.at(-1);

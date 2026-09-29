@@ -49,6 +49,8 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("InterviewOpened" as const), heading: text, stage: fc.constantFrom("clarification" as const, "followUp" as const, "conversation" as const), total: nat }),
   fc.record({ _tag: fc.constant("ClaudeSaid" as const), text }),
   fc.constant({ _tag: "AnswerRejected" as const }),
+  // Issue #26: the SDK's own reconnection.
+  fc.record({ _tag: fc.constant("AgentReconnecting" as const), agent, by: fc.constant("sdk" as const), attempt: fc.option(nat, { nil: null }), of: fc.option(nat, { nil: null }), delayMs: fc.option(nat, { nil: null }), detail: text }),
   // Issue #6: the phases known of the run.
   fc.record({ _tag: fc.constant("PhasesForeseen" as const), phases: fc.array(phase, { maxLength: 4 }) }),
   // Issue #6: the plan with its statuses, after every write and every report of a step.

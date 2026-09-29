@@ -4,7 +4,7 @@
 
 import { Effect, Ref, Result, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
-import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
+import { AgentReplyInvalid, ClaudeCallFailed, CodexCallFailed, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
 import { correctivePrompt, unchangedPrompt, unchangedQuestion, decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
 import { correctiveValidation } from "./round.ts";
@@ -187,7 +187,8 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
       Effect.gen(function* () {
         const before = yield* store.projectSnapshot();
         const recordsBefore = capability === "readOnly" ? yield* store.recordsSnapshot() : null;
-        const result = yield* planner.planning(text, schema, purpose, capability);
+        // Until the retry of issue #26 wraps it, a transport fault ends the run as any failed call did.
+        const result = yield* planner.planning(text, schema, purpose, capability).pipe(Effect.catchTag("TransportFault", (f) => Effect.fail(new ClaudeCallFailed({ message: f.message }))));
         const changes = compareSnapshots(before, yield* store.projectSnapshot());
         if (changes.length > 0) return yield* Effect.fail(new ProjectChanged({ during: "planning", fileLabel: null, changes }));
         if (recordsBefore !== null) {
@@ -256,7 +257,8 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
         // The bytes of the reviewed artifact too: a work review's fileHash is recomputed from the project and
         // does not see an edit of changes.diff itself (P1-R2-2).
         const recordBefore = yield* store.recordHash(id);
-        const reply = yield* session.review(text);
+        // Until the retry of issue #26 wraps it, a transport fault ends the run as any failed turn did.
+        const reply = yield* session.review(text).pipe(Effect.catchTag("TransportFault", (f) => Effect.fail(new CodexCallFailed({ message: f.message }))));
         const changes = compareSnapshots(projectBefore, yield* store.projectSnapshot());
         // The artifact's bytes, or the observed hash without a visible project change (a work review's diff also
         // changes with a commit); a change of the project itself is reported as ProjectChanged below. For the

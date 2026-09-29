@@ -19,6 +19,7 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   AgentCallStarted: [{ _tag: "AgentCallStarted", agent: "codex", purpose: "review" }, /Codex call started: review/],
   ToolUsed: [{ _tag: "ToolUsed", agent: "claude", tool: "Read", target: "src/run.ts" }, /Claude Code used Read src\/run\.ts/],
   AgentCallEnded: [{ _tag: "AgentCallEnded", agent: "claude", ok: false }, /Claude Code call ended: failed/],
+  AgentReconnecting: [{ _tag: "AgentReconnecting", agent: "claude", by: "sdk", attempt: 2, of: 10, delayMs: 1500, detail: "status 503" }, /Claude Code: reconnecting 2 of 10 in 1\.5 s \(status 503\)/],
   QuestionAsked: [{ _tag: "QuestionAsked", question: "Which?", options: [{ label: "A", description: "" }] }, /question: Which\? \(1 option\)/],
   InterviewTurn: [{ _tag: "InterviewTurn", heading: "Clarification", message: "Hello", summary: null, answered: 1, total: 3 }, /Clarification \(1 of 3 answered\): Hello/],
   InterviewOpened: [{ _tag: "InterviewOpened", heading: "Clarification", stage: "clarification", total: 3 }, /Clarification opened, 3 questions/],

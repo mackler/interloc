@@ -2,7 +2,7 @@
 // records them, the web Ui turns them into the page's panels, activity line and progress. Pure; types only from src/.
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
-import { cycleHeading, phaseLabel } from "./prompts.ts";
+import { agentReconnectingLine, cycleHeading, phaseLabel } from "./prompts.ts";
 import type { DecisionAnalysis, DecisionResponse, ExecOutcome, PlannerResponse, PlanResponse, QuestionListResponse, RecordedPlan, Review, UserQuestion } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
@@ -25,6 +25,11 @@ export type UiEvent =
   | Readonly<{ _tag: "AgentCallStarted"; agent: Agent; purpose: string }>
   | Readonly<{ _tag: "ToolUsed"; agent: Agent; tool: string; target: string }>
   | Readonly<{ _tag: "AgentCallEnded"; agent: Agent; ok: boolean }>
+  /**
+   * The SDK's own reconnection during a call (issue #26): Codex's error event (no attempt, count or delay), or the Agent
+   * SDK's api_retry message (its attempt, its maximum and its delay).
+   */
+  | Readonly<{ _tag: "AgentReconnecting"; agent: Agent; by: "sdk"; attempt: number | null; of: number | null; delayMs: number | null; detail: string }>
   | Readonly<{ _tag: "QuestionAsked"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
   /** `answered` of `total` questions so far (issue #21): the agreed ones and the follow-ups Claude reports asking. */
   | Readonly<{ _tag: "InterviewTurn"; heading: string; message: string; summary: string | null; answered: number; total: number }>
@@ -85,6 +90,8 @@ export const describeEvent = (event: UiEvent): string => {
       return `${AGENT_LABEL[event.agent]} used ${event.tool} ${event.target}`.trimEnd();
     case "AgentCallEnded":
       return `${AGENT_LABEL[event.agent]} call ended: ${event.ok ? "ok" : "failed"}`;
+    case "AgentReconnecting":
+      return agentReconnectingLine(AGENT_LABEL[event.agent], event.attempt, event.of, event.delayMs, event.detail);
     case "QuestionAsked":
       return `question: ${event.question} (${plural(event.options.length, "option")})`;
     case "InterviewTurn":

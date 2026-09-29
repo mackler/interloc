@@ -947,3 +947,17 @@ export const ENLARGE_WINDOW_NOTICE = "The analysis needs a window at least 390 p
 export const SCROLL_SIDEWAYS_HINT = "Scroll sideways to see every option.";
 export const SHOW_CONVERSATION = "Show the conversation";
 export const SHOW_ANALYSIS = "Show the analysis";
+
+// Issue #26: the transport faults and their retries, as the user reads them.
+
+/** The SDK's own reconnection during a call: Codex's notice, or the Agent SDK's api_retry with its attempt and delay. */
+export function agentReconnectingLine(agent: string, attempt: number | null, of: number | null, delayMs: number | null, detail: string): string {
+  const count = attempt === null ? "" : of === null ? ` ${attempt}` : ` ${attempt} of ${of}`;
+  const delay = delayMs === null ? "" : ` in ${Math.round(delayMs / 100) / 10} s`;
+  return `${agent}: reconnecting${count}${delay} (${detail})`;
+}
+
+/** What an api_retry message of the Agent SDK says of its failed request: the status, when there was a response, and the error. */
+export function apiRetryDetail(status: number | null, error: string): string {
+  return status === null ? `no response, ${error}` : `status ${status}, ${error}`;
+}

@@ -7,6 +7,7 @@ import { Result, Schema } from "effect";
 import * as S from "./schema.ts";
 import type { ExecOutcome, ExecReport } from "./schema.ts";
 import { normalizeReport } from "./schemaNormalize.ts";
+import type { ClaudeFailure } from "./transport.ts";
 
 export type Question = Readonly<{ question: string; options: readonly Readonly<{ label: string; description: string }>[] }>;
 /** A recorded AskUserQuestion stop of an execution call. */
@@ -16,7 +17,16 @@ export type Stop = Readonly<{ question: string; input: string }>;
  * stream ended before any result message (an abort or a stream failure): the other fields hold what
  * was retained up to that point. A failed result (`error_max_turns`, …) is a complete call, not partial.
  */
-export type CallOutcome = Readonly<{ sessionId: string | null; costUsd: number | null; structured: unknown; resultText: string; error: string | null; partial: boolean }>;
+export type CallOutcome = Readonly<{
+  sessionId: string | null;
+  costUsd: number | null;
+  structured: unknown;
+  resultText: string;
+  error: string | null;
+  partial: boolean;
+  /** The facts of the failure that src/transport.ts classifies (issue #26); null exactly when `error` is. */
+  failure: ClaudeFailure | null;
+}>;
 
 /** The fields of the SDK's AskUserQuestion input that the program reads; the others (header, multiSelect) are ignored. */
 const QuestionInput = Schema.Struct({
@@ -51,17 +61,45 @@ export const decodeToolTarget = (toolInput: unknown): string | null => {
 };
 
 const noResult = "the call produced no result message";
-/** The outcome of a call from its messages in order; `streamError` is the text of a failure of the stream, which wins over any result. */
-export const reduceMessages = (messages: readonly SDKMessage[], streamError: string | null = null): CallOutcome => {
-  const start: CallOutcome = { sessionId: null, costUsd: null, structured: null, resultText: "", error: noResult, partial: true };
-  const folded = messages.reduce<CallOutcome>((out, message) => {
-    if (message.type === "system" && message.subtype === "init") return { ...out, sessionId: message.session_id };
-    if (message.type !== "result") return out;
-    return message.subtype === "success"
-      ? { ...out, costUsd: message.total_cost_usd, structured: message.structured_output, resultText: message.result, error: null, partial: false }
-      : { ...out, costUsd: message.total_cost_usd, error: message.subtype, partial: false };
+const noFacts: ClaudeFailure = { streamCode: null, apiStatus: null, terminalReason: null, assistantError: null, retrySeen: null, subtype: null };
+
+/** Whether a message shows that the call made progress: an assistant message without error, a stream event, a tool result. */
+const isProgress = (message: SDKMessage): boolean => {
+  if (message.type === "assistant") return message.error === undefined;
+  if (message.type === "stream_event") return true;
+  if (message.type === "user") {
+    const content: unknown = message.message.content;
+    return Array.isArray(content) && content.some((block: unknown) => typeof block === "object" && block !== null && (block as { type?: unknown }).type === "tool_result");
+  }
+  return false;
+};
+
+type Fold = Readonly<{ out: CallOutcome; facts: ClaudeFailure }>;
+
+/**
+ * The outcome of a call from its messages in order; `streamError` is the text of a failure of the stream, which wins over
+ * any result, and `streamCode` its error code. A success result with is_error is a failure (the turn ended on an API
+ * error). The facts of a failure keep the result's status, reason and subtype, and the assistant error and the api_retry
+ * seen after the last sign of progress (issue #26).
+ */
+export const reduceMessages = (messages: readonly SDKMessage[], streamError: string | null = null, streamCode: string | null = null): CallOutcome => {
+  const start: Fold = { out: { sessionId: null, costUsd: null, structured: null, resultText: "", error: noResult, partial: true, failure: null }, facts: noFacts };
+  const folded = messages.reduce<Fold>(({ out, facts }, message) => {
+    if (message.type === "system" && message.subtype === "init") return { out: { ...out, sessionId: message.session_id }, facts };
+    if (message.type === "system" && message.subtype === "api_retry") return { out, facts: { ...facts, retrySeen: { status: message.error_status, error: message.error } } };
+    if (message.type === "assistant" && message.error !== undefined) return { out, facts: { ...facts, assistantError: message.error } };
+    if (isProgress(message)) return { out, facts: { ...facts, assistantError: null, retrySeen: null } };
+    if (message.type !== "result") return { out, facts };
+    const terminal = { ...facts, terminalReason: message.terminal_reason ?? null, subtype: message.subtype };
+    if (message.subtype !== "success") return { out: { ...out, costUsd: message.total_cost_usd, error: message.subtype, partial: false }, facts: terminal };
+    if (message.is_error) {
+      const error = message.result === "" ? "api error" : message.result;
+      return { out: { ...out, costUsd: message.total_cost_usd, structured: null, resultText: message.result, error, partial: false }, facts: { ...terminal, apiStatus: message.api_error_status ?? null } };
+    }
+    return { out: { ...out, costUsd: message.total_cost_usd, structured: message.structured_output, resultText: message.result, error: null, partial: false }, facts: terminal };
   }, start);
-  return streamError === null ? folded : { ...folded, error: streamError };
+  const out = streamError === null ? folded.out : { ...folded.out, error: streamError };
+  return { ...out, failure: out.error === null ? null : { ...folded.facts, streamCode: streamError === null ? null : streamCode } };
 };
 
 const decodeExecReport = Schema.decodeUnknownResult(S.ExecReport);

@@ -94,7 +94,7 @@ test("each startPhase returns a session bound to its own thread, and calls do no
 });
 
 // Finding 11 of docs/functional-design-review.md: startup failures were defects, not typed errors.
-const typedFailure = async (effect: Effect.Effect<unknown, RunError>): Promise<RunError> => {
+const typedFailure = async <E>(effect: Effect.Effect<unknown, E>): Promise<E> => {
   const exit = await Effect.runPromiseExit(effect);
   assert.ok(Exit.isFailure(exit), "the effect succeeded");
   const error = Cause.findErrorOption(exit.cause);
@@ -174,7 +174,40 @@ test("turn.failed, a stream error event, and a turn without an agent message fai
     const session = await run(fake.reviewer.startPhase);
     const error = await typedFailure(session.review("review"));
     assert.equal(error._tag, "CodexCallFailed");
-    assert.match(describe(error), text);
+    assert.match(describe(error as RunError), text);
     assert.deepEqual(fake.ui.notified.at(-1), { _tag: "AgentCallEnded", agent: "codex", ok: false });
   }
+});
+
+// Issue #26: Codex's error events are notices; a failure is TransportFault when src/transport.ts says so.
+const reconnecting = "Reconnecting... 2/5 (stream disconnected before completion: WebSocket protocol error: Connection reset without closing handshake)";
+const errorEvent = (message: string): ThreadEvent => ({ type: "error", message }) as ThreadEvent;
+
+test("an error notice followed by a completed turn succeeds, and the notice is notified as AgentReconnecting", async () => {
+  const empty = JSON.stringify({ issues: [] });
+  const fake = await reviewer([turn(empty, undefined, [errorEvent(reconnecting)])]);
+  const session = await run(fake.reviewer.startPhase);
+  assert.equal(await run(session.review("review")), empty);
+  assert.deepEqual(
+    fake.ui.notified.filter((e) => e._tag === "AgentReconnecting"),
+    [{ _tag: "AgentReconnecting", agent: "codex", by: "sdk", attempt: null, of: null, delayMs: null, detail: reconnecting }],
+  );
+});
+
+test("a notice followed by turn.failed with a stream-disconnected message is TransportFault", async () => {
+  const fake = await reviewer([[errorEvent(reconnecting), ...turnFailed("stream disconnected before completion")]]);
+  const session = await run(fake.reviewer.startPhase);
+  await assert.rejects(run(session.review("review")), (e: unknown) => (e as { _tag: string; agent: string })._tag === "TransportFault" && (e as { agent: string }).agent === "codex");
+});
+
+test("turn.failed with a usage limit is CodexCallFailed", async () => {
+  const fake = await reviewer([turnFailed("You've hit your usage limit.")]);
+  const session = await run(fake.reviewer.startPhase);
+  await assert.rejects(run(session.review("review")), (e: unknown) => tag(e) === "CodexCallFailed");
+});
+
+test("a rejected runStreamed with ECONNRESET is TransportFault", async () => {
+  const fake = await reviewer([new Error("read ECONNRESET")]);
+  const session = await run(fake.reviewer.startPhase);
+  await assert.rejects(run(session.review("review")), (e: unknown) => (e as { _tag: string })._tag === "TransportFault");
 });

@@ -26,17 +26,30 @@ export const toolEventOf = (seen: ReadonlySet<string>, event: ThreadEvent): Tool
   }
 };
 
-/** What a streamed turn produced: the text of its last agent message and its usage, or the reason it failed. */
-export type TurnOutcome = Readonly<{ kind: "ok"; finalResponse: string; usage: Readonly<{ input_tokens: number; output_tokens: number }> | null }> | Readonly<{ kind: "failed"; message: string }>;
+/**
+ * What a streamed turn produced: the text of its last agent message and its usage, or the reason it failed; and in both
+ * cases the notices of its error events, in order (issue #26).
+ */
+export type TurnOutcome =
+  | Readonly<{ kind: "ok"; finalResponse: string; usage: Readonly<{ input_tokens: number; output_tokens: number }> | null; notices: readonly string[] }>
+  | Readonly<{ kind: "failed"; message: string; notices: readonly string[] }>;
 
-/** The reduction of a turn's events: turn.failed or an error event fails it, and a turn without an agent message has no reply. */
+/**
+ * The reduction of a turn's events. An error event is a notice (the CLI reporting its reconnection, which the SDK's own
+ * run() ignores), not a failure (issue #26). The turn fails on turn.failed, when the stream ends without turn.completed
+ * (with the last notice as its message), and when it has no agent message.
+ */
 export const reduceTurn = (events: readonly ThreadEvent[]): TurnOutcome => {
-  const failure = events.find((e) => e.type === "turn.failed" || e.type === "error");
-  if (failure !== undefined) return { kind: "failed", message: failure.type === "turn.failed" ? failure.error.message : failure.type === "error" ? failure.message : "" };
+  const notices = events.flatMap((e) => (e.type === "error" ? [e.message] : []));
+  const failed = events.find((e) => e.type === "turn.failed");
+  if (failed !== undefined && failed.type === "turn.failed") return { kind: "failed", message: failed.error.message, notices };
+  const completed = events.find((e) => e.type === "turn.completed");
+  if (completed === undefined || completed.type !== "turn.completed") {
+    return { kind: "failed", message: notices[notices.length - 1] ?? "no reply: the stream ended without turn.completed", notices };
+  }
   const messages = events.flatMap((e) => (e.type === "item.completed" && e.item.type === "agent_message" ? [e.item.text] : []));
   const last = messages[messages.length - 1];
-  if (last === undefined) return { kind: "failed", message: "no reply: the turn ended without an agent message" };
-  const completed = events.find((e) => e.type === "turn.completed");
-  const usage = completed?.type === "turn.completed" ? { input_tokens: completed.usage.input_tokens ?? 0, output_tokens: completed.usage.output_tokens ?? 0 } : null;
-  return { kind: "ok", finalResponse: last, usage };
+  if (last === undefined) return { kind: "failed", message: "no reply: the turn ended without an agent message", notices };
+  const usage = { input_tokens: completed.usage.input_tokens ?? 0, output_tokens: completed.usage.output_tokens ?? 0 };
+  return { kind: "ok", finalResponse: last, usage, notices };
 };

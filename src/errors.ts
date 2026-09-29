@@ -26,6 +26,11 @@ export class QuestionListInvalid extends Data.TaggedError("QuestionListInvalid")
 export class RoundLimitStop extends Data.TaggedError("RoundLimitStop")<{ readonly heading: string }> {}
 export class ClaudeCallFailed extends Data.TaggedError("ClaudeCallFailed")<{ readonly message: string }> {}
 export class CodexCallFailed extends Data.TaggedError("CodexCallFailed")<{ readonly message: string }> {}
+/**
+ * A failure of an agent call that src/transport.ts identifies as a dropped connection, a reset, a timeout or a 5xx
+ * (issue #26). Not a RunError: the callers retry it (src/retry.ts), and only AgentUnreachable leaves a run.
+ */
+export class TransportFault extends Data.TaggedError("TransportFault")<{ readonly agent: "claude" | "codex"; readonly message: string; readonly status: number | null }> {}
 export class AgentReplyInvalid extends Data.TaggedError("AgentReplyInvalid")<{ readonly agent: string; readonly issue: string; readonly files: string[] }> {}
 export class ConfigInvalid extends Data.TaggedError("ConfigInvalid")<{ readonly file: string; readonly path: string; readonly message: string }> {}
 export class StateFileInvalid extends Data.TaggedError("StateFileInvalid")<{ readonly file: string; readonly message: string }> {}

@@ -7,7 +7,8 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { pathOf } from "./artifacts.ts";
 import { type CallOutcome, decodeQuestions, decodeToolTarget, interpretExecution, type Question, reduceMessages, type Stop } from "./claudeEvents.ts";
-import { ClaudeCallFailed, type RunError } from "./errors.ts";
+import { ClaudeCallFailed, type RunError, TransportFault } from "./errors.ts";
+import { type ClaudeFailure, classifyClaude } from "./transport.ts";
 import { askOffering, numberedOptions, permissionOptions } from "./offer.ts";
 import { chooseOption } from "./input.ts";
 import { relayedQuestionSays } from "./render.ts";
@@ -23,6 +24,15 @@ const EDIT_TOOLS = ["Write", "Edit", "MultiEdit", "NotebookEdit"];
  * data, or the error of a decision loop that the user started from a relayed question or a permission request.
  */
 type CallbackError = RunError;
+/** The code of a thrown value (`ECONNRESET`, …), or null. */
+const errorCode = (e: unknown): string | null => {
+  const code = typeof e === "object" && e !== null ? (e as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : null;
+};
+/** A failed call: TransportFault when src/transport.ts identifies a transport fault, ClaudeCallFailed otherwise (issue #26). */
+const callFailure = (message: string, failure: ClaudeFailure | null): ClaudeCallFailed | TransportFault =>
+  classifyClaude(failure) ? new TransportFault({ agent: "claude", message, status: failure?.apiStatus ?? null }) : new ClaudeCallFailed({ message });
+
 /** Runs an Effect inside a callback of the SDK; on failure the call is aborted and `fallback` is answered. */
 type InCallback = <A>(effect: Effect.Effect<A, CallbackError>, fallback: A) => Promise<A>;
 
@@ -275,13 +285,15 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       const iterator = started.success;
       const seen: SDKMessage[] = [];
       let streamError: string | null = null;
-      /** The next message, or null at the end; a failure of the stream ends the call with its text. */
+      let streamCode: string | null = null;
+      /** The next message, or null at the end; a failure of the stream ends the call with its text and its code (issue #26). */
       const next = (): Effect.Effect<SDKMessage | null> =>
         Effect.tryPromise({ try: () => iterator.next(), catch: (e: unknown) => e }).pipe(
           Effect.map((step) => (step.done ? null : step.value)),
           Effect.catch((e) =>
             Effect.sync(() => {
               streamError = failed(e);
+              streamCode = errorCode(e);
               return null;
             }),
           ),
@@ -305,6 +317,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
                 if (show === "tools") yield* ui.say(`  [claude: ${block.name} ${target}]`);
               }
             }
+          } else if (message.type === "system" && message.subtype === "api_retry") {
+            // Issue #26: the SDK's own retry of a failed request, invisible until now.
+            yield* ui.notify({ _tag: "AgentReconnecting", agent: "claude", by: "sdk", attempt: message.attempt, of: message.max_retries, delayMs: message.retry_delay_ms, detail: prompts.apiRetryDetail(message.error_status, message.error) });
           } else if (message.type === "result") {
             yield* store.recordUsage({ agent: "claude", session: yield* Ref.get(session), turns: message.num_turns, totalCostUsd: message.total_cost_usd });
           }
@@ -319,7 +334,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       });
       yield* consume.pipe(Effect.onExit((exit) => (Exit.isSuccess(exit) ? Effect.succeed(undefined) : close)));
       if (yield* Deferred.isDone(callbackFailure)) return yield* Deferred.await(callbackFailure);
-      return reduceMessages(seen, streamError);
+      return reduceMessages(seen, streamError, streamCode);
     }).pipe(
       // Every exit ends the activity: a call error, a typed failure and an interruption are ok: false.
       Effect.onExit((exit) => ui.notify({ _tag: "AgentCallEnded", agent: "claude", ok: Exit.isSuccess(exit) && exit.value.error === null })),
@@ -342,7 +357,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           },
           capability === "readOnly" ? () => readOnlyPermission : planningPermission(decider),
         );
-        if (outcome.error !== null) return yield* Effect.fail(new ClaudeCallFailed({ message: outcome.error }));
+        if (outcome.error !== null) return yield* Effect.fail(callFailure(outcome.error, outcome.failure));
         return { output: outcome.structured, resultText: outcome.resultText, costUsd: outcome.costUsd };
       }),
     executing: (prompt, reporter) =>
