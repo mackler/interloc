@@ -6,7 +6,8 @@ import { Effect, Ref, Result, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
-import { correctivePrompt, transportReviewWhat, transportWhat, unchangedPrompt, unchangedQuestion, decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
+import { type Question, validateQuestions } from "./question.ts";
+import { questionRepairPrompt, correctivePrompt, transportReviewWhat, transportWhat, unchangedPrompt, unchangedQuestion, decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
 import { correctiveValidation } from "./round.ts";
 import { askOffering, limitOptions, numberedOptions, unchangedOptions } from "./offer.ts";
 import { answerOf, parseUnchangedAnswer } from "./input.ts";
@@ -226,6 +227,17 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
  */
 export const repairTurn = <Out extends Schema.Decoder<unknown>>(repair: Repair, schema: Out, capability: PlanningCapability, validate: Validation<Out["Type"]> | null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider | Ui | RunConfig> =>
   planningCall(repair.prompt, schema, "planning", capability, validate);
+
+/**
+ * The validation of the questions a reply puts to the user (S2): `questionsOf` names each with where it is; a failure
+ * gets the validation repair turn, whose prompt cites the rules broken.
+ */
+export const questionsValidation =
+  <T>(questionsOf: (output: T) => readonly Readonly<{ where: string; question: Question }>[]): Validation<T> =>
+  (output) => {
+    const validated = validateQuestions(questionsOf(output));
+    return Result.isFailure(validated) ? Result.fail({ error: validated.failure, repair: questionRepairPrompt(validated.failure.questions) }) : Result.succeed({ value: output, notes: [] });
+  };
 
 /** Two validations in turn: the second sees the first's value, and the notes of both are kept. */
 export const bothValidations =

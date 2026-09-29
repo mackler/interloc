@@ -107,6 +107,60 @@ export function questionReviewCriteria(): string {
 ${QUESTION_RULES.map((r) => `- ${r.criterion}`).join("\n")}`;
 }
 
+/**
+ * The mechanically checkable part of the rules (S2): each kind of problem that `validateQuestion` in src/question.ts finds,
+ * with the id of the rule of QUESTION_RULES it breaks. The repair prompt cites that rule's text.
+ */
+export const QUESTION_PROBLEM_KINDS = ["blankContext", "notLast", "blankTerm", "blankExplanation", "termAbsent", "duplicateTerm", "bareNumber"] as const;
+export type QuestionProblemKind = (typeof QUESTION_PROBLEM_KINDS)[number];
+export const QUESTION_PROBLEM_RULE: Readonly<Record<QuestionProblemKind, string>> = {
+  blankContext: "context",
+  notLast: "questionLast",
+  blankTerm: "terms",
+  blankExplanation: "terms",
+  termAbsent: "terms",
+  duplicateTerm: "terms",
+  bareNumber: "kindBeforeNumber",
+};
+/** One problem of a question: its kind and what it concerns (a term, the bare reference), or "". */
+export type QuestionProblem = Readonly<{ kind: QuestionProblemKind; subject: string }>;
+/** The problems of the questions of one reply, each question named by where it is ("questions_for_user 1", "Q3"). */
+export type QuestionProblems = readonly Readonly<{ where: string; problems: readonly QuestionProblem[] }>[];
+/** One problem in one sentence. */
+export function questionProblemText(problem: QuestionProblem): string {
+  switch (problem.kind) {
+    case "blankContext":
+      return "the context paragraph is empty";
+    case "notLast":
+      return "the question does not end with its interrogative sentence and a question mark";
+    case "blankTerm":
+      return "a listed term is empty";
+    case "blankExplanation":
+      return `the term ${JSON.stringify(problem.subject)} has an empty explanation`;
+    case "termAbsent":
+      return `the term ${JSON.stringify(problem.subject)} does not occur, with exactly those words, in the context, the question or the options`;
+    case "duplicateTerm":
+      return `the term ${JSON.stringify(problem.subject)} is listed more than once`;
+    case "bareNumber":
+      return `${JSON.stringify(problem.subject)} is a number without the kind of thing it numbers before it`;
+  }
+}
+const questionProblemLines = (questions: QuestionProblems): readonly string[] => questions.map((q) => `${q.where}: ${q.problems.map(questionProblemText).join("; ")}.`);
+/** The halt of QuestionInvalid. */
+export function questionInvalidText(questions: QuestionProblems): string {
+  return `a question for the user is invalid: ${questionProblemLines(questions).join(" ")}`;
+}
+/** The validation repair turn of a reply whose questions break a rule (S2): what was wrong, and the rules broken, verbatim. */
+export function questionRepairPrompt(questions: QuestionProblems): string {
+  const ids = [...new Set(questions.flatMap((q) => q.problems.map((p) => QUESTION_PROBLEM_RULE[p.kind])))];
+  const rules = QUESTION_RULES.filter((r) => ids.includes(r.id)).map((r) => `- ${r.rule}`);
+  return `Your structured output matched the schema, but the program cannot accept its questions for the user:
+${questionProblemLines(questions).join("\n")}
+The rules they break:
+${rules.join("\n")}
+Return the complete output again, corrected. Do not modify any file.`;
+}
+
 /** How a question for the user is filled (decision Q1 of the decision-support task), with the rules of every question (S1). */
 export const QUESTION_OPTIONS_RULE = `Each entry of questions_for_user has a question and options. When the question is a choice, give two or more mutually exclusive options, each with a short label and a description; otherwise return an empty options array.
 ${questionWritingRules()}`;

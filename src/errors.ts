@@ -2,7 +2,7 @@
 // raw. `describe` produces the text that the program prints. Replaces the single Halt class.
 import { Data, Result, Schema } from "effect";
 import { type Change, renderChange } from "./snapshot.ts";
-import { agentUnreachableText, analysisInvalidText, correctionInvalidText, cycleInvalidText, cycleLimitStopText, decisionFormatUnreadableText, planInvalidText } from "./prompts.ts";
+import { agentUnreachableText, analysisInvalidText, correctionInvalidText, cycleInvalidText, cycleLimitStopText, decisionFormatUnreadableText, planInvalidText, QUESTION_PROBLEM_KINDS, type QuestionProblems, questionInvalidText } from "./prompts.ts";
 
 export class UserStopped extends Data.TaggedError("UserStopped")<{ readonly where: string }> {}
 export class ProjectChanged extends Data.TaggedError("ProjectChanged")<{ readonly during: "planning" | "review"; readonly fileLabel: string | null; readonly changes: readonly Change[] }> {}
@@ -65,6 +65,11 @@ export class PlanInvalid extends Data.TaggedError("PlanInvalid")<{
   /** Done steps (by id) whose label or text the revision changed. */
   readonly changedDone: readonly string[];
 }> {}
+/**
+ * A question put to the user that breaks a mechanically checkable rule of QUESTION_RULES (S2): each question named by
+ * where it is, with its problems. The reply gets the validation repair turn of behaviour 10; a second failure halts.
+ */
+export class QuestionInvalid extends Data.TaggedError("QuestionInvalid")<{ readonly questions: QuestionProblems }> {}
 /** A report of report_step that names no step of the plan (Q3): an error for Claude Code, not a halt. */
 export class UnknownStep extends Data.TaggedError("UnknownStep")<{ readonly id: string }> {}
 /** docs/decision-making.md of the program could not be read before the run (decision support, D7). */
@@ -91,6 +96,7 @@ export type RunError =
   | AnalysisInvalid
   | PlanInvalid
   | CorrectionInvalid
+  | QuestionInvalid
   | AgentUnreachable
   | Interrupted;
 
@@ -165,6 +171,8 @@ export const describe = (error: RunErrorFields): string => {
       return correctionInvalidText(error.changedIds, error.other);
     case "PlanInvalid":
       return planInvalidText(error);
+    case "QuestionInvalid":
+      return questionInvalidText(error.questions);
     case "Interrupted":
       return `interrupted during ${error.where}`;
   }
@@ -216,6 +224,10 @@ const RunErrorData = Schema.Union([
   }),
   Schema.Struct({ _tag: Schema.Literal("CorrectionInvalid"), changedIds: Strings, other: Strings }),
   Schema.Struct({ _tag: Schema.Literal("PlanInvalid"), duplicateIds: Strings, emptyIds: Schema.Number, removedDone: Strings, changedDone: Strings }),
+  Schema.Struct({
+    _tag: Schema.Literal("QuestionInvalid"),
+    questions: Schema.Array(Schema.Struct({ where: Schema.String, problems: Schema.Array(Schema.Struct({ kind: Schema.Literals(QUESTION_PROBLEM_KINDS), subject: Schema.String })) })),
+  }),
   Schema.Struct({ _tag: Schema.Literal("AgentUnreachable"), agent: Schema.Literals(["claude", "codex"]), attempts: Schema.Number, lastFault: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("Interrupted"), where: Schema.String }),
 ]);
