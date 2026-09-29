@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { programWritten } from "../src/questionContext.ts";
+import type { ContextRequest } from "../src/prompts.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
@@ -550,18 +551,19 @@ test("each call carries its own capability: a read-only call and then a records 
 });
 
 // Decision support, plan step 3.5: a relayed question with options and a permission request carry the offer.
-const recordingDecider = (): { decider: DeciderShape; requests: unknown[] } => {
+const recordingDecider = (): { decider: DeciderShape; requests: unknown[]; explained: ContextRequest[] } => {
   const requests: unknown[] = [];
+  const explained: ContextRequest[] = [];
   const decider: DeciderShape = {
     at: () => decider,
-    explain: (request) => Effect.succeed(programWritten(request)),
+    explain: (request) => Effect.sync(() => (explained.push(request), programWritten(request))),
     decide: (request) =>
       Effect.sync(() => {
         requests.push(request);
         return { decision: requests.length, analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } }, result: "converged" as const };
       }),
   };
-  return { decider, requests };
+  return { decider, requests, explained };
 };
 
 test("a relayed question with options offers Help me decide, presents the question again, and relays the answer", async () => {
@@ -591,12 +593,15 @@ test("an execution permission request offers Help me decide over Allow and Deny"
     yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
   })();
   const fake = await planner([script], ["/decide", "y"]);
-  const { decider, requests } = recordingDecider();
+  const { decider, requests, explained } = recordingDecider();
   await run(fake.planner.executing("implement the plan", noReporter), decider);
   assert.deepEqual(results, ["allow"]);
   const request = requests[0] as { question: string; options: { label: string }[] };
-  assert.match(request.question, /Bash/);
-  assert.match(request.question, /rm -rf build/);
+  assert.equal(request.question, "Claude Code wants to run the command rm -rf build. Should it be allowed?");
+  // S12: the context call is given the tool and its input in prose, not the input's JSON.
+  assert.equal(explained.length, 1);
+  assert.match(explained[0].facts, /its tool Bash with this input:\ncommand: rm -rf build\n/);
+  assert.ok(!explained[0].facts.includes("{"), explained[0].facts);
   assert.deepEqual(request.options.map((o) => o.label), [prompts.PERMISSION_ALLOW, prompts.PERMISSION_DENY]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")).option, prompts.PERMISSION_ALLOW);
 });

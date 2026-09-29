@@ -233,8 +233,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       }
       const allowed = await inCallback(
         Effect.gen(function* () {
-          const origin: QuestionOrigin = { kind: "permission", tool: toolName, input: JSON.stringify(input) };
-          const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.permissionQuestion(toolName, JSON.stringify(input)), options: permissionOptions, decision: null };
+          // S12: the input in prose, and the context written by a context call made while the execution call waits.
+          const origin: QuestionOrigin = { kind: "permission", tool: toolName, input: prompts.toolInputProse(input) };
+          const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.permissionQuestion(toolName, input), options: permissionOptions, explain: prompts.permissionFacts(toolName, input), decision: null };
           const reply = yield* offering(decider, prompts.permissionPrompt, draft);
           return reply.toLowerCase() === "y";
         }),

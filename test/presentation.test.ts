@@ -94,3 +94,53 @@ test("S11: a pause reaches the user as prose: no line said and no question shown
   const shown = [...probe.ui.said, ...presentedQuestions(probe.ui).flatMap((q) => [q.context.text, q.details, q.question, ...q.options.map((o) => o.description)])];
   for (const text of shown) for (const forbidden of ["{\n", '"duplicate_of"', "duplicate_of:", "superseded", "\\n"]) assert.ok(!text.includes(forbidden), `${forbidden} in: ${text}`);
 });
+
+// S12 (decision Q1): every question the program composes is explained by a context call, which the user reads as an
+// agent's paragraph; the program's fixed question and options stand as the program wrote them.
+test("S12: a pause, the cycle limit and the unchanged pause are presented with the context call's paragraph and terms", async () => {
+  const explained = { context: "Codex, the reviewing agent, checks the plan that Claude Code, the planning agent, writes; this happens now, before the plan is carried out, so that the plan is right.", terms: [{ term: "Codex", explanation: "An AI agent that reviews the work." }] };
+  const pause = scenario();
+  pause.probe.planner.contexts = [{ output: explained }];
+  await runTask(pause.layer);
+  const paused = presentedQuestions(pause.probe.ui).find((q) => q.origin.kind === "pause");
+  assert.deepEqual([paused?.context, paused?.terms], [{ text: explained.context, by: "agent" }, explained.terms]);
+  assert.equal(paused?.question, prompts.pauseQuestion({ pause: "reraised", id: "P1-R1-1" }));
+  // The context call was given the pause's facts, which the user also reads (S11).
+  assert.ok(pause.probe.planner.contextPrompts[0].includes(paused?.details ?? "?"));
+
+  const limit = testLayer(tempRepo(), {
+    answers: ["p"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["P1-R1-1", "accepted"]]), plan: "v2" }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }],
+    execs: [finished],
+    config: { maxRounds: 1 },
+  });
+  await runTask(limit.layer);
+  const [atLimit] = presentedQuestions(limit.probe.ui);
+  assert.equal(atLimit.origin.kind, "limit");
+  assert.equal(atLimit.context.by, "agent");
+  assert.match(limit.probe.planner.contextPrompts[0], new RegExp(prompts.limitFacts("Planning phase 1", 1, [1]).replace(/[.()]/g, "\\$&")));
+
+  const unchanged = testLayer(tempRepo(), {
+    answers: [prompts.UNCHANGED_ANSWERS.proceed],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: respond([["P1-R1-1", "accepted"]]) }, { output: respond([["P1-R1-1", "accepted"]]) }],
+    reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  await runTask(unchanged.layer);
+  const [kept] = presentedQuestions(unchanged.probe.ui);
+  assert.equal(kept.origin.kind, "unchanged");
+  assert.equal(kept.context.by, "agent");
+  assert.match(unchanged.probe.planner.contextPrompts[0], /did not change, also after Claude Code was told so/);
+});
+
+test("S12: the questions that do not need one make no context call: the clarification, the plan writer's, the summary's", async () => {
+  const { layer, probe } = scenario();
+  await runTask(layer);
+  // The one context call of the scenario is the pause's.
+  assert.equal(probe.planner.contextPrompts.length, 1);
+  const byKind = new Map(presentedQuestions(probe.ui).map((q) => [q.origin.kind, q.context]));
+  assert.deepEqual(byKind.get("clarification"), { text: "The context of Q2.", by: "agent" });
+  assert.deepEqual(byKind.get("planner"), { text: plannerQuestion.context, by: "agent" });
+  assert.equal(byKind.get("confirmSummary")?.by, "program");
+});

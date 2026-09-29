@@ -1050,9 +1050,32 @@ export const PERMISSION_ALLOW = "Allow";
 export const PERMISSION_DENY = "Deny";
 export const PERMISSION_ALLOW_DESCRIPTION = "Claude Code performs the action and continues.";
 export const PERMISSION_DENY_DESCRIPTION = "Claude Code is told that the user denied the action and continues without it.";
-/** The question of a permission request for a decision. */
-export function permissionQuestion(tool: string, input: string): string {
-  return `Claude Code requests permission to use ${tool} with the input ${input}. Should it be allowed?`;
+/** A tool's input in prose (S12): each field on its own line, values as text, never the input's JSON. */
+export function toolInputProse(input: unknown): string {
+  const value = (v: unknown): string =>
+    typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : Array.isArray(v) ? v.map(value).join(", ") : v === null || v === undefined ? "(none)" : Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k} ${value(x)}`).join("; ");
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return value(input);
+  return Object.entries(input as Record<string, unknown>).map(([k, v]) => `${k}: ${value(v)}`).join("\n");
+}
+/** The question of a permission request (S12): what the tool would do, named in words where the input says it. */
+export function permissionQuestion(tool: string, input: unknown): string {
+  const fields = input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const command = typeof fields.command === "string" ? fields.command : null;
+  const target = typeof fields.file_path === "string" ? fields.file_path : typeof fields.url === "string" ? fields.url : null;
+  const what = command !== null ? `run the command ${command}` : target !== null ? `use its tool ${tool} on ${target}` : `use its tool ${tool}`;
+  return `Claude Code wants to ${what}. Should it be allowed?`;
+}
+/** The facts of a permission request a context call is given (S12). */
+export function permissionFacts(tool: string, input: unknown): string {
+  return `Claude Code, while it carries out the plan, asks to use its tool ${tool} with this input:\n${toolInputProse(input)}\nIf the user allows it, the tool runs in the project; if not, Claude Code is told so and continues without it.`;
+}
+/** The facts of the cycle limit a context call is given (S12). */
+export function limitFacts(heading: string, limit: number, counts: readonly number[]): string {
+  return `${heading} has had ${limit} rounds of review without convergence; the configuration allows ${limit} before the user is asked. The issues Codex counted in each round: ${counts.join(", ") || "none"}.`;
+}
+/** The facts of the unchanged pause a context call is given (S12). */
+export function unchangedFacts(heading: string, fileLabel: string, accepted: readonly string[]): string {
+  return `In ${heading}, Claude Code accepted ${accepted.join(", ")} of Codex's review in full or in part, but ${fileLabel}, the file under review, did not change, also after Claude Code was told so.`;
 }
 /** The two positions at a disputed pause (decision Q1): what Codex asks for, and what Claude Code holds. */
 export const REVIEWER_POSITION = "Follow Codex (the reviewer)";
