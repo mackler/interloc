@@ -341,6 +341,42 @@ routes), the SSE module (Q9), a confirmation for Stop (behaviour 1), an icon set
 dependency), and persistence of the page's runs beyond the records (the server keeps the current and the
 last run in memory).
 
+## A failed call and an unchanged file (issues #26, #30 and #31, 28 and 29 Sep 2026)
+
+Three issues were applied as one subject: a run must not die from a failure that a retry would fix, and the reviewer
+must be able to see when a response did nothing.
+
+- #31: each issue-log entry of a response records `file_change`, what the program measured of the reviewed file
+  during that response (changed, lines added and removed), from the same observation the guard compares. Codex reads
+  it as fact; the terminal and the page do not show it.
+- #30: an accepted issue with the reviewed file unchanged no longer halts. The question list, the plan and a decision
+  get one corrective turn in the same session, whose dispositions are re-evaluated; if the file is still unchanged,
+  the user chooses Retry, Proceed or Stop. The requirements go straight to that pause, because their unchanged file
+  is the summary the user confirmed; the work review cannot meet the condition.
+- #26: transport faults are classified and retried with backoff, the user decides when the retries are exhausted,
+  and the retries are shown.
+
+**Two mechanisms, not four.** The schema repair (behavior 10), the validation repair (#37), the corrective turn (#30)
+and the transport retry (#26) all spend a second attempt, and the task asked for them to be unified as far as their
+meaning allows. The first three answer a *defective reply* in the same session: the reply exists, the program found a
+defect in it, and one more turn says what was wrong. They became one executor, `repairTurn` in `src/review.ts`, with a
+budget per kind. The transport retry repeats a *call that produced no reply*: there is no defect to describe, it waits
+between attempts, its budget is configured, and the guard must also be checked after a failed attempt. It became one
+combinator, `withTransportRetry` in `src/retry.ts`. `TransportFault` is kept out of `RunError` and out of
+`Planner.executing`, so the type check rejects an agent call that is not wrapped; the execution call is retried inside
+the Claude Code adapter, which alone holds its session, its stop and its `report_step` server.
+
+**The Codex halt of #26.** The halt's text was the message of a Codex `error` event, naming the CLI's reconnection at
+2 of 5. The adapter consumes a streamed turn to its end, but `reduceTurn` then failed the turn retrospectively on the
+first `error` event, whereas the SDK's own `thread.run()` treats only `turn.failed` as a failure. So the turn was
+probably not cut short but misclassified after it had recovered; this is read from the SDK's source and has not been
+seen in a run. An `error` event is now a notice.
+
+**The records guard during a wait.** A read-only call's records guard compared a fixed snapshot. With retries, the
+program itself writes guarded records while it waits (the retry line, the pause's answer, a decision's records), and a
+journal that kept only each write's result would adopt an external edit made before an append. The Store now journals
+every write to a guarded record with its preimage, and the guard replays the journal from its baseline.
+
 ## Rejected or deferred
 
 - `--permission-mode plan` and `plansDirectory` for the planning phases: the location of the
