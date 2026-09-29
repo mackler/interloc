@@ -4,9 +4,7 @@ import * as path from "node:path";
 import { test } from "node:test";
 import type * as S from "../src/schema.ts";
 import * as prompts from "../src/prompts.ts";
-import { numberedOptionLabels } from "../src/userPrompts.ts";
 import { finished, runFails, runTask, tempRepo, testLayer, presentedQuestions, presentedSubjects } from "./helpers.ts";
-import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 
 // Step 4.6 (finding 8; Q4): the interview matches on turn variants, and the question list is normalised.
 type QuestionEntry = typeof S.QuestionEntry.Type;
@@ -113,26 +111,34 @@ test("the interview's opening is an InterviewOpened event, not a terminal-only s
   assert.ok(!probe.ui.said.some((line) => line.includes('"""')), "the terminal's multiline convention was said to every interface");
 });
 
-// Decision support, plan step 3.5: an interview turn's numbered answers carry the offer; the decision is in the
-// requirements phase, and the chosen answer goes on to Claude Code as typed.
-test("an interview turn with numbered answers offers Help me decide; after the analysis the number is the answer", async () => {
-  const labels = numberedOptionLabels(NUMBERED_MESSAGE).map((c) => c.label);
-  const el = { text: "t", counterarguments: [] };
-  const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
-  const analysis = { decision: "d", columns: labels.map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
-  const { layer, probe } = testLayer(tempRepo(), {
-    answers: ["/decide", "2", ""],
-    steps: [
-      { output: { questions: [q("Q1")] } },
-      { output: turn(NUMBERED_MESSAGE, false, "") },
-      { output: analysis },
-      { output: turn("Done.", true, "# Requirements\n\nQ1: SQLite") },
-      { output: noQuestions, plan: "v1" },
-    ],
+// Decision support, plan step 3.5, and S18: an agreed question is presented from questions.json, its proposed answers its
+// options, which carry the offer; the decision is in the requirements phase, and the chosen answer goes on to Claude Code.
+const db: QuestionEntry = {
+  id: "Q1",
+  context: "The service keeps its data in a database, which Interloq, the orchestrator, starts with the service.",
+  question: "Which database should the service use?",
+  reason: "the schema depends on it",
+  proposed_answers: [{ label: "PostgreSQL", description: "already in the container" }, { label: "SQLite", description: "no server needed" }, { label: "Both, chosen by configuration", description: "either, by a setting" }],
+  default_answer: "PostgreSQL",
+};
+const labels = db.proposed_answers.map((a) => a.label);
+/** A turn that asks the agreed question by its id alone (S16, S18). */
+const asksAgreed = (id: string, text = "") => ({ ...turn("Next question.", false, ""), current_question: { id, context: "", text, terms: [], options: [] }, asked_ids: [id] });
+const el = { text: "t", counterarguments: [] };
+const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
+const analysis = { decision: "d", columns: labels.map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
+const decided = (answers: string[], current = asksAgreed("Q1")) =>
+  testLayer(tempRepo(), {
+    answers,
+    steps: [{ output: { questions: [db] } }, { output: current }, { output: analysis }, { output: turn("Done.", true, "# Requirements\n\nQ1: SQLite") }, { output: noQuestions, plan: "v1" }],
+    // The question review, the analysis's review, the requirements review, the plan review, the work review.
     reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { questionPhase: true },
   });
+
+test("an agreed question with proposed answers offers Help me decide; after the analysis the number is the answer", async () => {
+  const { layer, probe } = decided(["/decide", "2", ""]);
   await runTask(layer);
   assert.ok(probe.ui.asked.filter((p) => p.endsWith("You > ")).every((p) => p.startsWith(prompts.OFFER_LINE)));
   const question = JSON.parse(read(probe.dir, "decision-1/question.json"));
@@ -143,96 +149,43 @@ test("an interview turn with numbered answers offers Help me decide; after the a
 });
 
 // W1-R1-1: a blank reply after the analysis is not the choice; the answer that follows is.
-test("an interview turn answered /decide, blank, 2 records option 2", async () => {
-  const labels = numberedOptionLabels(NUMBERED_MESSAGE).map((c) => c.label);
-  const el = { text: "t", counterarguments: [] };
-  const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
-  const analysis = { decision: "d", columns: labels.map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
-  const { layer, probe } = testLayer(tempRepo(), {
-    answers: ["/decide", "", "2", ""],
-    steps: [
-      { output: { questions: [q("Q1")] } },
-      { output: turn(NUMBERED_MESSAGE, false, "") },
-      { output: analysis },
-      { output: turn("Done.", true, "# Requirements\n\nQ1: SQLite") },
-      { output: noQuestions, plan: "v1" },
-    ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
-    execs: [finished],
-    config: { questionPhase: true },
-  });
+test("an agreed question answered /decide, blank, 2 records option 2", async () => {
+  const { layer, probe } = decided(["/decide", "", "2", ""]);
   await runTask(layer);
   assert.deepEqual(JSON.parse(read(probe.dir, "decision-1/chosen.json")), { version: 2, decision: 1, answer: "2", option: labels[1] });
 });
 
-// W2-R1-2: an interview option chosen by its label is recorded as that option; the columns are the bare labels.
-test("an interview turn answered /decide, then a label, records that option; the question's options are the bare labels", async () => {
-  const labels = ["PostgreSQL", "SQLite", "Both, chosen by configuration"];
-  const el = { text: "t", counterarguments: [] };
-  const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
-  const analysis = { decision: "d", columns: labels.map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
-  const { layer, probe } = testLayer(tempRepo(), {
-    answers: ["/decide", "SQLite", ""],
-    steps: [
-      { output: { questions: [q("Q1")] } },
-      { output: turn(NUMBERED_MESSAGE, false, "") },
-      { output: analysis },
-      { output: turn("Done.", true, "# Requirements\n\nQ1: SQLite") },
-      { output: noQuestions, plan: "v1" },
-    ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
-    execs: [finished],
-    config: { questionPhase: true },
-  });
+// W2-R1-2: an option chosen by its label is recorded as that option; the columns are the bare labels.
+test("an agreed question answered /decide, then a label, records that option; the question's options are the bare labels", async () => {
+  const { layer, probe } = decided(["/decide", "SQLite", ""]);
   await runTask(layer);
   assert.deepEqual(JSON.parse(read(probe.dir, "decision-1/question.json")).options.map((o: { label: string }) => o.label), labels);
   assert.deepEqual(JSON.parse(read(probe.dir, "decision-1/chosen.json")), { version: 2, decision: 1, answer: "SQLite", option: "SQLite" });
 });
 
-// Issue #35 (Q5, Q6): the decision's question is the current question alone, its number written out; the message with
-// the record of the previous answer, the options and the default is not.
-test("Help me decide on an interview turn names the current question, Question <n>: text, not the whole message", async () => {
-  const labels = numberedOptionLabels(NUMBERED_MESSAGE).map((c) => c.label);
-  const el = { text: "t", counterarguments: [] };
-  const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
-  const analysis = { decision: "d", columns: labels.map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
-  const message = `Q3 recorded: changed flag.\n\nQ4. Should you also see that a response left the file unchanged?\n${NUMBERED_MESSAGE}\nDefault: 1.`;
-  const { layer, probe } = testLayer(tempRepo(), {
-    answers: ["/decide", "2", ""],
-    steps: [
-      { output: { questions: [q("Q4")] } },
-      { output: { ...turn(message, false, ""), current_question: { id: "Q4", context: "", text: "Should you also see that a response left the file unchanged?", terms: [], options: [] } } },
-      { output: analysis },
-      { output: turn("Done.", true, "# Requirements\n\nQ4: 2") },
-      { output: noQuestions, plan: "v1" },
-    ],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
-    execs: [finished],
-    config: { questionPhase: true },
-  });
+// Issue #35 (Q5, Q6) and S18: the decision's question is the agreed question as it was reviewed; what the turn writes
+// beside its id is ignored, and the message with the record of the previous answer is not the question.
+test("Help me decide on an agreed question names the question as reviewed, not the turn's text or its message", async () => {
+  const { layer, probe } = decided(["/decide", "2", ""], { ...asksAgreed("Q1", "Some other wording?"), message_to_user: "Q3 recorded: changed flag." });
   await runTask(layer);
-  // S5: the number is the run's (in the question's heading), not part of the decision's question.
-  const expected = "Should you also see that a response left the file unchanged?";
-  assert.equal(JSON.parse(read(probe.dir, "decision-1/question.json")).question, expected);
+  assert.equal(JSON.parse(read(probe.dir, "decision-1/question.json")).question, db.question);
   const analyzed = probe.ui.notified.find((e) => e._tag === "DecisionAnalyzed");
-  assert.equal(analyzed?._tag === "DecisionAnalyzed" ? analyzed.question : null, expected);
-  assert.match(probe.planner.prompts[2], new RegExp(`The decision: ${expected.replace(/[?]/g, "\\?")}\n`));
-  // The user still reads Claude's whole message in the interview.
+  assert.equal(analyzed?._tag === "DecisionAnalyzed" ? analyzed.question : null, db.question);
+  assert.match(probe.planner.prompts[2], new RegExp(`The decision: ${db.question.replace(/[?]/g, "\\?")}\n`));
+  // The user still reads Claude's message in the interview.
   assert.ok(probe.ui.said.some((line) => line.includes("Q3 recorded")), probe.ui.said.join("\n"));
 });
 
-test("a turn without a current question offers the decision on the whole message, as before", async () => {
-  const labels = numberedOptionLabels(NUMBERED_MESSAGE).map((c) => c.label);
-  const el = { text: "t", counterarguments: [] };
-  const entry = (id: string) => ({ id, title: id, comparative_condition: el, starting_cause: el, intermediate_steps: el, threshold: el, effect_on_persons: el, reason_the_effect_matters: el, extent: { per_person: el, persons_affected: el, likelihood: el, timing: el } });
-  const analysis = { decision: "d", columns: labels.map((option, i) => ({ kind: "argued", option, advantages: [entry(`E${i + 1}`)], disadvantages: [] })), recommendation: { option: "", reason: "" } };
+test("a turn without a current question asks for the user's reply, its message the context, with no option and no offer", async () => {
   const { layer, probe } = testLayer(tempRepo(), {
-    answers: ["/decide", "2", ""],
-    steps: [{ output: { questions: [q("Q1")] } }, { output: turn(NUMBERED_MESSAGE, false, "") }, { output: analysis }, { output: turn("Done.", true, "# R") }, { output: noQuestions, plan: "v1" }],
-    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    answers: ["more text", ""],
+    steps: [{ output: { questions: [db] } }, { output: turn("Tell me about the deployment.", false, "") }, { output: turn("Done.", true, "# R") }, { output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finished],
     config: { questionPhase: true },
   });
   await runTask(layer);
-  assert.equal(JSON.parse(read(probe.dir, "decision-1/question.json")).question, NUMBERED_MESSAGE);
+  const [reply] = presentedQuestions(probe.ui);
+  assert.deepEqual([reply.origin, reply.context, reply.question, reply.options], [{ kind: "reply" }, { text: "Tell me about the deployment.", by: "agent" }, prompts.REPLY_QUESTION, []]);
+  assert.ok(!probe.ui.asked[0].startsWith(prompts.OFFER_LINE));
 });

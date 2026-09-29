@@ -8,11 +8,11 @@ import * as prompts from "./prompts.ts";
 import { interviewSays, recordHeading } from "./render.ts";
 import { planningCall, questionsValidation, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
+import type { QuestionsFile, TermsEntry } from "./schema.ts";
 import { clarificationCount, normalizeTurn, type TurnVariant } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
 import { agentContext, askOffering, numberedOptions, programContext, type QuestionDraft } from "./offer.ts";
 import type { QuestionOrigin } from "./question.ts";
-import { numberedOptionLabels } from "./userPrompts.ts";
 import type { InterviewStage } from "./uiEvents.ts";
 
 /**
@@ -28,17 +28,28 @@ export const turnValidation =
     return questionsValidation((t: S.InterviewTurn) => [{ where: current.id, question: { context: t.current_question.context, question: t.current_question.text, terms: t.current_question.terms, options: t.current_question.options } }])(turn);
   };
 
+/** The reviewed records an interview presents its agreed questions from (S18): questions.json and terms.json. */
+export type AgreedRecords = Readonly<{ questions: QuestionsFile["questions"]; terms: readonly TermsEntry[] }>;
+
 /**
- * The question an interview turn asks (S7): the question it names now, with its context, terms and options, as an
- * agreed question or a follow-up; a turn that names none asks for the user's reply to its message, which is then the
- * context. Options the turn does not give are read from its message's numbered answers (W2-R1-2).
+ * The question an interview turn asks (S7, S18). A question of questions.json is presented from the reviewed records
+ * alone: its context, text and reason as agreed, its proposed answers as options with the default marked, and its terms
+ * from terms.json; what the turn writes beside the id is ignored, so no term shown can lose its explanation. Any other
+ * question (a follow-up, an accepted requirements issue) is presented from the turn, as validated (S16). A turn that
+ * names none asks for the user's reply to its message, which is then the context.
  */
-export const turnDraft = (turn: TurnVariant, agreed: readonly string[]): QuestionDraft => {
+export const turnDraft = (turn: TurnVariant, records: AgreedRecords): QuestionDraft => {
   const current = turn.current;
-  if (current.text.trim() === "") return { origin: { kind: "reply" }, context: { text: turn.message, by: "agent" }, terms: [], question: prompts.REPLY_QUESTION, options: numberedOptions(numberedOptionLabels(turn.message)), decision: null };
-  const origin: QuestionOrigin = agreed.includes(current.id) ? { kind: "clarification", id: current.id } : { kind: "followUp", id: current.id };
-  const options = current.options.length > 0 ? current.options : numberedOptionLabels(turn.message);
-  return { origin, context: agentContext(current.context, origin), terms: current.terms, question: current.text, options: numberedOptions(options), decision: null };
+  const agreed = records.questions.find((q) => q.id === current.id && current.id !== "");
+  if (agreed !== undefined) {
+    const origin: QuestionOrigin = { kind: "clarification", id: agreed.id };
+    const options = numberedOptions(agreed.proposed_answers.map((a) => ({ label: a.label, description: a.label === agreed.default_answer ? prompts.defaultMarked(a.description) : a.description })));
+    const terms = records.terms.find((t) => t.id === agreed.id)?.terms ?? [];
+    return { origin, context: agentContext(agreed.context, origin), terms, question: agreed.question, options, details: prompts.agreedDetails(agreed.reason), decision: null };
+  }
+  if (current.text.trim() === "") return { origin: { kind: "reply" }, context: { text: turn.message, by: "agent" }, terms: [], question: prompts.REPLY_QUESTION, options: [], decision: null };
+  const origin: QuestionOrigin = { kind: "followUp", id: current.id };
+  return { origin, context: agentContext(current.context, origin), terms: current.terms, question: current.text, options: numberedOptions(current.options), decision: null };
 };
 
 /**
@@ -54,8 +65,10 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
     // Each interface renders its own help (finding 8 of docs/gui-review.md): the terminal its """ convention, the page Shift+Enter.
     yield* ui.notify({ _tag: "InterviewOpened", heading, stage, total: clarificationCount(agreed, [], []).total });
     yield* store.converse(`## ${recordHeading(stage)}\n\n`);
-    // S16: the questions of questions.json were reviewed; any other question a turn asks is held to the rules here.
-    const recorded = (yield* store.loadQuestions()).questions.map((q) => q.id);
+    // S16, S18: the questions of questions.json were reviewed, and are presented from the records with their terms; any
+    // other question a turn asks is held to the rules here.
+    const records: AgreedRecords = { questions: (yield* store.loadQuestions()).questions, terms: yield* store.loadTerms() };
+    const recorded = records.questions.map((q) => q.id);
     let prompt = opening;
     for (;;) {
       const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, "interview", "records", turnValidation(recorded))).output);
@@ -80,7 +93,7 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
       }
 
       // A blank message is asked again inside the offer, so that it is never recorded as the choice (W1-R1-1).
-      const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.interviewMessagePrompt, turnDraft(turn, agreed), (m) => m !== ""));
+      const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.interviewMessagePrompt, turnDraft(turn, records), (m) => m !== ""));
       if (reply.kind === "empty") continue;
       yield* store.converse(`**User:** ${reply.kind === "done" ? "/done" : reply.text}\n\n`);
       prompt = reply.kind === "done" ? prompts.interviewDonePrompt : prompts.interviewUserMessage(reply.text);

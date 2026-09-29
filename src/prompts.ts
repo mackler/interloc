@@ -1370,6 +1370,14 @@ export function pauseQuestion(p: PauseOrigin): string {
 }
 /** The question after an empty agreed question list (behaviour 2). */
 export const START_OR_TALK_QUESTION = "Claude Code and Codex agree that no question needs to be put to you before the plan is written. Do you want planning to start now, or do you first want to tell Claude Code more about the task?";
+/** An agreed question's default, as its option's description marks it (S18). */
+export function defaultMarked(description: string): string {
+  return description.trim() === "" ? "(the default)" : `${description} (the default)`;
+}
+/** What the user reads of an agreed question beside its context (S18): why the plan needs the answer. */
+export function agreedDetails(reason: string): string {
+  return reason.trim() === "" ? "" : `Why the plan needs your answer: ${reason.trim()}`;
+}
 /** The question of a clarification turn that asks no particular question: its context is Claude Code's message. */
 export const REPLY_QUESTION = "What do you want to reply to Claude Code?";
 /** The question of the summary's confirmation. */

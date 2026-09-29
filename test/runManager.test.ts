@@ -14,7 +14,6 @@ import { type Broadcast, type Listener, makePublisher, makeRunManager, type Refu
 import { subscribeBounded } from "../src/webServer.ts";
 import { FakeSdk, init, messages, success, turn } from "./fakeSdk.ts";
 import { finished, scriptedPlan, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
-import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 
 // Plan step 3.3: the run manager with scripted clients over the scripted wiring (and once over the real adapters).
 const run = Effect.runPromise;
@@ -145,10 +144,11 @@ test("the replay during a run holds the last run and the current one", async () 
 test("an interview's numbered answer sent through the manager reaches Claude Code as the terminal's text", async () => {
   const repo = tempRepo();
   const turn = (message: string, complete: boolean, summary: string) => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: [], answered_ids: [], complete, summary });
+  const database = { id: "F1", context: "The service keeps its data in a database, which Interloq, the orchestrator, starts with the service.", text: "Which database should the service use?", terms: [], options: [{ label: "PostgreSQL", description: "already in the container" }, { label: "SQLite", description: "no server needed" }] };
   const h = await harness(repo, [
     {
       config: { questionPhase: true },
-      steps: [{ output: { questions: [] } }, { output: turn(NUMBERED_MESSAGE, false, "") }, { output: turn("Done.", true, "# Requirements\n\nPostgreSQL.") }, { output: noQuestions, plan: "v1" }],
+      steps: [{ output: { questions: [] } }, { output: { ...turn("One question.", false, ""), current_question: database, asked_ids: ["F1"] } }, { output: turn("Done.", true, "# Requirements\n\nPostgreSQL.") }, { output: noQuestions, plan: "v1" }],
       reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
       execs: [finished],
     },

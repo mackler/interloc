@@ -74,22 +74,3 @@ export const promptOf = (text: string): UserPrompt => {
 };
 
 const promptOfText = (text: string): UserPrompt => FIXED.get(text)?.(text) ?? entry("unknown", text, "ask", [], "line");
-
-const NUMBERED_LINE = /^\s*([1-9][0-9]*)[.):]\s+(\S.*)$/;
-/** The numbered proposed answers of an interview message (`<n>. <answer>`, one per line; `<n>)` and `<n>:` tolerated), as choices sending the number. */
-export const numberedChoices = (message: string): readonly Choice[] =>
-  message.split("\n").flatMap((line) => {
-    const match = NUMBERED_LINE.exec(line.trimEnd());
-    return match === null ? [] : [{ label: line.trim(), sends: match[1] }];
-  });
-/**
- * The numbered answers of an interview message as options (W2-R1-2): the label is the text after the number marker up
- * to a " - " or " — " separator, the description the rest. Choosing by label then matches what the user reads.
- */
-export const numberedOptionLabels = (message: string): readonly Readonly<{ label: string; description: string }>[] =>
-  message.split("\n").flatMap((line) => {
-    const match = NUMBERED_LINE.exec(line.trimEnd());
-    if (match === null) return [];
-    const [label, ...rest] = match[2].split(/ [-—] /);
-    return [{ label: label.trim(), description: rest.join(" - ").trim() }];
-  });

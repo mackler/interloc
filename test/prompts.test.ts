@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import { test } from "node:test";
 import { planReviewPrompt, questionReviewPrompt } from "../src/prompts.ts";
 import * as prompts from "../src/prompts.ts";
-import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 import { appendRound } from "../src/issueLog.ts";
 import type { IssueId } from "../src/round.ts";
 import * as S from "../src/schema.ts";

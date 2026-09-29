@@ -140,7 +140,75 @@ test("S12: the questions that do not need one make no context call: the clarific
   // The one context call of the scenario is the pause's.
   assert.equal(probe.planner.contextPrompts.length, 1);
   const byKind = new Map(presentedQuestions(probe.ui).map((q) => [q.origin.kind, q.context]));
-  assert.deepEqual(byKind.get("clarification"), { text: "The context of Q2.", by: "agent" });
+  // S18: an agreed question's context is the reviewed one of questions.json, not what the turn writes beside its id.
+  assert.deepEqual(byKind.get("clarification"), { text: entry("Q2").context, by: "agent" });
   assert.deepEqual(byKind.get("planner"), { text: plannerQuestion.context, by: "agent" });
   assert.equal(byKind.get("confirmSummary")?.by, "program");
+});
+
+// S18: an agreed question is presented from the reviewed records alone: questions.json and terms.json.
+test("S18: an agreed question is presented as reviewed: its context, text, proposed answers and reason, and the terms of terms.json", async () => {
+  const zod = { term: "zod", explanation: "A library that checks the shape of data." };
+  const entryZod = { ...entry("Q1"), context: "Claude Code checks the input of a tool with zod, a library, when the tool is called.", question: "Should zod be declared?", reason: "package.json does not list zod" };
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["1", ""],
+    steps: [
+      { output: { questions: [entryZod] } },
+      // The turn names the agreed question and writes its own wording beside the id, which is not shown.
+      { output: { ...asking("Q1", []), current_question: { id: "Q1", context: "Other context.", text: "Other wording?", terms: [], options: [{ label: "X", description: "x" }] } } },
+      { output: { ...done, asked_ids: ["Q1"], answered_ids: ["Q1"] } },
+      { output: noQuestions, plan: "v1" },
+    ],
+    terms: [{ output: { entries: [{ id: "Q1", terms: [zod] }] } }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: { questionPhase: true },
+  });
+  await runTask(layer);
+  const [q] = presentedQuestions(probe.ui);
+  assert.deepEqual(q.origin, { kind: "clarification", id: "Q1" });
+  assert.deepEqual(q.context, { text: entryZod.context, by: "agent" });
+  assert.equal(q.question, entryZod.question);
+  assert.deepEqual(q.options.map((o) => [o.label, o.description, "token" in o.answer ? o.answer.token : ""]), [
+    ["A", prompts.defaultMarked("a"), "1"],
+    ["B", "b", "2"],
+  ]);
+  assert.deepEqual(q.terms, [zod]);
+  assert.match(q.details, /package\.json does not list zod/);
+  // Every term shown with an agreed question has its explanation, and occurs in what is shown.
+  const shown = [q.context.text, q.details, q.question, ...q.options.flatMap((o) => [o.label, o.description])].join("\n");
+  for (const t of q.terms) {
+    assert.ok(t.explanation.trim() !== "");
+    assert.ok(shown.includes(t.term), t.term);
+  }
+});
+
+// S18 (P1-R2-1 of the plan's review): an accepted requirements issue asked in the second interview is not in
+// questions.json, so it is presented from the turn, validated, and keeps its issue id in the progress.
+test("S18: an accepted requirements issue in the second interview is validated, presented from the turn, and keeps its id", async () => {
+  const gap = (context: string) => ({ ...asking("G-R1-1", []), current_question: { id: "G-R1-1", context, text: "Which port should the service listen on?", terms: [], options: [{ label: "8080", description: "the usual" }, { label: "80", description: "needs root" }] }, asked_ids: ["G-R1-1"] });
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["1", "", "1", ""],
+    steps: [
+      { output: { questions: [entry("Q1")] } },
+      { output: asking("Q1", []) },
+      { output: { ...done, asked_ids: ["Q1"], answered_ids: ["Q1"], summary: "# Requirements\n\nQ1: A" } },
+      { output: respond([["G-R1-1", "accepted"]]) },
+      { output: gap(" ") },
+      { output: gap("The service, a web server, listens on a port for requests while it runs.") },
+      { output: { ...done, asked_ids: ["G-R1-1"], answered_ids: ["G-R1-1"], summary: "# Requirements\n\nQ1: A; port 8080" } },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [issue("G-R1-1", "The port is not decided.")] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: { questionPhase: true },
+  });
+  await runTask(layer);
+  assert.ok(probe.planner.prompts.includes(prompts.questionRepairPrompt([{ where: "G-R1-1", problems: [{ kind: "blankContext", subject: "" }] }])));
+  const gapQuestion = presentedQuestions(probe.ui).find((q) => q.origin.kind === "followUp");
+  assert.deepEqual(gapQuestion?.origin, { kind: "followUp", id: "G-R1-1" });
+  assert.equal(gapQuestion?.context.text, "The service, a web server, listens on a port for requests while it runs.");
+  assert.deepEqual(gapQuestion?.options.map((o) => o.label), ["8080", "80"]);
+  const turns = probe.ui.notified.flatMap((e) => (e._tag === "InterviewTurn" && e.heading === prompts.clarificationHeading("followUp") ? [e] : []));
+  assert.deepEqual(turns.at(-1) && [turns.at(-1)?.answered, turns.at(-1)?.total], [1, 1]);
 });

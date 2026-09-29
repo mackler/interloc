@@ -3,8 +3,7 @@ import { test } from "node:test";
 import fc from "fast-check";
 import { parseAskLine, parseMessage } from "../src/input.ts";
 import * as prompts from "../src/prompts.ts";
-import { HINTS, numberedChoices, numberedOptionLabels, promptOf, type UserPrompt } from "../src/userPrompts.ts";
-import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
+import { HINTS, promptOf, type UserPrompt } from "../src/userPrompts.ts";
 
 const quits = (p: UserPrompt, sends: string): boolean => (p.mode === "ask" ? parseAskLine(sends).kind === "quit" : parseMessage(sends).kind === "quit");
 const labels = (p: UserPrompt): string[] => p.choices.map((c) => `${c.label}=${c.sends}`);
@@ -66,33 +65,6 @@ test("promptOf never throws and always offers exactly one Quit that its input mo
   );
 });
 
-test("numberedChoices turns the numbered answers of the prescribed format into choices sending the number", () => {
-  assert.deepEqual(numberedChoices(NUMBERED_MESSAGE), [
-    { label: "1. PostgreSQL - the default, already in the container", sends: "1" },
-    { label: "2. SQLite - no server needed", sends: "2" },
-    { label: "3. Both, chosen by configuration", sends: "3" },
-  ]);
-});
-
-test("numberedChoices tolerates n) and n: and ignores numbers inside prose", () => {
-  assert.deepEqual(numberedChoices("Pick one:\n1) Yes\n2: No"), [
-    { label: "1) Yes", sends: "1" },
-    { label: "2: No", sends: "2" },
-  ]);
-  assert.deepEqual(numberedChoices("We have 2. options here, and 3 more."), []);
-  assert.deepEqual(numberedChoices("No numbers at all."), []);
-});
-
-test("every choice of numberedChoices sends the decimal number of its line", () => {
-  fc.assert(
-    fc.property(fc.array(fc.tuple(fc.integer({ min: 1, max: 99 }), fc.stringMatching(/^[A-Za-z][A-Za-z ]{0,20}$/)), { maxLength: 6 }), (lines) => {
-      const message = lines.map(([n, t]) => `${n}. ${t}`).join("\n");
-      const choices = numberedChoices(message);
-      return choices.length === lines.length && choices.every((c, i) => c.sends === String(lines[i][0]) && c.label.startsWith(`${lines[i][0]}. `));
-    }),
-  );
-});
-
 // Decision support, plan step 3.2: the offer is a property of the prompt text (D1).
 test("a prompt with the offer line has the entry of its text plus Help me decide before Quit; without the line nothing changes", () => {
   for (const [text, expected, choices] of catalog) {
@@ -104,15 +76,4 @@ test("a prompt with the offer line has the entry of its text plus Help me decide
   }
   assert.equal(prompts.pagePromptText("decision", prompts.withOffer(prompts.decisionPrompt)), "Choose an option, answer in your own words, or continue without deciding.");
   assert.equal(prompts.pagePromptText("unknown", prompts.withOffer("Something > ")), "Something");
-});
-
-// W2-R1-2: an interview option is its label without the number, its description apart.
-test("numberedOptionLabels gives each numbered answer's label without the number, and its description", () => {
-  assert.deepEqual(numberedOptionLabels(NUMBERED_MESSAGE), [
-    { label: "PostgreSQL", description: "the default, already in the container" },
-    { label: "SQLite", description: "no server needed" },
-    { label: "Both, chosen by configuration", description: "" },
-  ]);
-  assert.deepEqual(numberedOptionLabels("Pick:\n1) SQLite — a file\n2: PostgreSQL"), [{ label: "SQLite", description: "a file" }, { label: "PostgreSQL", description: "" }]);
-  assert.deepEqual(numberedOptionLabels("No list here."), []);
 });
