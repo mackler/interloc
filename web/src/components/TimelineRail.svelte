@@ -76,7 +76,7 @@
                 <span class="m3-font-label-medium" data-stage>{stageHeading(stage.number, stage.title)}</span>
                 <ol>
                   {#each stage.steps as step (step.id)}
-                    {@const state = planStepState(entry.state, step.status, executing)}
+                    {@const state = planStepState(entry, step, executing)}
                     <li class="plan-step {state}" data-plan-step={state} aria-current={state === "current" ? "step" : undefined}>
                       <span class="mark" aria-label={PLAN_STEP_STATE_LABEL[state]}>{STEP_MARK[state]}</span>
                       <StepTooltip key={step.id} label={planStepLabel(step.number, step.label)} text={step.text} />

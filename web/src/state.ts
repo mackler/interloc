@@ -6,7 +6,7 @@ import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
 import { clarificationProgress, cycleHeading, reconnectingActivity, retryActivity, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
 import { interviewSays, optionLines, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { correctionCount } from "../../src/issueLog.ts";
-import { countOfKind, type LoopResult, type Phase, phaseName, type UiEvent } from "../../src/uiEvents.ts";
+import { countOfKind, type LoopResult, type Phase, phaseName, type StepReport, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
 import type { RecordedPlan, StepStatus } from "../../src/schema.ts";
 
@@ -65,6 +65,12 @@ export type TimelineEntry = Readonly<{
   /** The publication times of the phase's PhaseBegan and of its end (PhaseEnded, or the run's Ended): null before (issue #50, Q2). */
   began: string | null;
   ended: string | null;
+  /**
+   * The step of the plan named by the latest 'started' report of the running execution call, while it is still started
+   * (issue #53, G-R1-1); null otherwise. A step is current only on a report: another step's start or the call's end
+   * clears it, and only a new report of the step makes it current again.
+   */
+  currentStep: string | null;
 }>;
 /** An agent call that runs; calls nest when a decision is taken inside an execution call (P1-R2-1). */
 export type AgentCall = Readonly<{ agent: "claude" | "codex"; purpose: string; label: string; startedAt: string }>;
@@ -237,6 +243,7 @@ const newEntry = (phase: Phase, state: TimelineState, plan: RecordedPlan | null)
   plan,
   began: null,
   ended: null,
+  currentStep: null,
 });
 /** The index of the last element that satisfies `p`, or -1 (the page's library has no findLastIndex). */
 const lastIndex = <T>(list: readonly T[], p: (t: T) => boolean): number => list.reduce((found, t, i) => (p(t) ? i : found), -1);
@@ -254,8 +261,20 @@ const currentStepIndex = (steps: readonly TimelineStep[]): number => {
  * How a step of the plan shows in the rail (issue #6, G-R1-2): current only while its Implementation entry is active and
  * an execution call runs; a started step otherwise shows as unfinished.
  */
-export const planStepState = (entry: TimelineState, status: StepStatus, executing: boolean): "done" | "current" | "unfinished" | "pending" =>
-  status === "done" ? "done" : status === "started" ? (entry === "active" && executing ? "current" : "unfinished") : status === "unfinished" ? "unfinished" : "pending";
+export const planStepState = (entry: Pick<TimelineEntry, "state" | "currentStep">, step: Readonly<{ id: string; status: StepStatus }>, executing: boolean): "done" | "current" | "unfinished" | "pending" =>
+  step.status === "done" ? "done" : step.status === "started" ? (currentPlanStep(entry, executing) === step.id ? "current" : "unfinished") : step.status === "unfinished" ? "unfinished" : "pending";
+/** The step of the plan that is current in the entry (issue #53, G-R1-1): where the rail puts the running indicator; null when none. */
+export const currentPlanStep = (entry: Pick<TimelineEntry, "state" | "currentStep">, executing: boolean): string | null => (entry.state === "active" && executing ? entry.currentStep : null);
+/**
+ * The current step after a PlanChanged of the entry's plan (issue #53, G-R1-1): a 'started' report makes its step current,
+ * a 'done' report of the current step clears it, and a plan in which the current step is no longer started clears it.
+ */
+const currentAfter = (current: string | null, step: StepReport | null, plan: RecordedPlan): string | null => {
+  if (step !== null && step.status === "started") return step.id;
+  if (current === null) return null;
+  const status = plan.stages.flatMap((st) => st.steps).find((st) => st.id === current)?.status;
+  return status === "started" ? current : null;
+};
 /** The start of the innermost running call, which the elapsed time is measured from (issue #42, P1-R2-1); null when none runs. */
 export const callStartedAt = (run: RunView): string | null => run.calls.at(-1)?.startedAt ?? null;
 /** Whether an execution call runs, possibly with nested calls above it (P1-R2-1). */
@@ -306,7 +325,7 @@ const plus = (a: StepCount, b: StepCount): StepCount => ({ answered: a.answered 
 const endEntry = (e: TimelineEntry, code: number, time: string): TimelineEntry => {
   const end = code === 0 ? "done" : "stopped";
   const unreached = (st: TimelineStep): TimelineStep => (code !== 0 && st.state === "ahead" ? { ...st, state: "notReached" } : st);
-  if (e.state === "active") return endSteps({ ...e, state: end, steps: e.steps.map(unreached), ended: time }, end);
+  if (e.state === "active") return endSteps({ ...e, state: end, steps: e.steps.map(unreached), ended: time, currentStep: null }, end);
   return code !== 0 && e.state === "ahead" ? { ...e, state: "notReached", steps: e.steps.map(unreached) } : e;
 };
 /** The entry with its active steps ended in `state`, and the steps it never began skipped: its phase is over. */
@@ -331,7 +350,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return relabel({ ...next, phase: bandOf(event.phase, time, countIn(next, event.phase)) });
     }
     case "PhaseEnded":
-      return { ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done", ended: time }, "done") : e)) };
+      return { ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done", ended: time, currentStep: null }, "done") : e)) };
     case "RoundBegan":
       // A decision loop is a loop inside a phase that the progress panel does not show (D12 of the decision-support plan).
       return isDecision(event.subject) ? run : { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
@@ -414,7 +433,10 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       const calls = run.calls.slice(0, -1);
       const outer = calls.at(-1);
       const activity = outer !== undefined ? outer.label : `${ended?.label ?? AGENT[event.agent]} — ${event.ok ? "done" : "failed"}`;
-      return { ...run, calls, activity, busy: calls.length > 0, retry: null };
+      // Issue #53 (P1-R1-1): the end of the execution call itself, a retried attempt's included, leaves no step current;
+      // the end of a call nested in it does not.
+      const timeline = ended?.purpose === "execution" ? run.timeline.map((e) => (e.currentStep === null ? e : { ...e, currentStep: null })) : run.timeline;
+      return { ...run, calls, activity, busy: calls.length > 0, retry: null, timeline };
     }
     case "ExecutionEnded":
       return run;
@@ -435,7 +457,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     case "PlanChanged": {
       // Q5, Q9: the plan on the Implementation of its phase alone.
       const carries = (e: TimelineEntry) => e.phase.kind === "execution" && e.phase.n === event.phase;
-      return { ...run, plan: { phase: event.phase, plan: event.plan }, timeline: run.timeline.map((e) => (carries(e) ? { ...e, plan: event.plan } : e.plan === null ? e : { ...e, plan: null })) };
+      return { ...run, plan: { phase: event.phase, plan: event.plan }, timeline: run.timeline.map((e) => (carries(e) ? { ...e, plan: event.plan, currentStep: currentAfter(e.currentStep, event.step, event.plan) } : e.plan === null ? e : { ...e, plan: null })) };
     }
     case "ClaudeSaid":
       // Issue #5: Claude's prose is attributed as data, not by a prefix in its text.

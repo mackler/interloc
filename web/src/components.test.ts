@@ -373,7 +373,7 @@ describe("PromptWidget", () => {
 });
 
 /** The fields of a timeline entry that its tests do not concern: the entry of a phase with no times yet. */
-const fresh = { began: null, ended: null } as const;
+const fresh = { began: null, ended: null, currentStep: null } as const;
 
 describe("TimelineRail", () => {
   const cycle = (round: number, raised: number | null, counted: number | null = raised) => ({ round, raised, counted, reviewIds: [] });
@@ -787,7 +787,7 @@ describe("TimelineRail: the plan", () => {
       { number: 2, title: "the page", steps: [{ id: "S3", number: 1, label: "The rail", text: "y", status: "unfinished" as const }, { id: "S4", number: 2, label: "The tooltip", text: "z", status: "pending" as const }] },
     ],
   });
-  const entry = (state: TimelineEntry["state"], plan: TimelineEntry["plan"]): TimelineEntry => ({ ...fresh, phase: { kind: "execution", n: 1 }, label: "Implementation", state, groups: [], steps: [], plan });
+  const entry = (state: TimelineEntry["state"], plan: TimelineEntry["plan"]): TimelineEntry => ({ ...fresh, phase: { kind: "execution", n: 1 }, label: "Implementation", state, groups: [], steps: [], plan, currentStep: "S2" });
   const ahead = (kind: "planning" | "work", state: TimelineEntry["state"]): TimelineEntry => ({ ...fresh, phase: { kind, n: 1 }, label: kind === "planning" ? "Planning" : "Work review", state, groups: [], steps: [], plan: null });
   const rows = (root: HTMLElement) => [...root.querySelectorAll("[data-plan-step]")].map((e) => `${e.getAttribute("data-plan-step")}:${e.querySelector("[data-plan-step-label]")?.textContent?.trim()}`);
 

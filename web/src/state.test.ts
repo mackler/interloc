@@ -4,7 +4,7 @@ import * as prompts from "../../src/prompts.ts";
 import { decodeServer, type RunEvent, type ServerMessage, type Stamped } from "../../src/protocol.ts";
 import { foreseenPhases, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { waiting, type Band, bandsOf, callStartedAt, dismissUnsent, initialState, keepUnsent, planStepState, progressOf, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
+import { waiting, type Band, bandsOf, callStartedAt, currentPlanStep, dismissUnsent, executing, initialState, keepUnsent, planStepState, progressOf, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
 const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
@@ -930,13 +930,18 @@ describe("the whole run in the timeline", () => {
     expect(late.run?.timeline[0].plan).toEqual(recorded("S1", "done"));
   });
 
-  test("a started step is current only while its phase is active and an execution call runs; otherwise unfinished", () => {
-    expect(planStepState("active", "started", true)).toBe("current");
-    expect(planStepState("active", "started", false)).toBe("unfinished");
-    expect(planStepState("done", "started", true)).toBe("unfinished");
-    expect(planStepState("active", "unfinished", true)).toBe("unfinished");
-    expect(planStepState("ahead", "pending", false)).toBe("pending");
-    expect(planStepState("active", "done", true)).toBe("done");
+  test("a started step is current only when it is the entry's current step, its phase is active and an execution call runs", () => {
+    const active = { state: "active" as const, currentStep: "S1" };
+    expect(planStepState(active, { id: "S1", status: "started" }, true)).toBe("current");
+    expect(planStepState(active, { id: "S1", status: "started" }, false)).toBe("unfinished");
+    expect(planStepState(active, { id: "S2", status: "started" }, true)).toBe("unfinished");
+    expect(planStepState({ state: "done", currentStep: "S1" }, { id: "S1", status: "started" }, true)).toBe("unfinished");
+    expect(planStepState(active, { id: "S1", status: "unfinished" }, true)).toBe("unfinished");
+    expect(planStepState({ state: "ahead", currentStep: null }, { id: "S1", status: "pending" }, false)).toBe("pending");
+    expect(planStepState(active, { id: "S1", status: "done" }, true)).toBe("done");
+    expect(currentPlanStep(active, true)).toBe("S1");
+    expect(currentPlanStep(active, false)).toBe(null);
+    expect(currentPlanStep({ state: "done", currentStep: "S1" }, true)).toBe(null);
   });
 
   test("a decision nested in an execution call: the step stays current, busy stays, and the activity returns to the execution", () => {
@@ -1074,5 +1079,91 @@ describe("phase times", () => {
   test("a phase not foreseen is stamped when it begins", () => {
     const s = fold(live([started, notified({ _tag: "PhaseBegan", phase: planning })], 1, [0, 7]));
     expect(times(s)).toEqual([["Planning", at(7), null]]);
+  });
+});
+
+// Issue #53 (G-R1-1): at most one step of the plan is current, the one named by the latest 'started' report of the
+// running execution call while it is still started; nothing but a report makes a step current again.
+describe("the current step of the plan", () => {
+  const foreseen = notified({ _tag: "PhasesForeseen", phases: foreseenPhases(false, 1) });
+  const began = notified({ _tag: "PhaseBegan", phase: { kind: "execution", n: 1 } });
+  const call = (purpose = "execution") => notified({ _tag: "AgentCallStarted", agent: "claude", purpose });
+  const callEnded = (ok = true) => notified({ _tag: "AgentCallEnded", agent: "claude", ok });
+  type Status = "pending" | "started" | "done" | "unfinished";
+  const ids = ["S1", "S2", "S3"];
+  /** The events of the reports in order, each PlanChanged carrying the plan as recorded after it. */
+  const reports = (list: readonly (readonly [string, "started" | "done"])[], from: Record<string, Status> = {}): RunEvent[] => {
+    const statuses: Record<string, Status> = { ...from };
+    return list.map(([id, status]) => {
+      statuses[id] = status;
+      const plan = { stages: [{ number: 1, title: "t", steps: ids.map((sid, i) => ({ id: sid, number: i + 1, label: sid, text: sid, status: statuses[sid] ?? ("pending" as const) })) }] };
+      return notified({ _tag: "PlanChanged", phase: 1, plan, step: { id, status } });
+    });
+  };
+  const prefix: RunEvent[] = [started, foreseen, began, call()];
+  const implementation = (s: ViewState) => s.run!.timeline.find((e) => e.phase.kind === "execution")!;
+  /** The state of each step as the rail derives it, in the order of the plan. */
+  const states = (s: ViewState) => {
+    const entry = implementation(s);
+    return (s.run!.plan?.plan.stages[0].steps ?? []).map((st) => `${st.id}:${planStepState(entry, st, executing(s.run!))}`);
+  };
+  const both = (events: RunEvent[]) => [fold(live(events)), replayed(events)];
+
+  test("two steps started: the later is current, the earlier unfinished; live and replay agree", () => {
+    for (const s of both([...prefix, ...reports([["S1", "started"], ["S2", "started"]])])) {
+      expect(states(s)).toEqual(["S1:unfinished", "S2:current", "S3:pending"]);
+      expect(currentPlanStep(implementation(s), executing(s.run!))).toBe("S2");
+    }
+  });
+
+  test("the current step done while an earlier one is open: no step is current, until the earlier one is reported started again", () => {
+    const done = [...prefix, ...reports([["S1", "started"], ["S2", "started"], ["S2", "done"]])];
+    for (const s of both(done)) {
+      expect(states(s)).toEqual(["S1:unfinished", "S2:done", "S3:pending"]);
+      expect(currentPlanStep(implementation(s), executing(s.run!))).toBe(null);
+    }
+    const resumed = [...prefix, ...reports([["S1", "started"], ["S2", "started"], ["S2", "done"], ["S1", "started"]])];
+    for (const s of both(resumed)) expect(states(s)).toEqual(["S1:current", "S2:done", "S3:pending"]);
+  });
+
+  test("a transport retry of the execution call: the step is not current until it is reported again", () => {
+    const retried = [...prefix, ...reports([["S1", "started"]]), callEnded(false), call()];
+    for (const s of both(retried)) {
+      expect(states(s)).toEqual(["S1:unfinished", "S2:pending", "S3:pending"]);
+      expect(currentPlanStep(implementation(s), executing(s.run!))).toBe(null);
+    }
+    for (const s of both([...retried, ...reports([["S1", "started"]], { S1: "started" })])) expect(states(s)[0]).toBe("S1:current");
+  });
+
+  test("a call nested in the execution call leaves the current step", () => {
+    for (const s of both([...prefix, ...reports([["S1", "started"]]), call("planning"), callEnded()])) expect(states(s)[0]).toBe("S1:current");
+  });
+
+  test("the end of the phase or of the run leaves no step current", () => {
+    const events = [...prefix, ...reports([["S1", "started"]])];
+    for (const end of [notified({ _tag: "PhaseEnded", phase: { kind: "execution", n: 1 }, result: "aborted" }), { _tag: "Ended", code: 1 } as RunEvent]) {
+      for (const s of both([...events, end])) expect(implementation(s).currentStep).toBe(null);
+    }
+  });
+
+  test("the end's PlanChanged, which names no report, clears a current step that is no longer started", () => {
+    const [ended] = reports([["S1", "started"]]);
+    const plan = ended._tag === "Notified" && ended.event._tag === "PlanChanged" ? ended.event.plan : null;
+    const unfinished = { stages: plan!.stages.map((st) => ({ ...st, steps: st.steps.map((x) => (x.id === "S1" ? { ...x, status: "unfinished" as const } : x)) })) };
+    const s = fold(live([...prefix, ended, notified({ _tag: "PlanChanged", phase: 1, plan: unfinished, step: null })]));
+    expect(implementation(s).currentStep).toBe(null);
+  });
+
+  test("property: for any sequence of reports at most one step is current, and it is the latest started one still started", () => {
+    const report = fc.tuple(fc.constantFrom(...ids), fc.constantFrom("started" as const, "done" as const));
+    fc.assert(
+      fc.property(fc.array(report, { maxLength: 12 }), (list) => {
+        const s = fold(live([...prefix, ...reports(list)]));
+        const current = states(s).filter((x) => x.endsWith(":current"));
+        expect(current.length).toBeLessThanOrEqual(1);
+        const last = list.at(-1);
+        if (last !== undefined && last[1] === "started") expect(current).toEqual([`${last[0]}:current`]);
+      }),
+    );
   });
 });
