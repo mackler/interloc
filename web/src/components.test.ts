@@ -592,6 +592,26 @@ describe("App and the draft", () => {
     expect(root.querySelector('section[aria-label^="Decision 1"]')).not.toBe(null);
   });
 
+  // S27 with decision support: beside an analysis, which shows the question, the pane keeps only its answers; the
+  // analysis's "Show the conversation" shows the conversation itself.
+  test("beside an analysis the pane shows only its answers; the analysis's Show the conversation shows the transcript", async () => {
+    const { root, ws } = await openPage();
+    const presentedQ = { number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: "", decision: null };
+    const analyzed = { _tag: "Notified", event: { _tag: "DecisionAnalyzed", decision: 1, question: "Which?", presented: presentedQ, options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } } };
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, { _tag: "Notified", event: { _tag: "QuestionPresented", question: presentedQ } }, analyzed, asked(1)]) }] });
+    expect(root.querySelector(".pane")).not.toBe(null);
+    expect(root.querySelector(".pane .question-text")).toBe(null);
+    expect(root.querySelector(".pane .top")).toBe(null);
+    expect(root.querySelector(".pane input[name=answer]")).not.toBe(null);
+    one(root, ".decision button[name=conversation]").click();
+    flushSync();
+    expect((root.querySelector(".left .chat") as HTMLElement).classList.contains("hidden")).toBe(false);
+    expect(root.querySelector("button[name=question]")).not.toBe(null);
+    one(root, "button[name=analysis]").click();
+    flushSync();
+    expect(root.querySelector('section[aria-label^="Decision 1"]')).not.toBe(null);
+  });
+
   test("the right panel is titled Claude and Codex (issue #5)", async () => {
     const { root, ws } = await openPage();
     ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started]) }] });

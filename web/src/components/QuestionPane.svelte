@@ -23,8 +23,10 @@
   // Offline (the page has stopped reconnecting, decision G-R1-1 of the defects' requirements) the prompt stays usable:
   // the socket refuses the answer with a notice, and the field keeps what was typed [user control and freedom: no
   // typed text is lost; help users recognise and recover: the page's banner and notice say why nothing is sent].
-  type Props = { widget: Widget | null; text?: string; offline?: boolean; onAnswer: (prompt: number, text: string) => void; onShowConversation?: () => void };
-  let { widget, text = $bindable(""), offline = false, onAnswer, onShowConversation }: Props = $props();
+  // `answersOnly`: beside a decision's analysis, which shows the question with its context and terms (S22), the pane keeps
+  // only the answers [aesthetic and minimalist design: the question is not shown twice].
+  type Props = { widget: Widget | null; text?: string; offline?: boolean; answersOnly?: boolean; onAnswer: (prompt: number, text: string) => void; onShowConversation?: () => void };
+  let { widget, text = $bindable(""), offline = false, answersOnly = false, onAnswer, onShowConversation }: Props = $props();
   const deliver = (value: string) => {
     if (widget === null) return;
     if (!offline) text = "";
@@ -60,13 +62,11 @@
 </script>
 
 {#if widget !== null}
-  <section class="pane" aria-label={question === null ? "Your answer" : questionTitle(question.number)}>
+  <section class="pane" class:answers-only={answersOnly} aria-label={question === null ? "Your answer" : questionTitle(question.number)}>
+    {#if !answersOnly}
     <div class="head">
       {#if question !== null}
-        <div>
-          <h2 class="m3-font-title-small">{questionTitle(question.number)}</h2>
-          <p class="origin m3-font-body-small">{originLine(question.origin, question.decision)}</p>
-        </div>
+        <div class="title"><h2 class="m3-font-title-small">{questionTitle(question.number)}</h2> <span class="origin m3-font-body-small">{originLine(question.origin, question.decision)}</span></div>
       {/if}
       {#if onShowConversation !== undefined}
         <Button variant="text" type="button" name="conversation" onclick={onShowConversation}>{SHOW_CONVERSATION}</Button>
@@ -94,13 +94,14 @@
       </div>
     {/if}
     <p class="question-text m3-font-title-medium">{#if question === null}{widget.hint}{:else}<TermText inline html={textHtml(question.question)} terms={question.terms} />{/if}</p>
+    {/if}
     <div class="bottom">
       {#if question !== null && question.options.length > 0}
         <div class="options m3-font-body-medium" role="group" aria-label={PROPOSED_ANSWERS_LABEL}>
           {#each question.options as option, i (i)}
             {#if "token" in option.answer}
               {@const token = option.answer.token}
-              <Card variant="outlined" onclick={() => send(token)}><span class="token">{token}.</span> <TermText inline html={textHtml(option.description === "" ? option.label : `${option.label} — ${option.description}`)} terms={question.terms} /></Card>
+              <Card variant="outlined" onclick={() => send(token)}><span class="card-text"><span class="token">{token}.</span> <TermText inline html={textHtml(option.description === "" ? option.label : `${option.label} — ${option.description}`)} terms={question.terms} /></span></Card>
             {:else}
               <div class="numeric"><strong>{option.label}</strong>{#if option.description !== ""} — {option.description}{/if}<br /><span class="m3-font-body-small">{NUMERIC_OPTION_NOTE}</span></div>
             {/if}
@@ -113,7 +114,7 @@
           {/each}
         </div>
       {/if}
-      {#if question !== null}<p class="asks m3-font-body-small">{widget.hint}</p>{/if}
+      {#if question !== null && !answersOnly}<p class="asks m3-font-body-small">{widget.hint}</p>{/if}
       <div class="choices">
         {#each widget.choices as choice, i (i)}
           {#if endsRunLabel(choice.label, choice.sends)}
@@ -146,10 +147,17 @@
   /* The pane fills the left column; the two regions share its height and scroll on their own, and the question between
      them never moves (S27). */
   .pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 0.5rem; padding: 0.75rem; background: var(--m3c-surface-container-low); border-radius: var(--m3-shape-medium); }
+  /* Beside an analysis the pane holds only the answers, sized by them; the options scroll within 15 % of the window's
+     height, so that the field, the buttons and the analysis itself stay in view. */
+  .pane.answers-only { flex: 0 0 auto; padding: 0.5rem 0.75rem; }
+  .pane.answers-only .bottom { flex: 0 0 auto; min-height: 0; overflow: visible; }
+  .pane.answers-only .options { max-height: 15dvh; overflow-y: auto; }
   .head { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; }
-  .head h2 { margin: 0; }
-  .origin { margin: 0.125rem 0 0; color: var(--m3c-on-surface-variant); }
-  .top { flex: 1 1 auto; min-height: 3rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+  /* The heading and the origin share a line where they fit, so that a short window keeps room for the question. */
+  .title h2 { display: inline; margin: 0 0.25rem 0 0; }
+  .origin { color: var(--m3c-on-surface-variant); }
+  /* The context takes at most three tenths of the pane, so that the question's first option stays in view below it. */
+  .top { flex: 0 1 auto; max-height: 30%; min-height: 2.5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
   .context { padding: 0.5rem 0.75rem; border-radius: var(--m3-shape-small); background: var(--m3c-surface-container); color: var(--m3c-on-surface-variant); }
   .context .by { margin: 0.25rem 0 0; font-style: italic; }
   .terms { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; }
@@ -157,7 +165,7 @@
   .terms dd { margin: 0; }
   .top :global(.markdown pre) { overflow-x: auto; }
   .question-text { margin: 0; flex-shrink: 0; overflow-wrap: anywhere; }
-  .bottom { flex: 1 1 auto; min-height: 6rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+  .bottom { flex: 1 1 0; min-height: 4rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
   /* One card per row at every width; a card grows with its text, and a long unbroken token (a path) wraps. */
   .options { display: flex; flex-direction: column; gap: 0.5rem; }
   .options > :global(button) { width: 100%; min-width: 0; overflow-wrap: anywhere; text-align: start; }
@@ -165,8 +173,8 @@
   .numeric { padding: 0.75rem 1rem; border: 1px dashed var(--m3c-outline-variant); border-radius: var(--m3-shape-medium); }
   .asks { margin: 0; color: var(--m3c-on-surface-variant); }
   .choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
-  /* The run-ending button stands apart at the end of the row, in the error role (S25). */
-  .ends-run { margin-inline-start: auto; --m3c-primary: var(--m3c-error); --m3c-outline: var(--m3c-error); }
+  /* The run-ending button stands apart from the other choices, in the error role (S25). */
+  .ends-run { margin-inline-start: 0.75rem; --m3c-primary: var(--m3c-error); --m3c-outline: var(--m3c-error); }
   /* The field has the full width in every window (finding 7); the hint and Send share the row below it. */
   .send-row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; }
   .hint { margin: 0; color: var(--m3c-on-surface-variant); }

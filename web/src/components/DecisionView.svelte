@@ -106,7 +106,7 @@
   .head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
   .head h2 { margin: 0; }
   /* The question beside its analysis: bounded, and scrolling on its own when its context is long. */
-  .question { flex-shrink: 0; max-height: 25dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+  .question { flex-shrink: 0; max-height: min(4.5rem, 12dvh); overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
   .question-context { margin: 0; padding: 0.5rem 0.75rem; border-radius: var(--m3-shape-small); background: var(--m3c-surface-container); color: var(--m3c-on-surface-variant); white-space: pre-wrap; }
   .question-context .by { font-style: italic; }
   .question-text { margin: 0; }

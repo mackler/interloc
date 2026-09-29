@@ -154,11 +154,11 @@
       {/if}
       {#if analysis !== null && deciding}
         <div class="decision-area">
-          <DecisionView event={analysis.event} narrow={width < NARROW_WIDTH} onShowConversation={() => (conversationFor = analysisKey)} />
+          <DecisionView event={analysis.event} narrow={width < NARROW_WIDTH} onShowConversation={() => { conversationFor = analysisKey; conversationForPrompt = promptKey; }} />
         </div>
       {:else if analysis !== null}
         <div class="decision-area back">
-          <Button variant="tonal" type="button" name="analysis" onclick={() => (conversationFor = null)}>{SHOW_ANALYSIS}</Button>
+          <Button variant="tonal" type="button" name="analysis" onclick={() => { conversationFor = null; conversationForPrompt = null; }}>{SHOW_ANALYSIS}</Button>
         </div>
       {/if}
       <div class="left" class:hidden={!deciding && !shown("left")}>
@@ -173,6 +173,7 @@
         {/if}
         <QuestionPane
           widget={asking ? run.pending : null}
+          answersOnly={deciding}
           onShowConversation={() => (conversationForPrompt = promptKey)}
           {offline}
           bind:text={() => draftFor(draft, pendingKey(view)), (text) => { const key = pendingKey(view); draft = key === null ? null : { key, text }; }}
@@ -217,7 +218,7 @@
   .back-to-question { padding: 0.5rem 0.75rem 0; }
   /* The shown column fills the window; its panel scrolls inside it and keeps at least 12.5rem, below which the page scrolls. */
   .run.compact .left, .run.compact .right { flex: 1 0 0; }
-  .run.compact .left :global(.panel), .run.compact .right :global(.panel) { min-height: 12.5rem; }
+  .run.compact .left :global(.panel), .run.compact .right :global(.panel), .run.compact .left :global(.pane:not(.answers-only)) { min-height: 12.5rem; }
   /* W4-R1-1: while the analysis is shown, only the decision area flexes; it never grows to its content and keeps a
      floor of min(12rem, 40dvh), and DecisionView's .scroll scrolls inside it. The columns hold only the prompt and
      the activity line then, sized by their content. The run keeps its outer scroll, so that where the controls and

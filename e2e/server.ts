@@ -28,6 +28,8 @@ import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from
 const noQuestions = { questions_for_user: [] };
 /** A scripted interview turn; `asked` and `answered` are the ids Claude reports (issue #21). */
 const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: asked, answered_ids: answered, complete, summary });
+/** A turn that asks the agreed question Q1 by its id: the page shows it from questions.json (S18). */
+const asksQ1 = (message: string) => ({ ...turn(message, false, "", ["Q1"]), current_question: { id: "Q1", context: "", text: "", terms: [], options: [] } });
 const LONG = 60;
 /** An analysis of the "decide" scenario: two columns, a counterargument with a defense, one equivalence, a recommendation. */
 const element = (text: string, counterarguments: unknown[] = []) => ({ text, counterarguments });
@@ -77,8 +79,8 @@ export const SCENARIOS: Record<string, TestOptions> = {
   interview: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
-      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "", ["Q1"]) },
+      { output: { questions: [{ id: "Q1", context: "c", question: "Which database should the service use?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: asksQ1("The first question.") },
       { output: turn("Anything else?", false, "", ["Q1"], ["Q1"]) },
       { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.", ["Q1"], ["Q1"]) },
       { output: noQuestions, plan: "1. [ ] the step\n" },
@@ -90,8 +92,8 @@ export const SCENARIOS: Record<string, TestOptions> = {
   decideBlank: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
-      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "", ["Q1"]) },
+      { output: { questions: [{ id: "Q1", context: "c", question: "Which database should the service use?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: asksQ1("The first question.") },
       { output: { ...DECIDE_ANALYSIS, columns: [{ ...DECIDE_ANALYSIS.columns[1], option: "PostgreSQL" }, { ...DECIDE_ANALYSIS.columns[0], option: "SQLite" }] } },
       { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL.", ["Q1"], ["Q1"]) },
       { output: noQuestions, plan: "1. [ ] the step\n" },
@@ -103,8 +105,8 @@ export const SCENARIOS: Record<string, TestOptions> = {
   longChoices: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", context: "c", question: "How should a message show its time?", reason: "r", proposed_answers: [{ label: "Absolute", description: "a" }, { label: "Relative", description: "r" }], default_answer: "Absolute" }] } },
-      { output: turn(`How should a message show its time?\n${LONG_ANSWERS.join("\n")}`, false, "", ["Q1"]) },
+      { output: { questions: [{ id: "Q1", context: "c", question: "How should a message show its time?", reason: "r", proposed_answers: LONG_ANSWERS.map((a) => { const [label, ...rest] = a.replace(/^\d+\. /, "").split(": "); return { label, description: rest.join(": ") }; }), default_answer: "Absolute clock time" }] } },
+      { output: asksQ1("The first question.") },
       { output: turn("Anything else?", false, "") },
       { output: turn("That is all I need.", true, "# Requirements\n\nRelative time.") },
       { output: noQuestions, plan: "1. [ ] the step\n" },
@@ -118,17 +120,17 @@ export const SCENARIOS: Record<string, TestOptions> = {
   questionReview: {
     config: { questionPhase: true },
     steps: [
-      { output: { questions: [{ id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
+      { output: { questions: [{ id: "Q1", context: "c", question: "Which database should the service use?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" }] } },
       {
         output: {
           ...respond([["Q-R1-1", "accepted"]]),
           questions: [
-            { id: "Q1", context: "c", question: "Which database?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" },
+            { id: "Q1", context: "c", question: "Which database should the service use?", reason: "r", proposed_answers: [{ label: "PostgreSQL", description: "p" }, { label: "SQLite", description: "s" }], default_answer: "PostgreSQL" },
             { id: "Q2", context: "c", question: "Which port?", reason: "r", proposed_answers: [{ label: "8080", description: "p" }], default_answer: "8080" },
           ],
         },
       },
-      { output: turn("Which database should the service use?\n1. PostgreSQL\n2. SQLite", false, "") },
+      { output: asksQ1("The first question.") },
       { output: turn("That is all I need.", true, "# Requirements\n\nThe service uses PostgreSQL on port 8080.") },
       { output: noQuestions, plan: "1. [ ] the step\n" },
     ],
@@ -237,6 +239,24 @@ SCENARIOS.unchangedPause = {
     { output: respond([["P1-R1-1", "accepted"]]) },
   ],
   reviews: [{ issues: [issue("P1-R1-1", "The step names no file.")] }, { issues: [] }, { issues: [] }],
+  execs: [finished],
+};
+
+// S29: a question of the plan writer with a long context, many terms and long options, for the layout of the question
+// pane at every size and for a term's tooltip reached by keyboard.
+export const LONG_QUESTION = {
+  context: Array.from({ length: 12 }, (_, i) => `Paragraph ${i + 1} of the context: the service, a web server, keeps its data in a database; the cache, a store in memory, answers repeated reads; the migration, a script, changes the schema when the service starts.`).join("\n\n"),
+  question: "Which database should the service use?",
+  terms: ["service", "cache", "migration", "schema", "database", "web server", "store in memory", "script"].map((term) => ({ term, explanation: `The ${term} of this task, explained in ordinary words for a reader who has never seen the codebase.` })),
+  options: [
+    { label: "SQLite", description: "One file beside the service, no server to run; the migration runs when the service starts. ".repeat(4) },
+    { label: "PostgreSQL", description: "A database server of its own, which the service reaches over the network; the cache stays in memory. ".repeat(4) },
+    { label: "Both, chosen by configuration", description: "The service reads a setting that names the database; each migration is written twice. ".repeat(4) },
+  ],
+};
+SCENARIOS.longQuestion = {
+  steps: [{ output: { questions_for_user: [LONG_QUESTION] }, plan: "1. [ ] the step\n" }, { output: noQuestions }],
+  reviews: [{ issues: [] }, { issues: [] }],
   execs: [finished],
 };
 

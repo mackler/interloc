@@ -1,6 +1,6 @@
 import type { Locator, Page } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
-import { HELP_ME_DECIDE } from "../src/prompts.ts";
+import { CONTINUE_WITHOUT_DECIDING, END_CLARIFICATION, HELP_ME_DECIDE, SHOW_CONVERSATION, SHOW_QUESTION } from "../src/prompts.ts";
 import { LONG_ANSWERS } from "./longAnswers.ts";
 
 // Finding 7 of docs/gui-review.md, decision Q3: the layout adapts. At M3's expanded width (840 px and wider) the rail
@@ -10,6 +10,11 @@ const URL = "http://127.0.0.1:8106/";
 const LEFT = "You and Interloq";
 const RIGHT = "Claude and Codex";
 const panel = (page: Page, name: string) => page.getByRole("region", { name });
+/** The question the run waits on, which takes the left column while it is pending (S27). */
+const pane = (page: Page) => page.locator("section.pane");
+const asking = (page: Page, text: string) => pane(page).locator(".question-text", { hasText: text });
+const continueWithoutDeciding = (page: Page) => pane(page).getByRole("button", { name: CONTINUE_WITHOUT_DECIDING, exact: true });
+const confirmEnd = (page: Page) => page.locator("dialog[open] button[name=confirm-end]").click();
 const box = async (locator: Locator) => {
   const b = await locator.boundingBox();
   if (b === null) throw new Error("the element is not visible");
@@ -27,22 +32,26 @@ const startTask = async (page: Page, task: string, url = URL) => {
   // which Stop stays disabled and a plain click would wait for the test's whole timeout.
   await expect(async () => {
     if (await form.isVisible()) return;
-    if (await stop.isEnabled({ timeout: 1_000 }).catch(() => false)) await stop.click({ timeout: 2_000 });
+    if (await stop.isEnabled({ timeout: 1_000 }).catch(() => false)) {
+      await stop.click({ timeout: 2_000 });
+      await confirmEnd(page);
+    }
     await again.click({ timeout: 5_000 });
     await expect(form).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 60_000 });
   await form.fill(task);
   await page.locator("button[name=start]").click();
 };
-const FIRST = "Decision on: question from Claude Code: Which database should the service use?";
-const SECOND = "Decision on: question from Claude Code: Which cache should the service use?";
+const FIRST = "Which database should the service use?";
+const SECOND = "Which cache should the service use?";
 
 /** The assertions of a compact window: no horizontal overflow, a usable panel and answer field, the panel switch. */
 const compactChecks = async (page: Page, context: import("@playwright/test").BrowserContext, minHeight: number) => {
   await startTask(page, "Add a database in a narrow window");
-  await expect(panel(page, LEFT).getByText(FIRST)).toBeVisible();
+  await expect(asking(page, FIRST)).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page overflows horizontally").toBe(true);
-  const left = await box(panel(page, LEFT));
+  // S27 and issue #20: the question the run waits on takes the column; the transcript is out of the way.
+  const left = await box(pane(page));
   expect(left.width, "the panel's width").toBeGreaterThanOrEqual(300);
   expect(left.height, "the panel's height").toBeGreaterThanOrEqual(minHeight);
   expect((await box(page.locator("[name=answer]"))).width, "the answer field's width").toBeGreaterThanOrEqual(280);
@@ -51,15 +60,15 @@ const compactChecks = async (page: Page, context: import("@playwright/test").Bro
   // The other panel by its title; a prompt brings "You and Interloq" back.
   await page.getByRole("button", { name: new RegExp(RIGHT) }).click();
   await expect(panel(page, RIGHT)).toBeVisible();
-  await expect(panel(page, LEFT)).toBeHidden();
+  await expect(pane(page)).toBeHidden();
   const other = await context.newPage();
   await other.goto(URL);
-  await other.getByRole("button", { name: "No decision" }).click();
-  await expect(panel(page, LEFT).getByText(SECOND)).toBeVisible();
+  await continueWithoutDeciding(other).click();
+  await expect(asking(page, SECOND)).toBeVisible();
   await expect(panel(page, RIGHT)).toBeHidden();
 
   // Messages that arrive in the hidden panel are counted on its button.
-  await other.getByRole("button", { name: "No decision" }).click();
+  await continueWithoutDeciding(other).click();
   await expect(page.getByRole("button", { name: new RegExp(`${RIGHT}.*[1-9][0-9]* new`) })).toBeVisible();
   await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await other.close();
@@ -78,15 +87,16 @@ test("(L2) a desktop window at 200 % zoom (a 640 × 400 CSS viewport): the same,
 test("(L3) a desktop window, 1280 × 800: the rail and both panels side by side", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await startTask(page, "Add a database in a wide window");
-  await expect(panel(page, LEFT).getByText(FIRST)).toBeVisible();
+  await expect(asking(page, FIRST)).toBeVisible();
   const rail = await box(page.getByRole("navigation", { name: "Progress of the run" }));
-  const left = await box(panel(page, LEFT));
+  const left = await box(pane(page));
   const right = await box(panel(page, RIGHT));
   expect(rail.x + rail.width).toBeLessThanOrEqual(left.x);
   expect(left.x + left.width).toBeLessThanOrEqual(right.x);
   await expect(page.getByRole("button", { name: new RegExp(RIGHT) })).toHaveCount(0);
-  await page.getByRole("button", { name: "No decision" }).click();
-  await page.getByRole("button", { name: "No decision" }).click();
+  await continueWithoutDeciding(page).click();
+  await expect(asking(page, SECOND)).toBeVisible();
+  await continueWithoutDeciding(page).click();
   await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
@@ -101,10 +111,17 @@ const toTop = (l: Locator) =>
     el.dispatchEvent(new Event("scroll"));
   });
 const showPanel = (page: Page, name: string) => page.getByRole("button", { name: new RegExp(`^${name}`) }).click();
+/** The long run at its idle pause, with the conversation shown instead of the question (S27). */
 const longRunAtItsPrompt = async (page: Page, task: string) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await startTask(page, task, LONG_URL);
-  await expect(page.getByRole("button", { name: "No decision" })).toBeVisible({ timeout: 60_000 });
+  await expect(continueWithoutDeciding(page)).toBeVisible({ timeout: 60_000 });
+  await pane(page).getByRole("button", { name: SHOW_CONVERSATION }).click();
+};
+/** Back to the question from the conversation, and the answer that continues the run. */
+const answerContinue = async (page: Page) => {
+  await page.getByRole("button", { name: SHOW_QUESTION }).click();
+  await continueWithoutDeciding(page).click();
 };
 
 test("(L4) a panel's reading position survives a switch of panels and a resize across 840 px", async ({ page }) => {
@@ -123,7 +140,7 @@ test("(L5) a hidden panel opens at its end, and follows the messages that arrive
   await showPanel(page, RIGHT);
   await expect.poll(() => fromEnd(list(page, RIGHT)), { message: "hidden from the start" }).toBeLessThan(32);
   await showPanel(page, LEFT);
-  await page.getByRole("button", { name: "No decision" }).click();
+  await answerContinue(page);
   await expect(page.getByRole("button", { name: new RegExp(`^${RIGHT}.*new`) })).toBeVisible();
   await showPanel(page, RIGHT);
   await expect.poll(() => fromEnd(list(page, RIGHT)), { message: "following after the reveal" }).toBeLessThan(32);
@@ -135,7 +152,7 @@ test("(L6) a panel scrolled up keeps its position while hidden, and its chip cou
   await expect.poll(() => fromEnd(list(page, RIGHT))).toBeLessThan(32);
   await toTop(list(page, RIGHT));
   await showPanel(page, LEFT);
-  await page.getByRole("button", { name: "No decision" }).click();
+  await answerContinue(page);
   await expect(page.getByRole("button", { name: new RegExp(`^${RIGHT}.*new`) })).toBeVisible();
   await showPanel(page, RIGHT);
   expect(await list(page, RIGHT).evaluate((el) => el.scrollTop)).toBe(0);
@@ -151,7 +168,7 @@ test("(L7) with the right panel shown, the page still says that the server has e
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await startTask(page, "Watch the review");
-  await expect(panel(page, LEFT).getByText(FIRST)).toBeVisible();
+  await expect(asking(page, FIRST)).toBeVisible();
   await showPanel(page, RIGHT);
   await expect(panel(page, RIGHT)).toBeVisible();
   route!.send(JSON.stringify({ type: "closing" }));
@@ -175,21 +192,22 @@ test("(L8) a new run's first prompt selects 'You and Interloq' although the old 
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await startTask(page, "The first run");
-  await expect(panel(page, LEFT).getByText(FIRST)).toBeVisible();
+  await expect(asking(page, FIRST)).toBeVisible();
   await showPanel(page, RIGHT);
   hold = true;
   await current!.close();
   const other = await context.newPage();
   await other.goto(URL);
   await other.locator("button[name=stop]").click();
+  await confirmEnd(other);
   await other.locator("button[name=new]").click();
   await other.locator("textarea[name=task]").fill("The second run");
   await other.locator("button[name=start]").click();
-  await expect(panel(other, LEFT).getByText(FIRST)).toBeVisible();
+  await expect(asking(other, FIRST)).toBeVisible();
   hold = false;
   await expect(page.getByText("connected", { exact: true })).toBeVisible();
   await expect(page.getByText("The second run").first()).toBeVisible();
-  await expect(panel(page, LEFT)).toBeVisible();
+  await expect(pane(page)).toBeVisible();
   await expect(page.locator("[name=answer]")).toBeVisible();
   await other.close();
 });
@@ -204,35 +222,40 @@ for (const [width, height] of [
   test(`(L9) paragraph-length answers at ${width} × ${height}: each is a card that holds its text, chosen by keyboard`, async ({ page }) => {
     await page.setViewportSize({ width, height });
     await startTask(page, `Show the time at ${width}`, LONG_CHOICES_URL);
-    await expect(page.getByRole("button", { name: "End clarification" })).toBeVisible();
+    await expect(page.getByRole("button", { name: END_CLARIFICATION })).toBeVisible();
     // Issue #21: a narrow window's progress line names the step and its count.
     if (width < 840) await expect(page.locator("details.progress summary")).toHaveText("Progress: Gather Requirements — Clarification, 0 of 1 answered");
     const group = page.getByRole("group", { name: "Proposed answers" });
     await expect(group.getByRole("button")).toHaveCount(3);
     const cards = group.getByRole("button");
-    const prompt = await box(page.getByRole("group", { name: "Your answer" }));
+    const prompt = await box(pane(page));
     for (let i = 0; i < 3; i++) {
       const card = cards.nth(i);
-      await expect(card).toHaveText(LONG_ANSWERS[i]);
+      // S8, S18: each card shows the answer that chooses it and the agreed answer, the default marked.
+      const [label, ...rest] = LONG_ANSWERS[i].replace(/^\d+\. /, "").split(": ");
+      const description = rest.join(": ");
+      await expect(card).toHaveText(`${i + 1}. ${label}${description === "" && i > 0 ? "" : ` — ${description}${i === 0 ? " (the default)" : ""}`}`.replace(" —  (the default)", " — (the default)"));
       const fits = await card.evaluate((el) => ({ height: el.scrollHeight <= el.clientHeight, width: el.scrollWidth <= el.clientWidth }));
       expect(fits, `answer ${i + 1} fits its card`).toEqual({ height: true, width: true });
       const b = await box(card);
-      expect(b.x, `answer ${i + 1} starts inside the prompt`).toBeGreaterThanOrEqual(prompt.x);
-      expect(b.x + b.width, `answer ${i + 1} ends inside the prompt`).toBeLessThanOrEqual(prompt.x + prompt.width + 0.5);
+      expect(b.x, `answer ${i + 1} starts inside the pane`).toBeGreaterThanOrEqual(prompt.x);
+      expect(b.x + b.width, `answer ${i + 1} ends inside the pane`).toBeLessThanOrEqual(prompt.x + prompt.width + 0.5);
     }
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page overflows horizontally").toBe(true);
-    // The cards scroll within the prompt, so the message field, Send and End clarification stay in the window.
-    for (const name of ["[name=answer]", "button[name=send]", "button:has-text('End clarification')"]) {
-      const b = await box(page.locator(name));
-      expect(b.y + b.height, `${name} is within the window`).toBeLessThanOrEqual(height);
+    // The cards scroll within the pane's lower region, so the message field, Send and Finish clarification can be
+    // scrolled into the window, with the question still in view.
+    for (const name of ["[name=answer]", "button[name=send]", `button:has-text('${END_CLARIFICATION}')`]) {
+      await page.locator(name).scrollIntoViewIfNeeded();
+      await expect(page.locator(name)).toBeInViewport();
+      await expect(pane(page).locator(".question-text")).toBeInViewport();
     }
     await cards.nth(1).focus();
     await page.keyboard.press("Enter");
-    await expect(panel(page, LEFT).getByText("Anything else?")).toBeVisible();
-    // The user's answer is Markdown (issue #7): the chosen "2. …" line is an ordered list item numbered 2.
-    const answer = panel(page, LEFT).locator("[data-author=user] ol[start='2'] > li");
-    await expect(answer).toHaveText(LONG_ANSWERS[1].replace(/^2\. /, ""));
+    await expect(pane(page).getByText("Anything else?")).toBeVisible();
+    await pane(page).getByRole("button", { name: SHOW_CONVERSATION }).click();
+    await expect(panel(page, LEFT).locator("[data-author=user]").last()).toContainText("Relative time");
     await page.locator("button[name=stop]").click();
+    await confirmEnd(page);
   });
 }
 
@@ -312,7 +335,7 @@ const openLongAnalysis = async (page: Page, width: number, height: number) => {
     run: page.locator("main.run"),
     area: page.locator(".decision-area"),
     scroll: analysis.locator(".scroll"),
-    prompt: page.getByRole("group", { name: "Your answer" }),
+    prompt: page.locator("section.pane"),
     activity: page.locator("[data-activity]"),
   };
 };
@@ -443,3 +466,36 @@ test("(L18) a long step text at 1280 × 800: hovered, the tooltip stays open whi
   await expect(tip).toBeVisible();
   await expect.poll(() => tip.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
 });
+
+// S29 (Q10, issue #20): a question with a long context, many terms and long options keeps the question and its first
+// option in view together at every supported size; each region scrolls on its own to its end with the question still in
+// view, and the answer controls can be reached.
+const LONG_QUESTION_URL = "http://127.0.0.1:8118/";
+for (const [width, height] of [[390, 844], [640, 400], [1280, 800]] as const) {
+  test(`(L19) a long question at ${width} × ${height}: the question and its first option in view, each region scrolls on its own`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await startTask(page, `Choose a database at ${width}`, LONG_QUESTION_URL);
+    const question = pane(page).locator(".question-text");
+    await expect(question).toBeInViewport();
+    const first = pane(page).getByRole("group", { name: "Proposed answers" }).getByRole("button").first();
+    await expect(first).toBeInViewport({ ratio: 0.1 });
+    // The transcript is not what the user reads while the question waits (issue #20).
+    await expect(panel(page, LEFT)).toBeHidden();
+    for (const region of [pane(page).locator(".top"), pane(page).locator(".bottom")]) {
+      const scrolls = await region.evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+        el.dispatchEvent(new Event("scroll"));
+        return el.scrollHeight > el.clientHeight;
+      });
+      expect(scrolls, "the region holds more than it shows").toBe(true);
+      await expect(question).toBeInViewport();
+    }
+    for (const name of ["[name=answer]", "button[name=send]"]) {
+      await page.locator(name).scrollIntoViewIfNeeded();
+      await expect(page.locator(name)).toBeInViewport();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page overflows horizontally").toBe(true);
+    await continueWithoutDeciding(page).click();
+    await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
+  });
+}

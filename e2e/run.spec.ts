@@ -1,15 +1,24 @@
 import type { Locator, Page, WebSocketRoute } from "@playwright/test";
 import { expect, test } from "./fixtures.ts";
-import { HELP_ME_DECIDE, loopSummary, transportRetryLine, UNCHANGED_PROCEED, PLAN_STEP_STATE_LABEL, planStepLabel, stageHeading, stepLabel } from "../src/prompts.ts";
+import { confirmEndText, questionTitle, CONFIRM_SUMMARY_LABEL, CONTINUE_WITHOUT_DECIDING, END_CLARIFICATION, HELP_ME_DECIDE, loopSummary, SHOW_CONVERSATION, SHOW_QUESTION, transportRetryLine, UNCHANGED_PROCEED, PLAN_STEP_STATE_LABEL, planStepLabel, stageHeading, stepLabel } from "../src/prompts.ts";
 
 // Plan step 5.2: the page against the server over scripted agents (e2e/server.ts), one server per scenario. Every test
 // fails on an uncaught error or a console error in any of its pages (e2e/fixtures.ts, finding 10 of docs/gui-review.md).
-const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113, decideBlank: 8114, planSteps: 8115, transportRetry: 8116, unchangedPause: 8117 } as const;
+const PORTS = { converge: 8101, decision: 8102, stop: 8103, interview: 8104, workCorrection: 8105, tabs: 8106, drop: 8107, long: 8108, questionReview: 8109, longChoices: 8110, decide: 8111, decideLong: 8112, decideRevise: 8113, decideBlank: 8114, planSteps: 8115, transportRetry: 8116, unchangedPause: 8117, longQuestion: 8118 } as const;
 type Scenario = keyof typeof PORTS;
 const url = (scenario: Scenario) => `http://127.0.0.1:${PORTS[scenario]}/`;
 const left = (page: Page) => page.getByRole("region", { name: "You and Interloq" });
 const right = (page: Page) => page.getByRole("region", { name: "Claude and Codex" });
 const rail = (page: Page) => page.getByRole("navigation", { name: "Progress of the run" });
+/** The question the run waits on, which takes the left column while it is pending (S27). */
+const pane = (page: Page) => page.locator("section.pane");
+const asking = (page: Page, text: string) => pane(page).locator(".question-text", { hasText: text });
+const DATABASE = "Which database should the service use?";
+const CACHE = "Which cache should the service use?";
+const option = (page: Page, name: string | RegExp) => pane(page).getByRole("group", { name: "Proposed answers" }).getByRole("button", { name });
+const continueWithoutDeciding = (page: Page) => pane(page).getByRole("button", { name: CONTINUE_WITHOUT_DECIDING, exact: true });
+/** Confirms the ending of the run in the page's dialog (S25). */
+const confirmEnd = (page: Page) => page.locator("dialog[open] button[name=confirm-end]").click();
 
 type Edges = { left: number; right: number };
 /** The horizontal edges of an element's content box: less its padding and, on the right, any scrollbar (P1-R2-2). */
@@ -44,7 +53,10 @@ const startTask = async (page: Page, scenario: Scenario, task: string) => {
   // which Stop stays disabled and a plain click would wait for the test's whole timeout.
   await expect(async () => {
     if (await form.isVisible()) return;
-    if (await stop.isEnabled({ timeout: 1_000 }).catch(() => false)) await stop.click({ timeout: 2_000 });
+    if (await stop.isEnabled({ timeout: 1_000 }).catch(() => false)) {
+      await stop.click({ timeout: 2_000 });
+      await confirmEnd(page);
+    }
     await again.click({ timeout: 5_000 });
     await expect(form).toBeVisible({ timeout: 2_000 });
   }).toPass({ timeout: 60_000 });
@@ -79,33 +91,41 @@ test("(1) a run from the form: the timeline shows its phases and the right panel
   expect(planningTone).not.toBe(await left(page).locator(".list").evaluate((e) => getComputedStyle(e).backgroundColor));
 });
 
-test("(2) a decision prompt with its buttons: No decision continues, and the answer is the user's message", async ({ page }) => {
+test("(2) a decision prompt with its buttons: Continue without deciding continues, and the answer is the user's message", async ({ page }) => {
   await startTask(page, "decision", "Add a database");
-  await expect(left(page).getByText("Decision on: question from Claude Code: Which database should the service use?")).toBeVisible();
-  await page.getByRole("button", { name: "No decision" }).click();
-  await expect(left(page).locator("[data-author=user]").getByText("No decision")).toBeVisible();
+  await expect(asking(page, DATABASE)).toBeVisible();
+  // S27: while the question waits, it takes the left column; S6: it is the run's first question.
+  await expect(left(page)).toBeHidden();
+  await expect(pane(page).locator("h2")).toHaveText(questionTitle(1));
+  await continueWithoutDeciding(page).click();
+  await expect(left(page).locator("[data-author=user]").getByText(CONTINUE_WITHOUT_DECIDING)).toBeVisible();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
 test("(3) a reload during a run shows the same messages and the pending prompt", async ({ page }) => {
   await startTask(page, "decision", "Add a database again");
-  const prompt = left(page).getByText("Decision on: question from Claude Code: Which database should the service use?");
-  await expect(prompt).toBeVisible();
+  await expect(asking(page, DATABASE)).toBeVisible();
   const before = await left(page).locator("article").allTextContents();
   await page.reload();
-  await expect(prompt).toBeVisible();
+  await expect(asking(page, DATABASE)).toBeVisible();
   expect(await left(page).locator("article").allTextContents()).toEqual(before);
-  await expect(page.getByRole("button", { name: "No decision" })).toBeVisible();
-  await page.getByRole("button", { name: "No decision" }).click();
+  await expect(continueWithoutDeciding(page)).toBeVisible();
+  await continueWithoutDeciding(page).click();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
-test("(4) one click on Stop interrupts the task, and the page offers a new one", async ({ page }) => {
+test("(4) Stop, confirmed, interrupts the task, and the page offers a new one", async ({ page }) => {
   await startTask(page, "stop", "A task to stop");
   await expect(left(page).getByText(/cycle 1: Claude Code response/)).toBeVisible();
   // Issue #14: while the loop runs, each cycle says what its review found.
   await expect(rail(page).getByText("cycle 1: 1 issue", { exact: true })).toBeVisible();
   await page.locator("button[name=stop]").click();
+  // S25: the dialog says what ends and the exit code; Cancel keeps the run, confirming stops it.
+  await expect(page.locator("dialog[open]")).toContainText("exit code 130");
+  await page.locator("dialog[open] button[name=cancel-end]").click();
+  await expect(page.locator("button[name=stop]")).toBeEnabled();
+  await page.locator("button[name=stop]").click();
+  await confirmEnd(page);
   await expect(left(page).getByText(/INTERRUPTED by the user\. State is preserved in/)).toBeVisible();
   await expect(page.locator("button[name=stop]")).toBeDisabled();
   await page.locator("button[name=new]").click();
@@ -125,16 +145,21 @@ test("the fixture records an uncaught error in a second page of the context", as
 
 test("(5) an interview through confirmation: the page's help, a numbered answer, /done, the confirmed summary", async ({ page }) => {
   await startTask(page, "interview", "Add a service");
+  await expect(asking(page, DATABASE)).toBeVisible();
+  // S27: the conversation is one click away while the question waits.
+  await pane(page).getByRole("button", { name: SHOW_CONVERSATION }).click();
   await expect(left(page).getByText("Clarification. /done ends the clarification, /quit ends the run; Shift+Enter starts a new line.")).toBeVisible();
+  await page.getByRole("button", { name: SHOW_QUESTION }).click();
   await expect(left(page).getByText('"""')).toHaveCount(0);
   // Issue #21: Gather Requirements shows its steps; the clarification counts the agreed question, answered or not.
   const step = (label: string) => rail(page).locator("[data-step]", { has: page.locator("[data-step-label]", { hasText: label }) });
   await expect(step(stepLabel("formulate"))).toHaveAttribute("data-step", "done");
   await expect(step("Clarification")).toHaveAttribute("data-step", "active");
   await expect(step("Clarification").locator("[data-count]")).toHaveText("0 of 1 answered");
-  await page.getByRole("button", { name: "1. PostgreSQL" }).click();
-  await expect(left(page).getByText("Anything else?")).toBeVisible();
+  await option(page, /PostgreSQL/).click();
+  await expect(pane(page).getByText("Anything else?")).toBeVisible();
   await expect(step("Clarification").locator("[data-count]")).toHaveText("1 of 1 answered");
+  await pane(page).getByRole("button", { name: SHOW_CONVERSATION }).click();
   // Issue #2 (Q5): in the left panel Claude and Interloq speak from the left, the user from the right.
   const list = left(page).locator(".list");
   await onSide(list.locator("article[data-author=claude]").first(), list, "left");
@@ -147,9 +172,10 @@ test("(5) an interview through confirmation: the page's help, a numbered answer,
   await onSide(band.locator("article[data-author=user]").first(), band, "right");
   const [b, c] = [await edges(band), await contentEdges(list)];
   expect(Math.abs(b.right - b.left - (c.right - c.left)), "the band is as wide as the list's content").toBeLessThanOrEqual(2);
-  await page.getByRole("button", { name: "End clarification" }).click();
-  await expect(left(page).getByText("The service uses PostgreSQL.")).toBeVisible();
-  await page.getByRole("button", { name: "Confirm" }).click();
+  await page.getByRole("button", { name: SHOW_QUESTION }).click();
+  await pane(page).getByRole("button", { name: END_CLARIFICATION }).click();
+  await expect(pane(page).getByText("The service uses PostgreSQL.")).toBeVisible();
+  await pane(page).getByRole("button", { name: CONFIRM_SUMMARY_LABEL, exact: true }).click();
   // Four review loops and an execution follow; the run takes about 5 s alone and longer under the whole suite's load.
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await expect(rail(page).getByText("Gather Requirements", { exact: true })).toBeVisible();
@@ -178,14 +204,13 @@ test("(7) two tabs: another tab's answer withdraws the unsent draft with a notic
   await startTask(page, "tabs", "Add a database");
   const other = await context.newPage();
   await other.goto(url("tabs"));
-  const first = "Decision on: question from Claude Code: Which database should the service use?";
-  await expect(left(other).getByText(first)).toBeVisible();
+  await expect(asking(other, DATABASE)).toBeVisible();
   await other.locator("[name=answer]").fill("an unsent answer");
-  await page.getByRole("button", { name: "No decision" }).click();
-  await expect(left(other).getByText("Decision on: question from Claude Code: Which cache should the service use?")).toBeVisible();
+  await continueWithoutDeciding(page).click();
+  await expect(asking(other, CACHE)).toBeVisible();
   await expect(other.locator("[name=answer]")).toHaveValue("");
   await expect(other.getByText(/answered in another tab; your unsent text was discarded: «an unsent answer»/)).toBeVisible();
-  await other.getByRole("button", { name: "No decision" }).click();
+  await continueWithoutDeciding(other).click();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
@@ -201,28 +226,29 @@ test("(8) a dropped connection: an answer made meanwhile is sent once after the 
     ws.connectToServer();
   });
   await startTask(page, "drop", "Add a database");
-  const prompt = "Decision on: question from Claude Code: Which database should the service use?";
-  await expect(left(page).getByText(prompt)).toBeVisible();
+  await expect(asking(page, DATABASE)).toBeVisible();
   hold = true;
   await current!.close();
   await expect(page.getByText("reconnecting…", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "No decision" }).click();
+  await continueWithoutDeciding(page).click();
   hold = false;
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
-  await expect(left(page).getByText(prompt)).toHaveCount(1);
-  await expect(left(page).locator("[data-author=user]").getByText("No decision")).toHaveCount(1);
+  await expect(left(page).locator("article").filter({ hasText: DATABASE })).toHaveCount(1);
+  await expect(left(page).locator("[data-author=user]").getByText(CONTINUE_WITHOUT_DECIDING)).toHaveCount(1);
 });
 
 test("(9) a long transcript: scrolled up, the position stays while messages arrive, and the chip leads to the end", async ({ page }) => {
   await startTask(page, "long", "Plan in detail");
-  await expect(page.getByRole("button", { name: "No decision" })).toBeVisible({ timeout: 60_000 });
+  await expect(continueWithoutDeciding(page)).toBeVisible({ timeout: 60_000 });
+  await pane(page).getByRole("button", { name: SHOW_CONVERSATION }).click();
   const list = left(page).locator(".list");
   expect(await left(page).locator("article").count()).toBeGreaterThan(150);
   await list.evaluate((el) => {
     el.scrollTop = 0;
     el.dispatchEvent(new Event("scroll"));
   });
-  await page.getByRole("button", { name: "No decision" }).click();
+  await page.getByRole("button", { name: SHOW_QUESTION }).click();
+  await continueWithoutDeciding(page).click();
   await expect(left(page).getByRole("button", { name: /new message/ })).toBeVisible();
   expect(await list.evaluate((el) => el.scrollTop)).toBe(0);
   await left(page).getByRole("button", { name: /new message/ }).click();
@@ -241,15 +267,14 @@ test("(10) Start still starts when the browser refuses to store the directory", 
 
 test("(11) Enter while an input method is composing does not answer", async ({ page }) => {
   await startTask(page, "decision", "Add a database with composition");
-  const prompt = left(page).getByText("Decision on: question from Claude Code: Which database should the service use?");
-  await expect(prompt).toBeVisible();
+  await expect(asking(page, DATABASE)).toBeVisible();
   const field = page.locator("[name=answer]");
   await field.fill("unfinished composition");
   await field.evaluate((el) => el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", isComposing: true, bubbles: true, cancelable: true })));
   await page.waitForTimeout(300);
   await expect(left(page).locator("[data-author=user]")).toHaveCount(0);
   await expect(field).toHaveValue("unfinished composition");
-  await page.getByRole("button", { name: "No decision" }).click();
+  await continueWithoutDeciding(page).click();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
@@ -259,16 +284,16 @@ test("(12) a question phase through the page: the list's review and response, on
   await startTask(page, "questionReview", "Add a service");
   await expect(right(page).getByText("The list does not ask for the port.")).toBeVisible();
   await expect(right(page).getByText(/accepted: rationale Q-R1-1/)).toBeVisible();
-  await expect(left(page).getByText(/Which database should the service use\?/).first()).toBeVisible();
+  await expect(asking(page, DATABASE)).toBeVisible();
   // A second tab receives the same run by replay, and the pending interview prompt with it.
   const other = await context.newPage();
   await other.goto(url("questionReview"));
   await expect(right(other).getByText(/accepted: rationale Q-R1-1/)).toBeVisible();
-  await expect(other.getByRole("button", { name: "1. PostgreSQL" })).toBeVisible();
+  await expect(option(other, /1\. PostgreSQL/)).toBeVisible();
   await other.close();
-  await page.getByRole("button", { name: "1. PostgreSQL" }).click();
-  await expect(left(page).getByText("The service uses PostgreSQL on port 8080.")).toBeVisible();
-  await page.getByRole("button", { name: "Confirm" }).click();
+  await option(page, /1\. PostgreSQL/).click();
+  await expect(pane(page).getByText("The service uses PostgreSQL on port 8080.")).toBeVisible();
+  await pane(page).getByRole("button", { name: CONFIRM_SUMMARY_LABEL, exact: true }).click();
   await expect(right(page).getByText(/Requirements review, cycle 1/)).toBeVisible();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
@@ -276,7 +301,7 @@ test("(12) a question phase through the page: the list's review and response, on
 // Decision support: "Help me decide" on a question with options, the analysis over both chat columns, then the answer.
 test("(13) Help me decide: the analysis covers the chat columns until the question is answered", async ({ page }) => {
   await startTask(page, "decide", "Add a database");
-  await expect(left(page).getByText("Decision on: question from Claude Code: Which database should the service use?")).toBeVisible();
+  await expect(asking(page, DATABASE)).toBeVisible();
   await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
   const analysis = page.getByRole("region", { name: /^Decision 1: / });
   await expect(analysis).toBeVisible();
@@ -285,11 +310,11 @@ test("(13) Help me decide: the analysis covers the chat columns until the questi
   await expect(analysis.getByText("On the other hand, the server needs its own configuration. *")).toBeVisible();
   await expect(left(page)).toBeHidden();
   // The conversation is one click away, and the analysis one click back.
-  await page.getByRole("button", { name: "Show the conversation" }).click();
+  await page.getByRole("button", { name: SHOW_CONVERSATION }).click();
   await expect(left(page)).toBeVisible();
   await page.getByRole("button", { name: "Show the analysis" }).click();
   await expect(analysis).toBeVisible();
-  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /PostgreSQL/ }).click();
+  await option(page, /PostgreSQL/).click();
   await expect(analysis).toBeHidden();
   await expect(left(page).locator("[data-author=user]").getByText("PostgreSQL — a database server")).toBeVisible();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
@@ -304,9 +329,10 @@ test("(14) a revised analysis: the decision's response reaches the page, which s
   await expect(analysis.getByText("The amended advantage: developers set up the service sooner.")).toBeVisible();
   await expect(page.getByText("connected", { exact: true })).toBeVisible();
   await expect(page.getByText(/could not read a message|stopped reconnecting/)).toHaveCount(0);
-  await page.getByRole("button", { name: "Show the conversation" }).click();
+  await page.getByRole("button", { name: SHOW_CONVERSATION }).click();
   await expect(right(page).getByText(/D1-R1-1/).first()).toBeVisible();
-  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: /SQLite/ }).click();
+  await page.getByRole("button", { name: SHOW_QUESTION }).click();
+  await option(page, /SQLite/).click();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
@@ -321,9 +347,9 @@ test("(15) a rejected empty reply keeps the analysis shown; the answer that foll
   await expect(page.locator("[data-author=user]")).toHaveCount(2);
   await expect(analysis).toBeVisible();
   await expect(analysis.locator(".column h3")).toHaveText(["PostgreSQL", "SQLite"]);
-  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button", { name: "1. PostgreSQL" }).click();
+  await option(page, /1\. PostgreSQL/).click();
   await expect(analysis).toBeHidden();
-  await page.getByRole("button", { name: "Confirm" }).click();
+  await pane(page).getByRole("button", { name: CONFIRM_SUMMARY_LABEL, exact: true }).click();
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
@@ -353,6 +379,7 @@ test("(16) the plan in the rail: its stages and steps under the Implementation t
   await page.keyboard.press("Escape");
   await expect(rail(page).getByRole("tooltip")).toHaveCount(0);
   await page.locator("button[name=stop]").click();
+  await confirmEnd(page);
   await expect(page.locator("button[name=new]")).toBeVisible();
   // After the stop no execution runs: the started step is unfinished.
   await expect(step(planStepLabel(2, "The store"))).toHaveAttribute("data-plan-step", "unfinished");
@@ -369,7 +396,37 @@ test("(17) a Codex turn that loses its connection: the page shows the retry, and
 
 test("(18) the pause of an accepted issue with the file unchanged: Proceed continues the review (issue #30)", async ({ page }) => {
   await startTask(page, "unchangedPause", "Document the service");
-  await page.getByRole("button", { name: UNCHANGED_PROCEED, exact: true }).click();
+  await option(page, new RegExp(`^p\\. ${UNCHANGED_PROCEED}`)).click();
   await expect(left(page).locator("[data-author=user]").getByText(UNCHANGED_PROCEED)).toBeVisible();
+  // Issue #19: the pause reached the user as prose; the transcript holds no JSON of the records.
+  await expect(left(page).locator("article").filter({ hasText: /"duplicate_of"|\{\s*"/ })).toHaveCount(0);
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+});
+
+// S28: a term of the question carries its explanation, reached by keyboard; Escape closes it.
+test("(19) a term's explanation is reached by keyboard in the question pane", async ({ page }) => {
+  await startTask(page, "longQuestion", "Add a database");
+  await expect(asking(page, DATABASE)).toBeVisible();
+  const term = pane(page).locator(".question-text .term", { hasText: "service" });
+  await term.focus();
+  await expect(page.getByRole("tooltip")).toContainText("The service of this task, explained in ordinary words");
+  await page.keyboard.press("Escape");
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+  // Shift+Tab reaches the term before it, "database", whose explanation opens in turn.
+  await page.keyboard.press("Shift+Tab");
+  await expect(page.getByRole("tooltip")).toContainText("The database of this task");
+  await continueWithoutDeciding(page).click();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+});
+
+// S24, S25: q typed at a question asks for confirmation; confirmed, the run ends as interrupted, with exit code 130.
+test("(20) q typed and confirmed ends the run as an interruption", async ({ page }) => {
+  await startTask(page, "decision", "Add a database and leave");
+  await expect(asking(page, DATABASE)).toBeVisible();
+  await page.locator("[name=answer]").fill("q");
+  await page.locator("[name=answer]").press("Enter");
+  await expect(page.locator("dialog[open]")).toContainText(confirmEndText("endRun"));
+  await confirmEnd(page);
+  await expect(left(page).getByText(/INTERRUPTED by the user\. State is preserved in/)).toBeVisible();
+  await expect(page.getByText("This task has ended (interrupted).")).toBeVisible();
 });
