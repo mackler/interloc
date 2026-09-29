@@ -95,7 +95,7 @@ test("the question phase notifies its beginning and end and every interview turn
   // The terminal line of a turn is unchanged; S7: the summary is shown in the context of the question that confirms it.
   assert.ok(probe.ui.said.includes("\nAnything to add?\n"));
   const confirm = presentedQuestions(probe.ui).find((q) => q.origin.kind === "confirmSummary");
-  assert.match(confirm?.context.text ?? "", /# Requirements\n\nNone\./);
+  assert.match(confirm?.details ?? "", /# Requirements\n\nNone\./);
   assert.equal(confirm?.question, prompts.CONFIRM_SUMMARY_QUESTION);
 });
 

@@ -217,7 +217,7 @@ const pausesOf = (trace: readonly ReviewCommand[]): string[] =>
   trace.flatMap((c) => {
     if (c.kind === "AskLimit") return ["limit"];
     if (c.kind !== "AskDecision") return [];
-    return [c.asks.kind === "pause" && (c.asks.pause.pause === "unexplained" || c.asks.pause.pause === "identical" || c.asks.pause.pause === "idle") ? c.asks.pause.pause : subjectOf("", c.asks)];
+    return [c.asks.kind === "pause" && (c.asks.facts.pause === "unexplained" || c.asks.facts.pause === "identical" || c.asks.facts.pause === "idle") ? c.asks.facts.pause : subjectOf("", c.asks)];
   });
 
 test("property: a work review's first exit, its round and its pauses equal the independent model's", () => {

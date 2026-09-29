@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { analysisLines, interviewSays, recordHeading, renderDecision, renderResponse, renderReview, renderFeedback, renderQuestions, renderRound, subjectHeading } from "../src/render.ts";
 import { issue, respond } from "./helpers.ts";
 import { viewOf } from "../src/analysisView.ts";
-import type { Argument, DecisionAnalysis, Entry } from "../src/schema.ts";
+import type { Argument, DecisionAnalysis, Entry, LogEntry } from "../src/schema.ts";
 import { OPPOSES_MARKER } from "../src/prompts.ts";
 import * as prompts from "../src/prompts.ts";
 
@@ -163,6 +163,7 @@ test("questionLines prints the heading, the origin, the context, the terms, the 
       { label: "Declare it", description: "add it to package.json", answer: { token: "1" } },
       { label: "More cycles", description: "", answer: { numeric: true as const } },
     ],
+    details: "",
     decision: null,
   };
   const lines = questionLines(q);
@@ -175,6 +176,10 @@ test("questionLines prints the heading, the origin, the context, the terms, the 
   assert.equal(lines[at(q.context.text) - 1], "");
   assert.equal(lines[at(q.question)], q.question);
   assert.equal(lines[at(q.question) - 1], "");
+  // S11: what the question is about follows the context, before the terms and the question.
+  const withDetails = questionLines({ ...q, details: "Codex says: the migration is missing." });
+  const d = withDetails.findIndex((l) => l.includes("Codex says"));
+  assert.ok(d > withDetails.findIndex((l) => l.includes(q.context.text)) && d < withDetails.findIndex((l) => l.includes(prompts.TERMS_HEADING)));
   // A context the program wrote is marked as the program's.
   assert.ok(questionLines({ ...q, context: { text: "x", by: "program" } }).some((l) => l.includes(prompts.CONTEXT_BY_PROGRAM)));
   assert.ok(!lines.some((l) => l.includes(prompts.CONTEXT_BY_PROGRAM)));
@@ -190,8 +195,40 @@ test("a question inside a decision says in its origin line that it belongs to th
 
 test("conversation.md records a question under its displayed number with the record's id beside it (S6)", async () => {
   const { renderQuestionRecord } = await import("../src/render.ts");
-  const q = { number: 3, origin: { kind: "clarification" as const, id: "Q1" }, context: { text: "c", by: "agent" as const }, terms: [], question: "Which?", options: [], decision: null };
+  const q = { number: 3, origin: { kind: "clarification" as const, id: "Q1" }, context: { text: "c", by: "agent" as const }, terms: [], question: "Which?", options: [], details: "", decision: null };
   assert.match(renderQuestionRecord(q), /^### Question 3 \(Q1\)\n/);
   assert.match(renderQuestionRecord({ ...q, origin: { kind: "relayed" } }), /^### Question 3\n/);
   assert.match(renderQuestionRecord({ ...q, origin: { kind: "pause", heading: "Planning phase 1", pause: "reraised", id: "P1-R1-2" } }), /^### Question 3 \(P1-R1-2\)\n/);
+});
+
+// S11 (issue #19): a pause's facts are prose, never JSON: the issue's problem and evidence, each earlier disposition
+// and its rationale in words, and no empty fields.
+test("pauseProse writes every kind of pause as prose, without the record's field names or empty fields", async () => {
+  const { pauseProse } = await import("../src/render.ts");
+  const earlier = [
+    { id: "P1-R1-1", phase: 1, round: 1, source: "review" as const, severity: "major" as const, location: "S3", problem: "The plan omits the migration.", evidence: "Step S3 writes the table\nbut never migrates it.", action: "rejected" as const, rationale: "The migration is in S4.", duplicate_of: null, reverses: null, superseded: true },
+    { id: "P1-R1-1", phase: 1, round: 2, source: "user" as const, problem: "The plan omits the migration.", action: "decided_by_user" as const, rationale: "Add it to S3.", superseded: false },
+  ] as unknown as LogEntry[];
+  const issueNow = { id: "P1-R2-1", severity: "major" as const, location: "S3", problem: "Still no migration.", evidence: "S3 is unchanged." };
+  const disposition = { id: "P1-R2-1", action: "partially_accepted" as const, rationale: "Only the index.", duplicate_of: "", reverses: "" };
+  const all = [
+    pauseProse({ pause: "reraised", id: "P1-R1-1", history: earlier, issue: issueNow }),
+    pauseProse({ pause: "secondClarification", id: "P1-R1-1", history: earlier, disposition }),
+    pauseProse({ pause: "disputedSelfCorrection", id: "P1-R1-1", explanation: "It breaks the build.", history: earlier }),
+    pauseProse({ pause: "reversal", id: "P1-R2-1", reverses: "P1-R1-1", history: earlier, issue: issueNow, disposition }),
+    pauseProse({ pause: "repeatedUnderNewId", id: "P1-R2-1", repeats: "P1-R1-1", history: earlier, issue: issueNow }),
+    pauseProse({ pause: "unexplained", fileLabel: "plan.json", heading: "Planning phase 1", round: 2, resultText: "I tidied it." }),
+    pauseProse({ pause: "identical", fileLabel: "plan.json", round: 3, seen: "cycle 1" }),
+    pauseProse({ pause: "idle", idle: 2, round: 2, issues: [earlier[0]] }),
+  ];
+  for (const text of all) {
+    assert.ok(text.trim() !== "");
+    for (const forbidden of ["{", "duplicate_of", "reverses:", "superseded", "\\n", "null", "decided_by_user", "partially_accepted"]) assert.ok(!text.includes(forbidden), `${forbidden} in: ${text}`);
+  }
+  assert.match(all[0], /The plan omits the migration\./);
+  assert.match(all[0], /Codex says: Still no migration\.\n\nS3 is unchanged\./);
+  assert.match(all[0], /Codex raised it: The plan omits the migration\. — Claude Code rejected it: The migration is in S4\./);
+  assert.match(all[0], /you decided: Add it to S3\./);
+  assert.match(all[1], /accepted it in part: Only the index\./);
+  assert.match(all[5], /I tidied it\./);
 });

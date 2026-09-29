@@ -18,7 +18,7 @@ import { Decider, Store, Ui } from "./services.ts";
  */
 export type OfferedOption = Readonly<{ label: string; description: string; answer: OptionAnswer; matches: (answer: string) => boolean }>;
 /** A question before it is numbered (S7): everything the user is shown of it but its number. */
-export type QuestionDraft = Readonly<{ origin: QuestionOrigin; context: QuestionContextText; terms: readonly Term[]; question: string; options: readonly OfferedOption[]; decision: number | null }>;
+export type QuestionDraft = Readonly<{ origin: QuestionOrigin; context: QuestionContextText; terms: readonly Term[]; question: string; options: readonly OfferedOption[]; details?: string; decision: number | null }>;
 /** The fixed context paragraph of a question the program composes (S7, S10), marked as the program's. */
 export const programContext = (origin: QuestionOrigin): QuestionContextText => ({ text: prompts.fallbackContext(origin), by: "program" });
 /** An agent's context paragraph; the program's own paragraph where the agent wrote none. */
@@ -36,6 +36,7 @@ export const presentedQuestion = (draft: QuestionDraft, number: number): Present
   terms: draft.terms,
   question: draft.question,
   options: draft.options.map((o) => ({ label: o.label, description: o.description, answer: o.answer })),
+  details: draft.details ?? "",
   decision: draft.decision,
 });
 

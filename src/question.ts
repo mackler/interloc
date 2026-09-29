@@ -3,7 +3,7 @@
 import { Result } from "effect";
 import { QuestionInvalid } from "./errors.ts";
 import type { QuestionProblem } from "./prompts.ts";
-import type { QuestionOption, Term } from "./schema.ts";
+import type { Disposition, Issue, LogEntry, QuestionOption, Term } from "./schema.ts";
 
 export type { QuestionOption, Term };
 
@@ -78,6 +78,41 @@ export type PauseOrigin =
   | Readonly<{ pause: "identical"; fileLabel: string }>
   | Readonly<{ pause: "idle"; idle: number }>;
 
+/** A log entry of a pause's facts; its prose never shows the program's measurement (issue #31). */
+export type ShownEntry = LogEntry;
+/**
+ * What a pause of behaviour 7 is about, as data (S11, issue #19): the ids of its origin, and the review issue, the
+ * disposition and the earlier log entries that the user reads as prose (`pauseProse` in src/render.ts), never as JSON.
+ */
+export type PauseFacts =
+  | Readonly<{ pause: "reraised"; id: string; history: readonly ShownEntry[]; issue: Issue | null }>
+  | Readonly<{ pause: "secondClarification"; id: string; history: readonly ShownEntry[]; disposition: Disposition | null }>
+  | Readonly<{ pause: "disputedSelfCorrection"; id: string; explanation: string; history: readonly ShownEntry[] }>
+  | Readonly<{ pause: "reversal"; id: string; reverses: string; history: readonly ShownEntry[]; issue: Issue | null; disposition: Disposition | null }>
+  | Readonly<{ pause: "repeatedUnderNewId"; id: string; repeats: string; history: readonly ShownEntry[]; issue: Issue | null }>
+  | Readonly<{ pause: "unexplained"; fileLabel: string; heading: string; round: number; resultText: string }>
+  | Readonly<{ pause: "identical"; fileLabel: string; round: number; seen: string }>
+  | Readonly<{ pause: "idle"; idle: number; round: number; issues: readonly ShownEntry[] }>;
+/** The ids a pause's origin keeps of its facts. */
+export const pauseOriginOf = (facts: PauseFacts): PauseOrigin => {
+  switch (facts.pause) {
+    case "reraised":
+    case "secondClarification":
+    case "disputedSelfCorrection":
+      return { pause: facts.pause, id: facts.id };
+    case "reversal":
+      return { pause: "reversal", id: facts.id, reverses: facts.reverses };
+    case "repeatedUnderNewId":
+      return { pause: "repeatedUnderNewId", id: facts.id, repeats: facts.repeats };
+    case "unexplained":
+      return { pause: "unexplained", fileLabel: facts.fileLabel, heading: facts.heading, round: facts.round };
+    case "identical":
+      return { pause: "identical", fileLabel: facts.fileLabel };
+    case "idle":
+      return { pause: "idle", idle: facts.idle };
+  }
+};
+
 /**
  * What produced a question (S5): where it arose in the run, with what the record and the origin line need to name it.
  * A question inside decision k carries k in `PresentedQuestion.decision`, whatever its origin (issue #57).
@@ -123,5 +158,7 @@ export type PresentedQuestion = Readonly<{
   terms: readonly Term[];
   question: string;
   options: readonly PresentedOption[];
+  /** What the question is about, in Markdown, shown with the context (S11): a pause's facts, the summary to confirm; "" when none. */
+  details: string;
   decision: number | null;
 }>;

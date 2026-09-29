@@ -2,11 +2,14 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
+import { pauseProse } from "../src/render.ts";
 import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, subjectOf, type Transition } from "../src/reviewState.ts";
 import type { LogEntry } from "../src/schema.ts";
 import { issue, respond } from "./helpers.ts";
 import * as prompts from "../src/prompts.ts";
 
+/** What the user reads of a pause the loop asks (S11): its facts as prose. */
+const askedProse = (c: ReviewCommand): string => (c.kind === "AskDecision" && c.asks.kind === "pause" ? pauseProse(c.asks.facts) : "");
 /** The record's subject of a decision the loop asks (S7): composed from what it asks by the one function. */
 const askedSubject = (c: ReviewCommand, state: ReviewState): string => {
   assert.equal(c.kind, "AskDecision");
@@ -65,10 +68,10 @@ test("a counted review saves the review, reports the count, and asks about each 
   const t = run(start({}, [entry("A", "rejected")]), { kind: "ReviewDecoded", review: { issues: [issue("A"), issue("B")] } });
   assert.ok(kinds(t).includes("SaveReview"));
   assert.match(says(t), /Issues: 2 total, 2 counted/);
-  assert.match(says(t), /raised again/);
+  assert.match(askedProse(last(t)), /raised issue A again/);
   assert.deepEqual(last(t), {
     kind: "AskDecision",
-    asks: { kind: "pause", pause: { pause: "reraised", id: "A" } },
+    asks: { kind: "pause", facts: { pause: "reraised", id: "A", history: [entry("A", "rejected")], issue: issue("A") } },
     id: "A",
     options: [{ label: prompts.REVIEWER_POSITION, description: "p e" }, { label: prompts.PLANNER_POSITION, description: "r" }],
   });
@@ -132,7 +135,7 @@ test("the pauses ask in the decided order and a decision leads to ApplyDecisions
 
 test("an unexplained change asks; no decision leads on, a decision applies and observes again", () => {
   const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" });
-  assert.match(says(t), /changed in cycle 1 without an accepted issue/);
+  assert.match(askedProse(last(t)), /changed in cycle 1 although Claude Code accepted no issue/);
   assert.match(askedSubject(last(t), t.state), /^the unexplained change to plan\.md in Planning phase 1, cycle 1$/);
   assert.equal(last(t).kind, "AskDecision");
   const onward = advance(t.state, { kind: "DecisionGiven", text: "" });
@@ -150,14 +153,14 @@ test("an unexplained change asks; no decision leads on, a decision applies and o
 test("identical content names the round after which it was seen, with the decision stage", () => {
   const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" }, { kind: "DecisionGiven", text: "" });
   const round2 = run(t, { kind: "ReviewDecoded", review: { issues: [issue("B")] } }, response([["B", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" }, { kind: "DecisionGiven", text: "" });
-  assert.match(says(round2), /after cycle 2 is identical to plan\.md after cycle 0 \(cycle 0 is the state at the start\)/);
+  assert.match(askedProse(last(round2)), /after cycle 2 is identical to plan\.md after cycle 0 \(cycle 0 is the state at the start\)/);
   assert.equal(last(round2).kind, "AskDecision");
 });
 
 test("idle rounds: the prompt after maxIdleRounds, a decision applies and is observed as a decision stage, and the counter resets", () => {
   const t = run(afterReview(), { kind: "ResponseDecoded", response: respond([["A", "rejected"]]), resultText: "", costUsd: null }, { kind: "FileObserved", hash: "h0", text: "" });
   const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
-  assert.match(says(idle), /accepted no issue in 1 consecutive cycles\. Issues of cycle 1 without amendment:/);
+  assert.match(askedProse(last(idle)), /accepted no issue in the last cycle\.\n\nThe issues of the last cycle that led to no change:\n\n- In cycle 1, Codex raised it: p — Claude Code rejected it: rationale A$/);
   assert.equal(askedSubject(last(idle), idle.state), "the issues of the last 1 cycles that produced no amendment");
   assert.equal(last(idle).kind, "AskDecision");
   const applied = run(idle, { kind: "DecisionGiven", text: "apply" }, { kind: "DecisionsApplied" });

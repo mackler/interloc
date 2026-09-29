@@ -83,3 +83,14 @@ test("S7: every ask is preceded by the presentation of its question, and every k
     assert.ok(q.context.text.trim() !== "", `question ${q.number} has no context`);
   }
 });
+
+test("S11: a pause reaches the user as prose: no line said and no question shown carries JSON (issue #19)", async () => {
+  const { layer, probe } = scenario();
+  await runTask(layer);
+  const pause = presentedQuestions(probe.ui).find((q) => q.origin.kind === "pause");
+  assert.ok(pause !== undefined);
+  assert.match(pause.details, new RegExp(`^${prompts.pauseLead({ pause: "reraised", id: "P1-R1-1" })}`));
+  assert.match(pause.details, /Codex says: p\n\ne/);
+  const shown = [...probe.ui.said, ...presentedQuestions(probe.ui).flatMap((q) => [q.context.text, q.details, q.question, ...q.options.map((o) => o.description)])];
+  for (const text of shown) for (const forbidden of ["{\n", '"duplicate_of"', "duplicate_of:", "superseded", "\\n"]) assert.ok(!text.includes(forbidden), `${forbidden} in: ${text}`);
+});

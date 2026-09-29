@@ -6,7 +6,8 @@ import { Effect, Ref, Result, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
-import { type Question, type QuestionOrigin, validateQuestions } from "./question.ts";
+import { pauseOriginOf, type Question, type QuestionOrigin, validateQuestions } from "./question.ts";
+import { pauseProse } from "./render.ts";
 import * as prompts from "./prompts.ts";
 import { questionRepairPrompt, correctivePrompt, transportReviewWhat, transportWhat, repairReplyPrompt, type RespondContext } from "./prompts.ts";
 import { correctiveValidation } from "./round.ts";
@@ -73,8 +74,9 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
  */
 export const decisionDraft = (heading: string, asks: Asks, options: readonly Option[], decision: number | null): QuestionDraft => {
   if (asks.kind === "planner") return plannerDraft(asks.question, heading, decision);
-  const origin: QuestionOrigin = { kind: "pause", heading, ...asks.pause };
-  return { origin, context: programContext(origin), terms: [], question: prompts.pauseQuestion(asks.pause), options: numberedOptions(options), decision };
+  const pause = pauseOriginOf(asks.facts);
+  const origin: QuestionOrigin = { kind: "pause", heading, ...pause };
+  return { origin, context: programContext(origin), terms: [], question: prompts.pauseQuestion(pause), options: numberedOptions(options), details: pauseProse(asks.facts), decision };
 };
 /** A question Claude Code returned with a plan or a response (S7): its context, terms and options as it wrote them. */
 export const plannerDraft = (question: UserQuestion, heading: string, decision: number | null): QuestionDraft => {

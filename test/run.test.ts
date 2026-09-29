@@ -67,8 +67,10 @@ test("a pause shows the log entries without file_change, while issue-log.json ke
     execs: [finished],
   });
   await runTask(layer);
-  assert.ok(probe.ui.said.some((line) => line.includes('"rationale"')), "the pause showed no log entry");
-  assert.equal(probe.ui.said.some((line) => line.includes(S.FILE_CHANGE_FIELD)), false, "the user was shown file_change");
+  // S11: the pause shows the point's history as prose; the measurement is not in it.
+  const details = presentedQuestions(probe.ui).map((q) => q.details).join("\n");
+  assert.match(details, /Claude Code rejected it: rationale B/, "the pause showed no log entry");
+  assert.equal([...probe.ui.said, details].some((line) => line.includes(S.FILE_CHANGE_FIELD) || /lines? added/.test(line)), false, "the user was shown file_change");
   assert.ok((await probe.loadLog()).some((e) => S.FILE_CHANGE_FIELD in e), "issue-log.json lacks file_change");
 });
 
@@ -296,8 +298,8 @@ test("the identical-content message names the round after which the content was 
     config: { maxIdleRounds: 1, maxRounds: 6 },
   });
   assert.equal(await runTask(layer), 1);
-  const identical = probe.ui.said.filter((line) => /is identical to plan\.json after/.test(line));
-  assert.equal(identical.length, 1, probe.ui.said.join("\n"));
+  const identical = presentedQuestions(probe.ui).map((q) => q.details).filter((line) => /is identical to plan\.json after/.test(line));
+  assert.equal(identical.length, 1, presentedSubjects(probe.ui).join("\n"));
   assert.match(identical[0], /identical to plan\.json after cycle 2\b/);
 });
 

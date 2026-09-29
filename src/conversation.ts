@@ -10,7 +10,7 @@ import { planningCall } from "./review.ts";
 import * as S from "./schema.ts";
 import { clarificationCount, normalizeTurn, type TurnVariant } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
-import { agentContext, askOffering, numberedOptions, type QuestionDraft } from "./offer.ts";
+import { agentContext, askOffering, numberedOptions, programContext, type QuestionDraft } from "./offer.ts";
 import type { QuestionOrigin } from "./question.ts";
 import { numberedOptionLabels } from "./userPrompts.ts";
 import type { InterviewStage } from "./uiEvents.ts";
@@ -52,8 +52,7 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
       if (turn.kind === "summary_proposed") {
         // S7: the summary is read beside the question that confirms it, after the program's paragraph.
         const origin: QuestionOrigin = { kind: "confirmSummary" };
-        const context = { text: `${prompts.fallbackContext(origin)}\n\n${turn.summary.trim()}`, by: "program" as const };
-        const draft: QuestionDraft = { origin, context, terms: [], question: prompts.CONFIRM_SUMMARY_QUESTION, options: [], decision: null };
+        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.CONFIRM_SUMMARY_QUESTION, options: [], details: turn.summary.trim(), decision: null };
         const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.confirmSummaryPrompt, draft));
         if (reply.kind !== "text") {
           yield* store.writeRequirements(turn.summary.trimEnd() + "\n");

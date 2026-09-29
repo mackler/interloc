@@ -502,14 +502,8 @@ export function observedAfter(cycle: number, afterDecision: boolean): string {
 export function alternatingSubject(fileLabel: string): string {
   return `which of the two alternating versions of ${fileLabel} is correct`;
 }
-export function idleLine(idle: number, cycle: number): string {
-  return `\nClaude Code accepted no issue in ${idle} consecutive cycles. Issues of cycle ${cycle} without amendment:`;
-}
 export function idleSubject(idle: number): string {
   return `the issues of the last ${idle} cycles that produced no amendment`;
-}
-export function unexplainedChangeLine(fileLabel: string, cycle: number): string {
-  return `\n${fileLabel} changed in cycle ${cycle} without an accepted issue, a self-correction, or a user decision.`;
 }
 export function unexplainedChangeSubject(fileLabel: string, heading: string, cycle: number): string {
   return `the unexplained change to ${fileLabel} in ${cycleHeading(heading, cycle)}`;
@@ -1287,7 +1281,7 @@ export function pauseQuestion(p: PauseOrigin): string {
     case "identical":
       return `${p.fileLabel} has returned to a version it had before, so the review alternates between two versions. Which of the two versions is correct?`;
     case "idle":
-      return `Claude Code has accepted no point of the review for ${p.idle} rounds in a row. What should Claude Code and Codex do about the points that led to no change?`;
+      return `Claude Code has accepted no point of the review ${p.idle === 1 ? "in the last cycle" : `in ${p.idle} cycles in a row`}. What should Claude Code and Codex do about the points that led to no change?`;
   }
 }
 /** The question after an empty agreed question list (behaviour 2). */
@@ -1338,3 +1332,76 @@ export function fallbackContext(origin: QuestionOrigin): string {
       return `${interloq} Every call to an agent goes over the network. ${agentWords(origin.agent)} could not be reached for ${origin.what} after ${origin.attempts} attempts; the last error was: ${origin.fault}. Interloq waited and tried again automatically. It now asks you whether to try again or stop the run; the run's records are kept either way.`;
   }
 }
+
+// ---- a pause's facts as prose (S11, issue #19) -------------------------------------------------------------------------
+
+/** What Claude Code did with an issue, in words: a disposition's action, never its literal value. */
+export function dispositionWords(action: "accepted" | "partially_accepted" | "rejected" | "no_change_needed" | "clarification_requested"): string {
+  switch (action) {
+    case "accepted":
+      return "accepted it";
+    case "partially_accepted":
+      return "accepted it in part";
+    case "rejected":
+      return "rejected it";
+    case "no_change_needed":
+      return "found that no change was needed";
+    case "clarification_requested":
+      return "asked Codex to clarify it";
+  }
+}
+/** What Claude Code did to its own earlier work, in words. */
+export function selfCorrectionWords(action: "accepted" | "plan_error" | "correction_disputed"): string {
+  switch (action) {
+    case "accepted":
+      return "withdrew its earlier rejection and accepted the point";
+    case "plan_error":
+      return "corrected an error of its own";
+    case "correction_disputed":
+      return "said that its earlier correction was wrong";
+  }
+}
+/** One earlier entry of an issue's history. */
+export function reviewEntryLine(round: number, problem: string, action: string, rationale: string): string {
+  return `In cycle ${round}, Codex raised it: ${problem.trim()} — Claude Code ${action}: ${rationale.trim()}`;
+}
+export function selfCorrectionLine(round: number, action: string, rationale: string): string {
+  return `In cycle ${round}, Claude Code ${action}: ${rationale.trim()}`;
+}
+export function userDecisionLine(round: number, rationale: string): string {
+  return `In cycle ${round}, you decided: ${rationale.trim()}`;
+}
+export const HISTORY_HEADING = "What happened to this point before:";
+export const CODEX_SAYS = "Codex says:";
+export function claudeAnswers(action: string, rationale: string): string {
+  return `Claude Code ${action}: ${rationale.trim()}`;
+}
+/** The first sentence of each pause's facts. */
+export function pauseLead(p: PauseOrigin): string {
+  switch (p.pause) {
+    case "reraised":
+      return `Codex has raised issue ${p.id} again, although Claude Code did not accept it in full.`;
+    case "secondClarification":
+      return `Claude Code asks for a clarification of issue ${p.id} a second time; one exchange did not settle it.`;
+    case "disputedSelfCorrection":
+      return `Claude Code now considers wrong the correction it made for issue ${p.id}.`;
+    case "reversal":
+      return `Codex's issue ${p.id} asks to reverse the correction that was made for issue ${p.reverses}.`;
+    case "repeatedUnderNewId":
+      return `Codex's issue ${p.id} repeats issue ${p.repeats}, which Claude Code did not accept in full.`;
+    case "unexplained":
+      return `${p.fileLabel} changed in cycle ${p.round} although Claude Code accepted no issue, corrected nothing of its own and had no decision of yours to apply.`;
+    case "identical":
+      return `${p.fileLabel} has returned to an earlier version.`;
+    case "idle":
+      return `Claude Code accepted no issue ${p.idle === 1 ? "in the last cycle" : `in ${p.idle} cycles in a row`}.`;
+  }
+}
+/** Claude Code's own account of a response that changed the file unexplained. */
+export function claudeResponseText(text: string): string {
+  return text.trim() === "" ? "Claude Code gave no account of its response." : `Claude Code's own account of its response: ${text.trim()}`;
+}
+export function identicalFacts(fileLabel: string, round: number, seen: string): string {
+  return identicalContentLine(fileLabel, round, seen).trim();
+}
+export const IDLE_ISSUES_HEADING = "The issues of the last cycle that led to no change:";

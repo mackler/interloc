@@ -26,7 +26,7 @@ const examples: { [K in UiEvent["_tag"]]: [Extract<UiEvent, { _tag: K }>, RegExp
   InterviewOpened: [{ _tag: "InterviewOpened", heading: "Clarification", stage: "clarification", total: 3 }, /Clarification opened, 3 questions/],
   ClaudeSaid: [{ _tag: "ClaudeSaid", text: "done" }, /Claude Code said: done/],
   QuestionPresented: [
-    { _tag: "QuestionPresented", question: { number: 3, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Which?", options: [{ label: "A", description: "", answer: { token: "1" } }, { label: "B", description: "", answer: { token: "2" } }], decision: null } },
+    { _tag: "QuestionPresented", question: { number: 3, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Which?", options: [{ label: "A", description: "", answer: { token: "1" } }, { label: "B", description: "", answer: { token: "2" } }], details: "", decision: null } },
     /question 3: Which\? \(2 options\)/,
   ],
   DecisionAnalyzed: [{ _tag: "DecisionAnalyzed", decision: 2, question: "Which?", options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } }, /decision 2 analyzed: Which\? \(0 columns\)/],

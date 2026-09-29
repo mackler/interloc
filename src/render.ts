@@ -4,7 +4,9 @@
 import type { SubjectId } from "./artifacts.ts";
 import type { AnalysisView, EntryView } from "./analysisView.ts";
 import { CONTEXT_BY_PROGRAM, decisionViewHeading, OPPOSES_MARKER, optionHeading, originLine, questionTitle, recommendedOption, TERMS_HEADING } from "./prompts.ts";
-import type { PresentedOption, PresentedQuestion, QuestionOrigin } from "./question.ts";
+import { type PauseFacts, pauseOriginOf, type PresentedOption, type PresentedQuestion, type QuestionOrigin, type ShownEntry } from "./question.ts";
+import * as words from "./prompts.ts";
+import type { Disposition, Issue } from "./schema.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { TurnText } from "./schemaNormalize.ts";
@@ -139,8 +141,8 @@ export const optionLine = (o: PresentedOption): string => {
 const indented = (text: string, by: string): readonly string[] => text.split("\n").map((line) => (line.trim() === "" ? "" : `${by}${line}`));
 /**
  * A question as the terminal prints it (S8), the same shape whatever produced it: the heading with its number and the
- * line saying where it came from; the context paragraph, indented and set apart, marked when the program wrote it; the
- * terms with their explanations (decision Q6); the question itself, not indented, so that it reads apart from the
+ * line saying where it came from; the context paragraph, indented and set apart, marked when the program wrote it; what
+ * the question is about (a pause's facts, the summary to confirm; S11); the terms with their explanations (decision Q6); the question itself, not indented, so that it reads apart from the
  * context; and the options, each with the answer that chooses it.
  */
 export const questionLines = (q: PresentedQuestion): readonly string[] => [
@@ -149,6 +151,7 @@ export const questionLines = (q: PresentedQuestion): readonly string[] => [
   ...indented(originLine(q.origin, q.decision), "  "),
   "",
   ...indented(q.context.by === "program" ? `${q.context.text} (${CONTEXT_BY_PROGRAM})` : q.context.text, "    "),
+  ...(q.details.trim() === "" ? [] : ["", ...indented(q.details, "    ")]),
   ...(q.terms.length === 0 ? [] : ["", `    ${TERMS_HEADING}`, ...q.terms.flatMap((t) => indented(`${t.term}: ${t.explanation}`, "      "))]),
   "",
   ...q.question.split("\n"),
@@ -165,12 +168,59 @@ export const renderQuestionRecord = (q: PresentedQuestion): string => {
   const terms = q.terms.length === 0 ? "" : `**${TERMS_HEADING}**\n\n${q.terms.map((t) => `- ${t.term}: ${t.explanation}`).join("\n")}\n\n`;
   const options = q.options.length === 0 ? "" : `${q.options.map((o) => `- ${"token" in o.answer ? `${o.answer.token}. ` : ""}${o.label}${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}\n\n`;
   const context = q.context.text.trim() === "" ? "" : `${q.context.text.split("\n").map((l) => `> ${l}`).join("\n")}${q.context.by === "program" ? ` (${CONTEXT_BY_PROGRAM})` : ""}\n\n`;
-  return `### ${questionTitle(q.number)}${id === null ? "" : ` (${id})`}\n\n_${originLine(q.origin, q.decision)}_\n\n${context}${terms}**${q.question}**\n\n${options}`;
+  const details = q.details.trim() === "" ? "" : `${q.details.trim()}\n\n`;
+  return `### ${questionTitle(q.number)}${id === null ? "" : ` (${id})`}\n\n_${originLine(q.origin, q.decision)}_\n\n${context}${details}${terms}**${q.question}**\n\n${options}`;
 };
 /** A question as the page shows it in the conversation (S8): the same parts as the terminal's, in Markdown. */
 export const questionMarkdown = (q: PresentedQuestion): string => {
   const context = q.context.text.trim() === "" ? "" : `${q.context.text}${q.context.by === "program" ? ` _(${CONTEXT_BY_PROGRAM})_` : ""}\n\n`;
   const terms = q.terms.length === 0 ? "" : `${TERMS_HEADING}\n\n${q.terms.map((t) => `- **${t.term}**: ${t.explanation}`).join("\n")}\n\n`;
   const options = q.options.length === 0 ? "" : `\n\n${q.options.map((o) => `- ${"token" in o.answer ? `${o.answer.token}. ` : ""}**${o.label}**${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}`;
-  return `**${questionTitle(q.number)}** · _${originLine(q.origin, q.decision)}_\n\n${context}${terms}**${q.question}**${options}`;
+  const details = q.details.trim() === "" ? "" : `${q.details.trim()}\n\n`;
+  return `**${questionTitle(q.number)}** · _${originLine(q.origin, q.decision)}_\n\n${context}${details}${terms}**${q.question}**${options}`;
+};
+
+// ---- a pause's facts as prose (S11, issue #19) -------------------------------------------------------------------------
+
+/** One entry of an issue's history in words, without the record's field names or its empty fields. */
+const entryProse = (e: ShownEntry): string => {
+  switch (e.source) {
+    case "review":
+      return words.reviewEntryLine(e.round, e.problem, words.dispositionWords(e.action), e.rationale);
+    case "self_correction":
+      return words.selfCorrectionLine(e.round, words.selfCorrectionWords(e.action), e.rationale);
+    case "user":
+      return words.userDecisionLine(e.round, e.rationale);
+  }
+};
+const historyProse = (history: readonly ShownEntry[]): readonly string[] => (history.length === 0 ? [] : [words.HISTORY_HEADING, history.map((e) => `- ${entryProse(e)}`).join("\n")]);
+const issueProse = (issue: Issue | null): readonly string[] => (issue === null ? [] : [`${words.CODEX_SAYS} ${issue.problem.trim()}`, ...(issue.evidence.trim() === "" ? [] : [issue.evidence.trim()])]);
+const answerProse = (d: Disposition | null): readonly string[] => (d === null ? [] : [words.claudeAnswers(words.dispositionWords(d.action), d.rationale)]);
+/**
+ * A pause of behaviour 7 as the user reads it (S11, issue #19): what happened, what Codex says and what Claude Code
+ * answers, and the point's history, in Markdown; the null and empty fields of the records are left out.
+ */
+export const pauseProse = (facts: PauseFacts): string => {
+  const lead = words.pauseLead(pauseOriginOf(facts));
+  const parts = ((): readonly string[] => {
+    switch (facts.pause) {
+      case "reraised":
+        return [...issueProse(facts.issue), ...historyProse(facts.history)];
+      case "secondClarification":
+        return [...answerProse(facts.disposition), ...historyProse(facts.history)];
+      case "disputedSelfCorrection":
+        return [facts.explanation.trim(), ...historyProse(facts.history)];
+      case "reversal":
+        return [...issueProse(facts.issue), ...answerProse(facts.disposition), ...historyProse(facts.history)];
+      case "repeatedUnderNewId":
+        return [...issueProse(facts.issue), ...historyProse(facts.history)];
+      case "unexplained":
+        return [words.claudeResponseText(facts.resultText)];
+      case "identical":
+        return [words.identicalFacts(facts.fileLabel, facts.round, facts.seen)];
+      case "idle":
+        return facts.issues.length === 0 ? [] : [words.IDLE_ISSUES_HEADING, facts.issues.map((e) => `- ${entryProse(e)}`).join("\n")];
+    }
+  })();
+  return [lead, ...parts.filter((p) => p !== "")].join("\n\n");
 };

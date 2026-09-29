@@ -56,6 +56,7 @@ const presentedQuestion = fc.record({
   terms: fc.array(fc.record({ term: text, explanation: text }), { maxLength: 2 }),
   question: text,
   options: fc.array(fc.record({ label: text, description: text, answer: fc.oneof(fc.record({ token: text }), fc.constant({ numeric: true as const })) }), { maxLength: 3 }),
+  details: text,
   decision: fc.option(nat, { nil: null }),
 });
 const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(

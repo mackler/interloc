@@ -81,6 +81,7 @@ export const PresentedQuestionSchema = Schema.Struct({
   terms: Schema.Array(S.Term),
   question: Str,
   options: Schema.Array(Schema.Struct({ label: Str, description: Str, answer: Schema.Union([Schema.Struct({ token: Str }), Schema.Struct({ numeric: Schema.Literal(true) })]) })),
+  details: Str,
   decision: Schema.NullOr(Int),
 });
 

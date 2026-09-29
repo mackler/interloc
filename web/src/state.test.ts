@@ -17,7 +17,7 @@ const asked = (prompt: number, text: string): RunEvent => ({ _tag: "Asked", prom
 /** A question presented to the user (S5), with its options numbered as the run numbers them. */
 const presentedEvent = (question: string, options: readonly { label: string; description: string }[], origin: PresentedQuestion["origin"] = { kind: "relayed" }): UiEvent => ({
   _tag: "QuestionPresented",
-  question: { number: 1, origin, context: { text: "", by: "agent" }, terms: [], question, options: options.map((o, i) => ({ ...o, answer: { token: String(i + 1) } })), decision: null },
+  question: { number: 1, origin, context: { text: "", by: "agent" }, terms: [], question, options: options.map((o, i) => ({ ...o, answer: { token: String(i + 1) } })), details: "", decision: null },
 });
 const presentedOf = (event: UiEvent): PresentedQuestion => (event._tag === "QuestionPresented" ? event.question : (undefined as never));
 /** The time of publication of an event: by default one second per seq from 14:00:00 UTC; `times` gives it in seconds. */
