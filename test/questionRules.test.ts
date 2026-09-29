@@ -43,3 +43,18 @@ test("every prompt that may return questions_for_user carries the writer's rende
   ];
   for (const text of texts) assert.ok(text.includes(prompts.questionWritingRules()), text.slice(0, 80));
 });
+
+// S15 (issues #34, #58, #59): the question list's prompt asks for the context of every entry under the rules, which
+// apply to the reason, the proposed answers and the default too; its review is given the same rules as criteria.
+test("the question list prompt carries the writer's rules and asks for a context per entry; its review carries the criteria", () => {
+  const list = prompts.questionListPrompt("t");
+  assert.ok(list.includes(prompts.questionWritingRules()));
+  assert.match(list, /context: the context paragraph that precedes the question/);
+  assert.match(list, /The rules apply to the question, its reason, its proposed answers and its default alike/);
+  const review = prompts.questionReviewPrompt(1);
+  assert.ok(review.includes(prompts.questionReviewCriteria()));
+  // The criteria the review had before stay.
+  assert.match(review, /a question is ambiguous or combines several decisions/);
+  const respond = prompts.questionRespondPrompt(1);
+  assert.ok(respond.includes(prompts.questionWritingRules()));
+});

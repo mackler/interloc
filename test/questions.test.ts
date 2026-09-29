@@ -4,7 +4,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import type * as S from "../src/schema.ts";
-import { finished, issue, respond, runTask, tempRepo, testLayer, presentedQuestions, presentedSubjects } from "./helpers.ts";
+import { finished, issue, respond, runFails, runTask, tempRepo, testLayer, presentedQuestions, presentedSubjects } from "./helpers.ts";
 
 type QuestionEntry = typeof S.QuestionEntry.Type;
 type InterviewTurn = typeof S.InterviewTurn.Type;
@@ -196,4 +196,46 @@ test("a follow-up asked during the clarification raises its total", async () => 
   await runTask(layer);
   const counts = probe.ui.notified.flatMap((e) => (e._tag === "InterviewTurn" ? [`${e.answered} of ${e.total}`] : []));
   assert.deepEqual(counts, ["0 of 2", "1 of 3", "2 of 3"]);
+});
+
+// S15 (issues #34, #58, #59): the question list is held to the rules inside behaviour 10's validation budget, at the
+// first call, at a response to a review and at the application of the user's decisions; a second failure halts.
+const blank = (id: string): QuestionEntry => ({ ...q(id), context: " " });
+test("a question list whose entry breaks a rule gets the validation repair turn at the first call; a second failure halts", async () => {
+  const repaired = testLayer(tempRepo(), {
+    answers: ["1", ""],
+    steps: [
+      { output: { questions: [blank("Q1")] } },
+      { output: { questions: [q("Q1")] } },
+      { output: { ...turn("Q1?", []), current_question: { id: "Q1", context: "", text: "question Q1?", terms: [], options: [] } } },
+      { output: turn("Done.", ["Q1"], "# Requirements\n\nQ1: A") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: withQuestions,
+  });
+  await runTask(repaired.layer);
+  assert.equal(repaired.probe.planner.prompts[1], prompts.questionRepairPrompt([{ where: "Q1", problems: [{ kind: "blankContext", subject: "" }] }]));
+  const halted = testLayer(tempRepo(), { steps: [{ output: { questions: [blank("Q1")] } }, { output: { questions: [blank("Q1")] } }], config: withQuestions });
+  await runFails(halted.layer, "QuestionInvalid", /Q1: the context paragraph is empty/);
+});
+
+test("a response to the question review whose list breaks a rule gets the validation repair turn", async () => {
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: [""],
+    steps: [
+      { output: { questions: [q("Q1")] } },
+      { output: { ...respond([["Q-R1-1", "accepted"]]), questions: [q("Q1"), { ...q("Q2"), question: "Which one? It matters." }] } },
+      { output: { ...respond([["Q-R1-1", "accepted"]]), questions: [q("Q1"), q("Q2")] } },
+      { output: turn("Done.", ["Q1", "Q2"], "# Requirements\n\nA") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [issue("Q-R1-1", "Q2 is missing")] }, { issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: withQuestions,
+  });
+  await runTask(layer);
+  assert.equal(probe.planner.prompts[2], prompts.questionRepairPrompt([{ where: "Q2", problems: [{ kind: "notLast", subject: "" }] }]));
+  assert.deepEqual(JSON.parse(read(probe.dir, "questions.json")).questions.map((x: QuestionEntry) => x.question), ["question Q1?", "question Q2?"]);
 });

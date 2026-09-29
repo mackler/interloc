@@ -9,7 +9,7 @@ import { planningCall, reviewLoop } from "./review.ts";
 import { renderQuestions } from "./render.ts";
 import * as S from "./schema.ts";
 import { type Services, Store, Ui } from "./services.ts";
-import { questionSubject, requirementsSubject, writeQuestions } from "./subjects.ts";
+import { questionListValidation, questionSubject, requirementsSubject, writeQuestions } from "./subjects.ts";
 
 /** Runs before planning phase 1 and ends with requirements.md written. */
 export const questionPhase = (task: string): Effect.Effect<void, RunError, Services> =>
@@ -19,7 +19,7 @@ export const questionPhase = (task: string): Effect.Effect<void, RunError, Servi
 
     yield* ui.notify({ _tag: "PhaseBegan", phase: { kind: "questions" } });
     yield* ui.say(prompts.questionListLine);
-    const generated = yield* planningCall(prompts.questionListPrompt(task), S.QuestionList);
+    const generated = yield* planningCall(prompts.questionListPrompt(task), S.QuestionList, "planning", "records", questionListValidation());
     yield* writeQuestions(task, generated.output);
     yield* store.converse(`## Question list proposed by Claude Code\n\n${renderQuestions(generated.output)}\n`);
 

@@ -201,7 +201,9 @@ export function questionListPrompt(task: string): string {
   return `Do not write a plan yet. Read the task below and inspect the codebase without changing anything.
 Return in 'questions' the questions whose answers you need from the user before you can write an implementation plan for the task.
 Include a question only if its answer affects the plan and neither the task text nor the codebase nor the project documentation determines it.
-Each entry has these fields. id: ${AGREED_QUESTION_PREFIX}1, ${AGREED_QUESTION_PREFIX}2, and so on. question: one decision per question. reason: why the plan depends on the answer, and why the codebase does not determine it, with the files you inspected. proposed_answers: two to four answers that are feasible in this codebase, each with a label and a description. default_answer: the label of the proposed answer that you would assume if the user expressed no preference.
+Each entry has these fields. id: ${AGREED_QUESTION_PREFIX}1, ${AGREED_QUESTION_PREFIX}2, and so on. context: the context paragraph that precedes the question, as the rules below describe it. question: one decision per question. reason: why the plan depends on the answer, and why the codebase does not determine it, with the files you inspected. proposed_answers: two to four answers that are feasible in this codebase, each with a label and a description. default_answer: the label of the proposed answer that you would assume if the user expressed no preference.
+${questionWritingRules()}
+The rules apply to the question, its reason, its proposed answers and its default alike. The explanations of the terms are written after the list is agreed; write the list so that it needs as few of them as possible.
 Return an empty list if no question is needed. Do not modify any file. Do not use the AskUserQuestion tool.
 Task: ${task}`;
 }
@@ -211,6 +213,8 @@ export function questionReviewPrompt(round: number): string {
   return `Review the question list in plan-review/questions.json against the task text in the same file and against the codebase. Do not modify any file.
 The planner will ask the user these questions in an interview and will then write an implementation plan from the answers.
 Raise an issue when: a question whose answer the plan needs is missing; a question is unnecessary because the task text or the codebase determines the answer (name the file); a question is ambiguous or combines several decisions; a reason is wrong; a feasible answer is missing from the proposed answers, or a proposed answer is not feasible in this codebase; a default contradicts the task or the codebase.
+${questionReviewCriteria()}
+These criteria apply to the question, its context, its reason, its proposed answers and its default alike. Any question in the list may be put to decision support, which works out the arguments for and against each proposed answer, so hold every proposed answer to that standard.
 Put the question id, or 'list' for an issue that concerns the list as a whole, in the location field.
 ${logRules(pathOf({ kind: "log", subject: "questions" }), "Q", round)}`;
 }

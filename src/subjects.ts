@@ -6,7 +6,7 @@ import { interview } from "./conversation.ts";
 import type { RunError } from "./errors.ts";
 import * as prompts from "./prompts.ts";
 import { subjectHeading } from "./render.ts";
-import type { Subject, Validation } from "./review.ts";
+import { questionsValidation, type Subject, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
 import type { DecisionAnalysis, DecisionApplied, DecisionResponse, Plan, PlannerResponse, PlanResponse, PlanWrite, PlanWriteResult, QuestionList, QuestionListResponse, RecordedPlan } from "./schema.ts";
 import { validatePlan } from "./plan.ts";
@@ -22,6 +22,16 @@ export const writeQuestions = (task: string, list: QuestionList): Effect.Effect<
     yield* store.saveQuestions(task, normalized.questions);
   });
 
+/**
+ * The question list's validation (S15): every entry under the rules of every question (its terms come later, from the
+ * terms subject), inside behaviour 10's validation budget, at the first call, at a response and at the application of
+ * the user's decisions alike. An entry is named by its id, or by its position when it has none.
+ */
+export const questionListValidation = <T extends Readonly<{ questions: readonly QuestionList["questions"][number][] }>>(): Validation<T> =>
+  questionsValidation((output: T) =>
+    output.questions.map((e, i) => ({ where: e.id.trim() === "" ? `question ${i + 1}` : e.id, question: { context: e.context, question: e.question, terms: [], options: e.proposed_answers } })),
+  );
+
 /** The question list. Claude Code returns the amended list, and the program writes it to questions.json. */
 export function questionSubject(task: string): Subject<QuestionListResponse, QuestionList> {
   const id = "questions" as const;
@@ -31,8 +41,8 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     heading: subjectHeading(id),
     fileLabel: "questions.json",
     reviewPrompt: prompts.questionReviewPrompt,
-    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records", validate: null },
-    applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output), validate: null },
+    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records", validate: questionListValidation() },
+    applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output), validate: questionListValidation() },
     amend: null,
     proceed: prompts.PROCEED_TO_CLARIFICATION,
     leaveOnAcceptance: false,
