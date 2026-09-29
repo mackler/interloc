@@ -377,6 +377,48 @@ program itself writes guarded records while it waits (the retry line, the pause'
 journal that kept only each write's result would adopt an external edit made before an append. The Store now journals
 every write to a guarded record with its preimage, and the guard replays the journal from its baseline.
 
+## Every question put to the user (issues #46, #59, #34, #36, #25, #20, #19, #57 and #58, 29 Sep 2026)
+
+The questions the user was asked came from a dozen places. Each was presented in its own way: a relayed question as
+Claude's message, a pause with the records' JSON, the cycle limit with a composed "Decision on:" line, an interview
+turn as a numbered list inside Claude's message. The user had to recognize each shape and look up what its words
+meant. The task made one shape of them. `QUESTION_RULES` in `src/prompts.ts` is the one statement of what a question
+must be: self-contained, every thing named, no bare identifier or number, the question last, a context paragraph of
+five points, determinate options, and every unfamiliar term explained. The writing prompts and the review prompts are
+rendered from it, and `validateQuestion` checks its mechanical part with the repair turn of behavior 10. Every
+question reaches the user through `askOffering` as one `QuestionPresented` event, numbered for the run.
+
+The decisions of the run:
+
+- Q1: an agent writes the context of the questions the program composes. This is a context call in a fresh session;
+  after W1-R1-1 of the work review it runs with a capability of its own, `readProject`, which reads and changes
+  nothing.
+- G-R1-1: that call is skipped when Claude Code is the agent that cannot be reached, and any other failure leaves the
+  program's fixed paragraph, so the question is always asked.
+- Q2 and G-R1-2: a question Claude Code relays carries its context and terms in its text. When it does not, a separate
+  call writes them.
+- Q4: one plain status line while an analysis is prepared.
+- Q5 and Q6: terms are bound to their exact words, and the terminal prints a "Terms:" block.
+- Q8: a fresh session writes the terms of the agreed list after the question review, followed by their own review
+  loop.
+- Q10: the question takes over the left panel.
+- Q11: Ctrl+C is unchanged.
+- Q12: the questions outside the agreed list get the rules in their prompts and the validation, with no Codex review.
+
+At the stop of the first execution phase, the developer decided that End the run (`q`, `/quit`, the button) is an
+interruption with exit code 130, like Stop task and Ctrl+C, where it had been a halt with 1. Stop at the cycle limit
+stays a halt with 1, as decided in the plan review. Every answer that ends the run is now confirmed first, in the
+terminal and in the page, by one predicate.
+
+The work review found five gaps, all corrected:
+
+- The context call had write access to the records (now `readProject`).
+- A permission request did not show what the tool would do. Its input is now shown field by field, and after P2-R1-2
+  a field with no plain label keeps its own name, explained as a term, so that two such fields never look alike.
+- A turn with a blank id escaped the validation.
+- A context call's terms were checked against facts the user never sees.
+- "Help me decide" dropped the context and terms the question had been shown with.
+
 ## Rejected or deferred
 
 - `--permission-mode plan` and `plansDirectory` for the planning phases: the location of the

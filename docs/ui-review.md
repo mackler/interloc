@@ -98,3 +98,34 @@ Cancel closes it, keeps the typed text in the field and returns focus to the con
 run-ending buttons (End the run in the question pane, Stop task in the top bar) and the confirming button use M3's
 error color role, the role of a destructive action. End the run stands apart at the end of the row of choices. Ctrl+C in
 the server's terminal is unchanged and asks nothing.
+
+## The question pane and the explanations of terms (issues #46, #59, #36, #20; 29 Sep 2026)
+
+**One presentation for every question.** Every question the user is asked, whatever produced it, is presented the
+same way in the terminal and in the page: its number in the run, where it came from in ordinary words, a context
+paragraph, what it is about (a pause's facts as prose, the summary to confirm, a permission's input), its terms and
+their explanations, the question itself, and its options with the answer that chooses each [consistency and standards;
+match between the system and the real world]. A context the program wrote is marked as such [visibility of system
+status].
+
+**The question takes the left column** (decision Q10). While a prompt is pending, `QuestionPane` replaces the
+transcript in the left column. From top to bottom it has the heading and origin; a top region that scrolls on its own,
+with the context, the details and the terms; the question, fixed between the regions and never inside a scrolled one;
+and a bottom region that scrolls on its own, with the option cards, the field and the buttons. The question and its
+first option stay in view together at 390 × 844, 640 × 400 and 1280 × 800 (`e2e/layout.spec.ts`, L19), so a long
+transcript can no longer scroll the question out of view (issue #20) [recognition rather than recall; visibility of
+system status]. The context takes at most three tenths of the pane. The transcript is one click away ("Show the
+conversation") and back ("Back to the question"), and an answer gives the column back to the transcript [user control
+and freedom]. The question joins the transcript with its answer once it is answered. Beside a decision's analysis,
+which shows the question with its context and terms, the pane keeps only the answers, so the question is not shown
+twice [aesthetic and minimalist design].
+
+**Explanations of terms.** m3-svelte has no rich tooltip, so the one of a term is built by hand (`TermTooltip`), as
+the plan step's is. It asserts only the explanation the agents wrote and Codex reviewed: plain text, nothing more.
+Every case-sensitive, whole-word occurrence of a term is marked (decision Q5) in the context, the details, the
+question, the options, the answered question in the transcript and the question beside an analysis. The analysis
+text is not marked. A marked word is focusable. Its tooltip opens on hover and on keyboard focus, closes on Escape or
+when the pointer or focus leaves, stays inside the viewport, and scrolls when long [help and documentation;
+flexibility and efficiency of use]. The marking is applied to the sanitized DOM and inserts a term's text as text, so
+no markup of an agent passes into the page unsanitized. The terminal prints the terms as a "Terms:" block above the
+question (decision Q6).
