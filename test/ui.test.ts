@@ -96,14 +96,14 @@ test("say writes the text and a newline", async () => {
 test("ask q fails with UserStopped", async () => {
   const io = streams();
   const answer = withUi(io, (ui) => ui.ask("Decision > "));
-  io.input.write("q\n");
+  io.input.write("q\ny\n");
   await assert.rejects(answer, stoppedByUser);
 });
 
 test("askMessage /quit fails with UserStopped", async () => {
   const io = streams();
   const message = withUi(io, (ui) => ui.askMessage("You > "));
-  io.input.write("/quit\n");
+  io.input.write("/quit\ny\n");
   await assert.rejects(message, stoppedByUser);
 });
 
@@ -231,4 +231,22 @@ test("notify prints the SDK's reconnection and the recovery, and nothing for the
     ),
   );
   assert.equal(io.written(), `${prompts.agentReconnectingLine("Codex", null, null, null, "Reconnecting... 2/5")}\n${prompts.transportRecoveredLine("codex")}\n`);
+});
+
+// S24 (issue #25, Q11): an answer that ends the run is confirmed first; anything but y returns to the question.
+test("q at a question asks for confirmation; n returns to the question, y ends the run", async () => {
+  const io = streams();
+  const answer = withUi(io, (ui) => ui.ask(prompts.decisionPrompt));
+  io.input.write("q\nn\nkeep it\n");
+  assert.equal(await answer, "keep it");
+  assert.ok(io.written().includes(prompts.confirmEndPrompt("endRun")));
+  assert.equal(io.written().split(prompts.decisionPrompt).length - 1, 2, "the question's prompt was not asked again");
+});
+
+test("an empty answer at the cycle limit is confirmed as the halt; y returns it, so that the loop halts", async () => {
+  const io = streams();
+  const answer = withUi(io, (ui) => ui.ask(prompts.withOffer(prompts.limitPrompt)));
+  io.input.write("\ny\n");
+  assert.equal(await answer, "");
+  assert.ok(io.written().includes(prompts.confirmEndPrompt("limitStop")));
 });

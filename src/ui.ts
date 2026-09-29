@@ -8,6 +8,7 @@ import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
 import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
 import { interviewHelp } from "./prompts.ts";
+import { confirmingRead } from "./confirmEnd.ts";
 import { analysisLines, claudeLine, questionLines } from "./render.ts";
 import { viewOf } from "./analysisView.ts";
 import { describeEvent } from "./uiEvents.ts";
@@ -66,6 +67,8 @@ export const terminalUi = (
         rl.prompt();
       });
 
+    const readLine = (prompt: string): Effect.Effect<string, UserStopped> => showPrompt(prompt).pipe(Effect.andThen(nextLine(prompt)));
+
     return {
       say: (text) => Effect.sync(() => void output.write(text + "\n")),
       // The terminal prints the interview's opening help (finding 8 of docs/gui-review.md), Claude Code's prose with its
@@ -93,17 +96,21 @@ export const terminalUi = (
       nextQuestion: Ref.updateAndGet(questions, (n) => n + 1),
       ask: (prompt) =>
         Effect.gen(function* () {
-          yield* showPrompt(prompt);
-          const parsed = parseAskLine(yield* nextLine(prompt));
+          // S24: an answer that ends the run is confirmed first.
+          const parsed = parseAskLine(yield* confirmingRead(readLine, readLine, prompt, "ask"));
           if (parsed.kind === "quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
           return parsed.text;
         }).pipe(dialogue.withPermits(1)),
       askMessage: (prompt) =>
         Effect.gen(function* () {
-          yield* showPrompt(prompt);
-          let fold = emptyFold;
-          while (!fold.complete) fold = foldLine(fold, yield* nextLine(prompt));
-          const parsed = parseMessage(fold.lines.join("\n"));
+          const readMessage = (p: string) =>
+            Effect.gen(function* () {
+              yield* showPrompt(p);
+              let fold = emptyFold;
+              while (!fold.complete) fold = foldLine(fold, yield* nextLine(p));
+              return fold.lines.join("\n");
+            });
+          const parsed = parseMessage(yield* confirmingRead(readMessage, readLine, prompt, "message"));
           if (parsed.kind === "quit") return yield* Effect.fail(new UserStopped({ where: prompt }));
           return parsed.text;
         }).pipe(dialogue.withPermits(1)),

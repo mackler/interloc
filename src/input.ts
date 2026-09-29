@@ -1,6 +1,7 @@
 // Pure interpretation of what the user types. No I/O; used by the terminal Ui and the agent adapters.
 
-import { TRANSPORT_ANSWERS, UNCHANGED_ANSWERS } from "./prompts.ts";
+import { LIMIT_ANSWERS, TRANSPORT_ANSWERS, UNCHANGED_ANSWERS } from "./prompts.ts";
+import type { PromptKind } from "./userPrompts.ts";
 
 /**
  * The option a reply chooses, as a zero-based index, or null when the reply is not a whole number in
@@ -81,3 +82,24 @@ export const answerOf = (reply: string, options: readonly Readonly<{ label: stri
   const option = options[chosen];
   return option.description === "" ? option.label : `${option.label}: ${option.description}`;
 };
+
+// ---- the answers that end the run (S24, issue #25) -----------------------------------------------------------------
+
+/**
+ * Whether an answer at the cycle limit stops the run (P2-R1-1): every answer that is neither an offered p nor a count
+ * of cycles parseExtraRounds accepts; the review loop halts on exactly these (onLimitAnswer in src/reviewState.ts), and
+ * the Stop option of limitOptions in src/offer.ts matches them.
+ */
+export const limitStops = (answer: string, proceedOffered: boolean): boolean => !(proceedOffered && answer.trim() === LIMIT_ANSWERS.proceed) && parseExtraRounds(answer) === null;
+/** How an answer ends the run: End the run (q, /quit), Stop at the cycle limit, or not at all (null). */
+export type Ending = "endRun" | "limitStop";
+export const endingOf = (kind: PromptKind, mode: "ask" | "message", text: string): Ending | null => {
+  const t = text.trim();
+  if (mode === "ask" ? t === "q" : t === "/quit") return "endRun";
+  if ((kind === "limit" || kind === "limitNoProceed") && !isDecide(t) && limitStops(t, kind === "limit")) return "limitStop";
+  return null;
+};
+/** Whether an answer ends the run, and so is confirmed first, in the terminal and in the page alike. */
+export const endsRun = (kind: PromptKind, mode: "ask" | "message", text: string): boolean => endingOf(kind, mode, text) !== null;
+/** The reply to a confirmation: y confirms; anything else returns to the question. */
+export const parseConfirmEnd = (reply: string): boolean => reply.trim().toLowerCase() === "y";

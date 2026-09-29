@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import type { PresentedQuestion } from "../src/question.ts";
+import { confirmingRead } from "../src/confirmEnd.ts";
 import { programWritten } from "../src/questionContext.ts";
 import { recordSubject } from "../src/prompts.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
@@ -91,8 +92,11 @@ export class ScriptedUi implements UiShape {
   private questions = 0;
   private readonly answers: ScriptedAnswer[];
   private readonly asks = readiness();
-  constructor(answers: readonly ScriptedAnswer[]) {
+  /** `confirmEnds`: an answer that ends the run is confirmed first, as in the terminal (S24, confirmingRead). */
+  private readonly confirmEnds: boolean;
+  constructor(answers: readonly ScriptedAnswer[], confirmEnds = false) {
     this.answers = [...answers];
+    this.confirmEnds = confirmEnds;
   }
   /** Resolves when the next prompt is asked. */
   nextAsk(): Promise<void> {
@@ -112,29 +116,33 @@ export class ScriptedUi implements UiShape {
   }
   /** The commands are the terminal's (src/input.ts): "q" ends the run at a one-line prompt. */
   ask(prompt: string): Effect.Effect<string, UserStopped> {
-    return this.take(prompt, (text) => {
+    return this.take(prompt, "ask", (text) => {
       const parsed = parseAskLine(text);
       return parsed.kind === "quit" ? Effect.fail(new UserStopped({ where: prompt })) : Effect.succeed(parsed.text);
     });
   }
   /** "/quit" ends the run in a message; "q" is a message like any other. */
   askMessage(prompt: string): Effect.Effect<string, UserStopped> {
-    return this.take(prompt, (text) => {
+    return this.take(prompt, "message", (text) => {
       const parsed = parseMessage(text);
       return parsed.kind === "quit" ? Effect.fail(new UserStopped({ where: prompt })) : Effect.succeed(parsed.text);
     });
   }
-  private take(prompt: string, interpret: (text: string) => Effect.Effect<string, UserStopped>): Effect.Effect<string, UserStopped> {
+  private take(prompt: string, mode: "ask" | "message", interpret: (text: string) => Effect.Effect<string, UserStopped>): Effect.Effect<string, UserStopped> {
+    const raw = (p: string) => this.raw(p);
+    return (this.confirmEnds ? confirmingRead(raw, raw, prompt, mode) : raw(prompt)).pipe(Effect.flatMap(interpret));
+  }
+  private raw(prompt: string): Effect.Effect<string> {
     return Effect.suspend(() => {
       this.asked.push(prompt);
       this.order.push("ask");
       this.asks.signal();
       const answer = this.answers.shift();
       if (answer === undefined) return Effect.die(new Error(`no scripted answer for: ${prompt}`));
-      if (typeof answer === "string") return interpret(answer);
+      if (typeof answer === "string") return Effect.succeed(answer);
       if ("wait" in answer) return Effect.never;
       answer.before();
-      return interpret(answer.text);
+      return Effect.succeed(answer.text);
     });
   }
 }
@@ -351,7 +359,7 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
 /** `store` wraps the live store of the test layer (a test that changes the project between the agents' calls). */
-export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; /** The replies of the context calls (S9), in order. */ contexts?: PlanningStep[]; /** The replies of the calls about the terms and their reviews (S17). */ terms?: PlanningStep[]; termsReviews?: ReviewStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; execScripts?: readonly ExecScript[]; config?: Partial<Config>; platform?: Layer.Layer<Platform>; store?: (store: StoreShape) => StoreShape };
+export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; /** The replies of the context calls (S9), in order. */ contexts?: PlanningStep[]; /** The replies of the calls about the terms and their reviews (S17). */ terms?: PlanningStep[]; termsReviews?: ReviewStep[]; /** The terminal's confirmation before an answer ends the run (S24). */ confirmEnds?: boolean; reviews?: ReviewStep[]; execs?: ExecOutcome[]; execScripts?: readonly ExecScript[]; config?: Partial<Config>; platform?: Layer.Layer<Platform>; store?: (store: StoreShape) => StoreShape };
 
 /**
  * The live platform with a file system whose writes and renames can fail: `shouldFail(method, count)` is asked
@@ -396,7 +404,7 @@ export const withDecider = (layer: Layer.Layer<DeciderDeps>, task = "task"): Lay
 export function testLayer(repo: string, options: TestOptions = {}): { layer: Layer.Layer<Services>; probe: Probe } {
   const paths = pathsOf(repo);
   const config: Config = { ...defaultConfig, questionPhase: false, ...options.config };
-  const ui = new ScriptedUi(options.answers ?? []);
+  const ui = new ScriptedUi(options.answers ?? [], options.confirmEnds ?? false);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? [], options.execScripts ?? []);
   planner.contexts = [...(options.contexts ?? [])];
   planner.terms = [...(options.terms ?? [])];
@@ -440,7 +448,7 @@ export function testWiring(repo: string, options: TestOptions = {}): { wiring: W
   fs.writeFileSync(shared, "{}");
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify({ questionPhase: false, ...options.config }));
-  const ui = new ScriptedUi(options.answers ?? []);
+  const ui = new ScriptedUi(options.answers ?? [], options.confirmEnds ?? false);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? [], options.execScripts ?? []);
   planner.contexts = [...(options.contexts ?? [])];
   planner.terms = [...(options.terms ?? [])];

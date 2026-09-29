@@ -4,7 +4,7 @@
 
 import { Effect } from "effect";
 import type { RunError } from "./errors.ts";
-import { chooseOption, isDecide, parseExtraRounds, parseTransportAnswer, parseUnchangedAnswer } from "./input.ts";
+import { chooseOption, isDecide, limitStops, parseExtraRounds, parseTransportAnswer, parseUnchangedAnswer } from "./input.ts";
 import * as prompts from "./prompts.ts";
 import type { ContextWritten, OptionAnswer, PresentedQuestion, QuestionContextText, QuestionOrigin, Term } from "./question.ts";
 import { renderChoice, renderQuestionRecord } from "./render.ts";
@@ -84,11 +84,11 @@ export const transportOptions = (): readonly OfferedOption[] => {
  */
 export const limitOptions = (proceed: string | null): readonly OfferedOption[] => {
   const d = prompts.limitOptionDescriptions(proceed);
-  const proceeds = (answer: string) => proceed !== null && answer === prompts.LIMIT_ANSWERS.proceed;
+  const proceeds = (answer: string) => proceed !== null && answer.trim() === prompts.LIMIT_ANSWERS.proceed;
   const more = (answer: string) => parseExtraRounds(answer) !== null;
   return [
     ...(proceed === null ? [] : [{ label: prompts.LIMIT_PROCEED, description: d.proceed, answer: { token: prompts.LIMIT_ANSWERS.proceed }, matches: proceeds }]),
-    { label: prompts.LIMIT_STOP, description: d.stop, answer: { token: prompts.LIMIT_ANSWERS.stop }, matches: (answer: string) => !proceeds(answer) && !more(answer) },
+    { label: prompts.LIMIT_STOP, description: d.stop, answer: { token: prompts.LIMIT_ANSWERS.stop }, matches: (answer: string) => limitStops(answer, proceed !== null) },
     { label: prompts.LIMIT_MORE, description: d.more, answer: { numeric: true }, matches: more },
   ];
 };

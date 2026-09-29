@@ -42,7 +42,8 @@ export const USAGE = 'usage: node main.ts "task description" [project directory]
 
 /**
  * Runs the program and returns the exit code; everything else is printed through the Ui.
- * A typed error of the run prints HALTED and gives 1. An interruption (Ctrl+C) prints INTERRUPTED
+ * A typed error of the run prints HALTED and gives 1; UserStopped (End the run: q, /quit, the page's button) prints
+ * INTERRUPTED and gives 130 (S24). An interruption (Ctrl+C, Stop task) prints INTERRUPTED
  * from a finalizer and leaves the fiber interrupted; `exitCodeOf` turns that into 130. In every
  * case the Claude Code session id and the usage summary are printed last.
  */
@@ -118,6 +119,11 @@ export const program = (args: readonly string[], wiring: Wiring): Effect.Effect<
     }
     const error = Cause.findErrorOption(exit.cause);
     if (Option.isNone(error)) return yield* Effect.die(Cause.squash(exit.cause));
+    // S24 (the user's decision at the stop of execution phase 1): End the run is an interruption, like Ctrl+C.
+    if (error.value._tag === "UserStopped") {
+      yield* interrupted;
+      return 130;
+    }
     return yield* halted(describe(error.value), yield* sessionId, records);
   });
 

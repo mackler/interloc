@@ -334,3 +334,16 @@ test("append and end stamp every event with the Clock's time; the replay holds t
   assert.deepEqual(replay[0].events, mine.map((b) => ({ time: b.time, event: b.event })));
   await run(Scope.close(h.scope, Exit.void));
 });
+
+// S24: End the run in the page (the answer q, which the page confirms itself, S25) ends the run with code 130.
+test("End the run in the page ends the run with code 130 as an interruption, and the server keeps running", async () => {
+  const repo = tempRepo();
+  const h = await harness(repo, [{ steps: [{ output: { questions_for_user: [{ context: "c", question: "Which?", terms: [], options: [] }] }, plan: "v1" }] }, converging]);
+  const first = await started(h, repo);
+  const asked = await pendingAsk(h, first);
+  await run(h.manager.answer(h.manager.incarnation, first, asked.prompt, "q"));
+  await ended(h, first);
+  assert.equal(endCode(h, first), 130);
+  assert.ok(eventsOf(h, first).some((e) => e._tag === "Said" && /INTERRUPTED by the user/.test(e.text)));
+  assert.equal(await started(h, repo), first + 1);
+});

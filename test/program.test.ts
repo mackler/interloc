@@ -118,3 +118,54 @@ test("exitCodeOf: the program's own code, 130 for an interruption, 1 for a defec
   assert.equal(exitCodeOf(Exit.interrupt(1)), 130);
   assert.equal(exitCodeOf(Exit.die(new Error("x"))), 1);
 });
+
+// S24 (issue #25; the user's decision at the stop of execution phase 1): End the run is an interruption with exit code
+// 130, like Stop task and Ctrl+C; Stop at the cycle limit stays a halt with exit code 1. Each confirmation says so.
+const withQuestion = { steps: [{ output: { questions_for_user: [{ context: "c", question: "Which?", terms: [], options: [] }] }, plan: "v1" }], reviews: [{ issues: [] }] };
+const statedCode = (text: string): number => Number(/exit code (\d+)/.exec(text)?.[1]);
+
+test("q at a question, confirmed, ends the run as an interruption with exit code 130", async () => {
+  const prompts = await import("../src/prompts.ts");
+  const { wiring, probe } = testWiring(tempRepo(), { ...withQuestion, answers: ["q", "y"], confirmEnds: true });
+  const code = await runProgram(["task"], wiring);
+  assert.equal(code, 130);
+  assert.equal(code, statedCode(prompts.confirmEndPrompt("endRun")), "the confirmation states another exit code");
+  assert.ok(probe.ui.asked.includes(prompts.confirmEndPrompt("endRun")));
+  assert.match(said(probe), /INTERRUPTED by the user\. State is preserved in .*plan-review\./);
+  assert.doesNotMatch(said(probe), /HALTED/);
+  assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /\*\*Interrupted by the user\.\*\*\n$/);
+  assertTail(probe);
+});
+
+test("/quit in the clarification, confirmed, ends the run with exit code 130", async () => {
+  const turn = { message_to_user: "Tell me more.", current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: [], answered_ids: [], complete: false, summary: "" };
+  const { wiring, probe } = testWiring(tempRepo(), {
+    config: { questionPhase: true },
+    steps: [{ output: { questions: [] } }, { output: turn }],
+    reviews: [{ issues: [] }],
+    answers: ["talk", "/quit", "y"],
+    confirmEnds: true,
+  });
+  assert.equal(await runProgram(["task"], wiring), 130);
+  assert.match(said(probe), /INTERRUPTED by the user/);
+});
+
+test("Stop at the cycle limit, confirmed, stays a halt with exit code 1; declined, it returns to the limit", async () => {
+  const prompts = await import("../src/prompts.ts");
+  const limited = (answers: string[]) =>
+    testWiring(tempRepo(), {
+      steps: [{ output: noQuestions, plan: "v1" }, { output: { dispositions: [{ id: "P1-R1-1", action: "rejected", rationale: "r", duplicate_of: "", reverses: "" }], self_corrections: [], reviewer_feedback: "", questions_for_user: [] } }],
+      reviews: [{ issues: [{ id: "P1-R1-1", severity: "major", location: "l", problem: "p", evidence: "e" }] }],
+      config: { maxRounds: 1 },
+      answers,
+      confirmEnds: true,
+    });
+  const halted = limited(["", "y"]);
+  const code = await runProgram(["task"], halted.wiring);
+  assert.equal(code, 1);
+  assert.equal(code, statedCode(prompts.confirmEndPrompt("limitStop")));
+  assert.match(said(halted.probe), /HALTED: stopped by the user at the cycle limit/);
+  const declined = limited(["0", "n", "0", "y"]);
+  assert.equal(await runProgram(["task"], declined.wiring), 1);
+  assert.equal(declined.probe.ui.asked.filter((a) => a === prompts.confirmEndPrompt("limitStop")).length, 2);
+});

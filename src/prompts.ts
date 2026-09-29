@@ -1115,6 +1115,25 @@ export function unchangedDecisionLine(answer: "retry" | "proceed" | "stop", file
   return `**User decision:** ${what} after cycle ${round} of ${heading}.\n\n`;
 }
 
+/**
+ * The confirmation before a run ends (S24, issue #25): what ends, that the records remain, and the exit code the program
+ * then returns, which test/program.test.ts compares with the code it does return. End the run and Stop task are
+ * interruptions (130, by the user's decision at the stop of execution phase 1); Stop at the cycle limit is a halt (1).
+ */
+export function confirmEndText(ending: "endRun" | "stopTask" | "limitStop"): string {
+  switch (ending) {
+    case "endRun":
+      return "End the run? It ends as interrupted by you, with exit code 130, and its records in plan-review/ remain.";
+    case "stopTask":
+      return "Stop the task? The run ends as interrupted by you, with exit code 130, and its records in plan-review/ remain.";
+    case "limitStop":
+      return 'Stop the run at the cycle limit? It halts ("HALTED: stopped by the user at the cycle limit") with exit code 1, and its records in plan-review/ remain.';
+  }
+}
+/** The terminal's confirmation: the text and how to answer it. */
+export function confirmEndPrompt(ending: "endRun" | "stopTask" | "limitStop"): string {
+  return `${confirmEndText(ending)} y = yes; anything else = back to the question > `;
+}
 /** The answers of the cycle limit's options (S8); a whole number above zero adds that many cycles. */
 export const LIMIT_ANSWERS = { proceed: "p", stop: "0" } as const;
 export const LIMIT_PROCEED = "Proceed without convergence";
