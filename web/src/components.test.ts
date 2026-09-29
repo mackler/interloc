@@ -410,7 +410,7 @@ describe("TimelineRail", () => {
   // Issue #21: Gather Requirements shows its steps, the clarification's count, and #14's labels and cycle lines with them.
   const questionReview = { subject: "questions" as const, heading: "Question review", rounds: [cycle(1, 1), cycle(2, 0)], corrections: 1, result: "converged" as const, done: true };
   const gather = (state: TimelineEntry["state"], steps: TimelineStep[]): TimelineEntry => ({ ...fresh, phase: { kind: "questions" }, label: "Gather Requirements", state, groups: [], steps, plan: null });
-  const step = (kind: TimelineStep["kind"], label: string, state: TimelineStep["state"], count: TimelineStep["count"], groups: RoundGroup[] = []): TimelineStep => ({ kind, label, state, count, groups });
+  const step = (kind: TimelineStep["kind"], label: string, state: TimelineStep["state"], count: TimelineStep["count"], groups: RoundGroup[] = []): TimelineStep => ({ kind, label, state, count, base: { answered: 0, total: 0 }, groups });
   const stepRows = (root: HTMLElement) => [...root.querySelectorAll("[data-step]")].map((e) => `${e.getAttribute("data-step")}:${e.querySelector("[data-step-label]")?.textContent?.trim()}:${e.getAttribute("aria-current") ?? "-"}`);
 
   test("during a clarification: the first step done with its loop's line, Clarification active with its count", () => {
@@ -422,15 +422,36 @@ describe("TimelineRail", () => {
     expect(root.textContent).not.toMatch(/Question phase|Interview|round/);
   });
 
-  test("a finished phase shows every step done, a follow-up clarification among them, with the requirements review's cycles", () => {
-    const requirements = { subject: "requirements" as const, heading: "Requirements review", rounds: [cycle(1, 2)], corrections: 0, result: null, done: false };
-    const root = show(TimelineRail, {
-      busy: false,
-      timeline: [gather("done", [step("formulate", prompts.stepLabel("formulate"), "done", null, [questionReview]), step("clarification", "Clarification", "done", { answered: 7, total: 7 }), step("followUp", "Follow-up clarification", "done", { answered: 1, total: 2 }, [requirements])])],
-    });
-    expect(stepRows(root)).toEqual([`done:${prompts.stepLabel("formulate")}:-`, "done:Clarification:-", "done:Follow-up clarification:-"]);
-    expect([...root.querySelectorAll("[data-cycle]")].map((e) => e.textContent?.trim())).toEqual(["cycle 1: 2 issues"]);
-    expect([...root.querySelectorAll("[data-count]")].map((e) => e.textContent?.trim())).toEqual(["7 of 7 answered", "1 of 2 answered"]);
+  // Issue #51 (Q4), the seam of the reducer and the rail: a clarification of 8 and a follow-up of 2 are one step, 10 of 10
+  // answered, and the requirements review's two cycles are one line.
+  test("a finished phase with a follow-up shows one Clarification step with the summed count and one loop summary", () => {
+    const q = { kind: "questions" as const };
+    const turn = (answered: number, total: number): UiEvent => ({ _tag: "InterviewTurn", heading: "Clarification", message: "Hi", summary: null, answered, total });
+    const events: UiEvent[] = [
+      { _tag: "PhaseBegan", phase: q },
+      { _tag: "InterviewOpened", heading: "Clarification", stage: "clarification", total: 8 },
+      turn(8, 8),
+      { _tag: "RoundBegan", subject: "requirements", round: 1, limit: 5 },
+      { _tag: "ReviewReceived", subject: "requirements", round: 1, review: { issues: [] }, counted: 2 },
+      { _tag: "InterviewOpened", heading: "Clarification", stage: "followUp", total: 2 },
+      turn(2, 2),
+      { _tag: "RoundBegan", subject: "requirements", round: 2, limit: 5 },
+      { _tag: "LoopFinished", subject: "requirements", result: "converged" },
+      { _tag: "PhaseEnded", phase: q, result: "converged" },
+    ];
+    const time = "2026-09-29T00:00:00Z";
+    const messages: ServerMessage[] = [
+      { type: "hello", cwd: "/p", current: 1, incarnation: "a" },
+      { type: "replay", runs: [] },
+      { type: "event", run: 1, seq: 0, time, event: { _tag: "Started", project: "/p", task: "t" } },
+      ...events.map((event, i): ServerMessage => ({ type: "event", run: 1, seq: i + 1, time, event: { _tag: "Notified", event } })),
+    ];
+    const s = messages.reduce(reduce, initialState);
+    const root = show(TimelineRail, { busy: false, timeline: s.run?.timeline ?? [] });
+    expect(stepRows(root)).toEqual([`done:${prompts.stepLabel("formulate")}:-`, `done:${prompts.stepLabel("clarification")}:-`]);
+    expect([...root.querySelectorAll("[data-count]")].map((e) => e.textContent?.trim())).toEqual([prompts.clarificationProgress(10, 10)]);
+    expect([...root.querySelectorAll("[data-step] [data-summary]")].map((e) => e.textContent?.trim())).toEqual([prompts.loopSummary(2, 0, "converged")]);
+    expect(root.textContent).not.toMatch(/Follow-up/);
   });
 
   // The re-check after #21: #14's labels and cycle lines render beside the steps of Gather Requirements.
@@ -796,7 +817,7 @@ describe("TimelineRail: the plan", () => {
   });
 
   test("a step its phase ended without has a mark and a name of its own, apart from ahead and not reached", () => {
-    const step = (kind: TimelineStep["kind"], state: TimelineStep["state"]): TimelineStep => ({ kind, label: prompts.stepLabel(kind), state, count: null, groups: [] });
+    const step = (kind: TimelineStep["kind"], state: TimelineStep["state"]): TimelineStep => ({ kind, label: prompts.stepLabel(kind), state, count: null, base: { answered: 0, total: 0 }, groups: [] });
     const questions: TimelineEntry = { ...fresh, phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [], steps: [step("formulate", "done"), step("clarification", "skipped")], plan: null };
     const root = show(TimelineRail, { busy: false, executing: false, timeline: [questions, { ...entry("notReached", null), steps: [step("formulate", "notReached")] }, { ...ahead("work", "ahead"), steps: [step("formulate", "ahead")] }] });
     const mark = (state: string) => root.querySelector(`[data-step=${state}] .mark`);

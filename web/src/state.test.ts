@@ -318,18 +318,35 @@ describe("the steps of Gather Requirements", () => {
     expect(replayed(through).run?.timeline).toEqual(s.run?.timeline);
   });
 
-  test("the requirements review's cycles go to the latest clarification; a follow-up clarification is a step of its own with the later cycles", () => {
-    const events = [...through, turn(7, 7, "# R"), round("requirements", 1), opened("followUp", 1), turn(0, 1), turn(1, 1, "# R2"), round("requirements", 2), finished("requirements"), opened("followUp", 2), notified({ _tag: "PhaseEnded", phase: q, result: "converged" })];
+  // Issue #51 (Q4): the follow-up clarifications are one conversation with the clarification, so they fold into its
+  // step: the counts are summed, and the requirements review is one group of cycles under it.
+  test("a follow-up clarification folds into the Clarification step: counts summed, one group of the requirements review", () => {
+    const followUp = [...through, turn(7, 7, "# R"), round("requirements", 1), opened("followUp", 2)];
+    expect(steps(fold(live(followUp)))?.at(-1)).toEqual(["Clarification", "active", "7/9", "Requirements review:1"]);
+    expect(steps(fold(live([...followUp, turn(1, 2)])))?.at(-1)).toEqual(["Clarification", "active", "8/9", "Requirements review:1"]);
+    const events = [...followUp, turn(1, 2), turn(2, 2, "# R2"), round("requirements", 2), finished("requirements"), notified({ _tag: "PhaseEnded", phase: q, result: "converged" })];
     const s = fold(live(events));
     expect(steps(s)).toEqual([
       [prompts.stepLabel("formulate"), "done", null, "Question review:1"],
-      ["Clarification", "done", "7/7", "Requirements review:1"],
-      ["Follow-up clarification", "done", "1/1", "Requirements review:2"],
-      ["Follow-up clarification", "done", "0/2", ""],
+      ["Clarification", "done", "9/9", "Requirements review:1,2"],
     ]);
+    expect(s.run?.timeline[0].steps[1].groups.length).toBe(1);
     expect(s.run?.timeline[0].steps[1].groups[0].result).toBe("converged");
     expect(s.run?.timeline[0].state).toBe("done");
     expect(replayed(events).run?.timeline).toEqual(s.run?.timeline);
+  });
+
+  test("every further follow-up folds in the same way", () => {
+    const events = [...through, turn(7, 7, "# R"), round("requirements", 1), opened("followUp", 1), turn(1, 1, "# R2"), round("requirements", 2), opened("followUp", 3), turn(2, 3), round("requirements", 3), finished("requirements")];
+    const s = fold(live(events));
+    expect(steps(s)?.map((st) => st[0])).toEqual([prompts.stepLabel("formulate"), "Clarification"]);
+    expect(steps(s)?.at(-1)).toEqual(["Clarification", "active", "10/11", "Requirements review:1,2,3"]);
+    expect(replayed(events).run?.timeline).toEqual(s.run?.timeline);
+  });
+
+  test("a follow-up after the conversation of an empty list folds into the same step", () => {
+    const events = [started, notified({ _tag: "PhaseBegan", phase: q }), round("questions", 1), finished("questions"), opened("conversation", 0), turn(0, 0, "# R"), round("requirements", 1), opened("followUp", 2), turn(2, 2)];
+    expect(steps(fold(live(events)))).toEqual([[prompts.stepLabel("formulate"), "done", null, "Question review:1"], ["Clarification", "active", "2/2", "Requirements review:1"]]);
   });
 
   test("the conversation after an empty list is a Clarification whose count starts at 0 of 0", () => {

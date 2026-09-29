@@ -699,9 +699,12 @@ export function runningFor(ms: number): string {
 }
 /** The accessible name of the plan's list under its Implementation entry. */
 export const PLAN_LIST_LABEL = "The steps of the plan";
-/** The steps of Gather Requirements in the progress rail (issue #21, Q5 and Q7; issue #33: "Identify choices"). */
-export function stepLabel(kind: "formulate" | "clarification" | "followUp"): string {
-  return kind === "formulate" ? "Identify choices" : kind === "clarification" ? "Clarification" : "Follow-up clarification";
+/**
+ * The steps of Gather Requirements in the progress rail (issue #21, Q5 and Q7; issue #33: "Identify choices"). Issue #51:
+ * a follow-up clarification is part of the Clarification step; the records keep their own vocabulary.
+ */
+export function stepLabel(kind: "formulate" | "clarification"): string {
+  return kind === "formulate" ? "Identify choices" : "Clarification";
 }
 /** A clarification's count (issue #21, Q6): the total grows with the follow-ups Claude asks. */
 export function clarificationProgress(answered: number, total: number): string {

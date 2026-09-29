@@ -45,7 +45,12 @@ export type TimelineState = "ahead" | "active" | "done" | "stopped" | "notReache
  * agreed question list without a conversation). Not "notReached", which a halt gives a step the run still needed.
  */
 export type StepState = TimelineState | "skipped";
-export type TimelineStep = Readonly<{ kind: "formulate" | "clarification" | "followUp"; label: string; state: StepState; count: Readonly<{ answered: number; total: number }> | null; groups: readonly RoundGroup[] }>;
+/**
+ * Issue #51 (Q4): the follow-up clarifications are one conversation with the clarification, so they fold into its step:
+ * `base` holds the counts of the interviews before the current one, and `count` is `base` plus the current interview's.
+ */
+export type StepCount = Readonly<{ answered: number; total: number }>;
+export type TimelineStep = Readonly<{ kind: "formulate" | "clarification"; label: string; state: StepState; count: StepCount | null; base: StepCount; groups: readonly RoundGroup[] }>;
 /**
  * A phase of the run in the timeline. `label` is numbered by the count of its kind in the timeline (issue #6), and is
  * renumbered when that count changes; `plan` is the current plan, on the Implementation entry that carries it out (Q5, Q9).
@@ -291,7 +296,9 @@ const openGroups = (timeline: readonly TimelineEntry[], subject: SubjectId, f: (
   const each = (groups: readonly RoundGroup[]) => groups.map((g) => (sameSubject(g.subject, subject) && !g.done ? f(g) : g));
   return timeline.map((e) => ({ ...e, groups: each(e.groups), steps: e.steps.map((st) => ({ ...st, groups: each(st.groups) })) }));
 };
-const newStep = (kind: TimelineStep["kind"], count: TimelineStep["count"], state: StepState = "active"): TimelineStep => ({ kind, label: stepLabel(kind), state, count, groups: [] });
+const NO_COUNT: StepCount = { answered: 0, total: 0 };
+const newStep = (kind: TimelineStep["kind"], count: TimelineStep["count"], state: StepState = "active"): TimelineStep => ({ kind, label: stepLabel(kind), state, count, base: NO_COUNT, groups: [] });
+const plus = (a: StepCount, b: StepCount): StepCount => ({ answered: a.answered + b.answered, total: a.total + b.total });
 /**
  * An entry when the run ends with `code`: the active one done or stopped; after a halt, what is ahead not reached (issue #6);
  * after success, the active one's steps never begun skipped (`endSteps`).
@@ -357,16 +364,22 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       // Issue #5: the interview's turns are Claude's words, so they are Claude's messages.
       // Issue #21: the turn's count is the active clarification step's.
       const count = { answered: event.answered, total: event.total };
-      const timeline = inQuestionPhase(run.timeline, (steps) => steps.map((st) => (st.state === "active" && st.kind !== "formulate" ? { ...st, count } : st)));
+      const timeline = inQuestionPhase(run.timeline, (steps) => steps.map((st) => (st.state === "active" && st.kind !== "formulate" ? { ...st, count: plus(st.base, count) } : st)));
       return { ...withLeft({ ...run, timeline }, message(run, time, "claude", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
     }
     case "InterviewOpened": {
       // Issue #21: the step before ends, and the clarification opens as a step with its total.
-      const step = newStep(event.stage === "followUp" ? "followUp" : "clarification", { answered: 0, total: event.total });
-      // Issue #6: a foreseen Clarification becomes active; a follow-up is appended.
+      const fresh = { answered: 0, total: event.total };
+      const step = newStep("clarification", fresh);
+      // Issue #6: a foreseen Clarification becomes active. Issue #51: a follow-up reopens the Clarification begun before,
+      // which keeps its cycles and adds the follow-up's counts to its own.
       const opened = (steps: readonly TimelineStep[]): readonly TimelineStep[] => {
-        const ended = steps.map((st) => (st.state === "active" ? { ...st, state: "done" as const } : st));
-        const ahead = ended.findIndex((st) => st.state === "ahead" && st.kind === step.kind);
+        const begun = steps.findIndex((st) => st.kind === "clarification" && st.state !== "ahead");
+        const ended = steps.map((st, i) => (st.state === "active" && i !== begun ? { ...st, state: "done" as const } : st));
+        if (event.stage === "followUp" && begun >= 0) {
+          return ended.map((st, i) => (i === begun ? { ...st, state: "active" as const, base: st.count ?? NO_COUNT, count: plus(st.count ?? NO_COUNT, fresh) } : st));
+        }
+        const ahead = ended.findIndex((st) => st.state === "ahead" && st.kind === "clarification");
         return ahead < 0 ? [...ended, step] : ended.map((st, i) => (i === ahead ? step : st));
       };
       const timeline = inQuestionPhase(run.timeline, opened);

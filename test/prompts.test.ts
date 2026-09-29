@@ -188,7 +188,6 @@ test("a finished loop's line reads n issues resolved in m cycles", () => {
 test("the steps of Gather Requirements", () => {
   assert.equal(prompts.stepLabel("formulate"), "Identify choices");
   assert.equal(prompts.stepLabel("clarification"), "Clarification");
-  assert.equal(prompts.stepLabel("followUp"), "Follow-up clarification");
 });
 
 // Issue #21 (Q6 follow-up): Claude reports every question asked, follow-ups with ids of their own, and the answered ones.
