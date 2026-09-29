@@ -8,6 +8,7 @@ import DirectoryDialog from "./components/DirectoryDialog.svelte";
 import PromptWidget from "./components/PromptWidget.svelte";
 import StartForm from "./components/StartForm.svelte";
 import TimelineRail from "./components/TimelineRail.svelte";
+import CircularIndeterminate from "./components/CircularIndeterminate.svelte";
 import ActivityLine from "./components/ActivityLine.svelte";
 import type { ServerMessage } from "../../src/protocol.ts";
 import type { UiEvent } from "../../src/uiEvents.ts";
@@ -953,4 +954,23 @@ test("the activity line shows an indeterminate progressbar only while busy, with
   const railBar = one(rail, "[role=progressbar]");
   expect(bar.className).toBe(railBar.className);
   expect(bar.innerHTML.replace(/<!--.*?-->/g, "")).toBe(railBar.innerHTML.replace(/<!--.*?-->/g, ""));
+});
+
+// Issue #50: M3's indeterminate circular progress indicator, written by hand: no value and no end, an SVG arc in the
+// mark's box, and the static glyph kept for reduced motion.
+describe("CircularIndeterminate", () => {
+  test("a progressbar with the given name, no value, an SVG arc, and the static glyph in its markup", () => {
+    const root = show(CircularIndeterminate, { label: "in progress: An agent is working", glyph: "●" });
+    const bar = one(root, "[role=progressbar]");
+    expect(bar.getAttribute("aria-label")).toBe("in progress: An agent is working");
+    for (const attribute of ["aria-valuenow", "aria-valuemin", "aria-valuemax", "value"]) expect(bar.hasAttribute(attribute)).toBe(false);
+    for (const el of [bar, ...bar.querySelectorAll<HTMLElement>("*")]) {
+      expect(el.style.width, "a width set from a value").toBe("");
+      expect(el.style.transform, "a transform set from a value").toBe("");
+    }
+    expect(bar.querySelector("svg circle, svg path")).not.toBe(null);
+    expect(bar.querySelector("img")).toBe(null);
+    expect(one(bar, "[data-glyph]").textContent).toBe("●");
+    expect(bar.classList.contains("circular-indeterminate")).toBe(true);
+  });
 });

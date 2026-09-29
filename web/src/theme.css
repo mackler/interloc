@@ -34,3 +34,29 @@ body { font-family: "Roboto Flex", Roboto, system-ui, sans-serif; }
 @media (prefers-reduced-motion: reduce) {
   .indeterminate > .active-indicator { left: 30%; animation: m3-indeterminate-pulse 3s ease-in-out infinite; }
 }
+
+/*
+ * Issue #50: M3's indeterminate circular progress indicator, written by hand because m3-svelte has none. It replaces a
+ * running step's mark in the mark's own 1em box, so no label moves when a call starts or ends: a track in
+ * secondary-container and an arc in primary that turns while it grows and shrinks, without end. It asserts that an agent
+ * works on this step and nothing about how much remains. With reduced motion the arc is hidden and the step's static
+ * glyph shows in its place.
+ */
+.circular-indeterminate { display: inline-block; position: relative; width: 1em; height: 1em; line-height: 1; vertical-align: -0.125em; }
+.circular-indeterminate > svg { position: absolute; inset: 0; width: 100%; height: 100%; animation: m3-circular-rotate 1.568s linear infinite; }
+.circular-indeterminate circle { fill: none; stroke-width: 3; }
+.circular-indeterminate .track { stroke: var(--m3c-secondary-container); }
+.circular-indeterminate .arc { stroke: var(--m3c-primary); stroke-linecap: round; stroke-dasharray: 1 56.5; transform-origin: center; animation: m3-circular-arc 1.333s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+.circular-indeterminate > .glyph { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@keyframes m3-circular-rotate {
+  to { transform: rotate(360deg); }
+}
+@keyframes m3-circular-arc {
+  0% { stroke-dasharray: 1 56.5; stroke-dashoffset: 0; }
+  50% { stroke-dasharray: 42 56.5; stroke-dashoffset: -8; }
+  100% { stroke-dasharray: 1 56.5; stroke-dashoffset: -56; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .circular-indeterminate > svg { display: none; }
+  .circular-indeterminate > .glyph { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
+}
