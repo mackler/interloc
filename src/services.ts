@@ -42,14 +42,15 @@ export interface UiShape {
 export class Ui extends Context.Service<Ui, UiShape>()("plan-review/Ui") {}
 
 /** What a planning call is for, as the activity line names it; the interview also prints its tool use in the terminal. */
-/** "context": the call that writes a question's context paragraph and terms (S9), in a fresh session, read-only. */
+/** "context": the call that writes a question's context paragraph and terms (S9), in a fresh session, with the capability "readProject". */
 export type PlanningPurpose = "planning" | "interview" | "context";
 export type PlanningResult = Readonly<{ output: unknown; resultText: string; costUsd: number | null }>;
 /**
  * What a planning call may do (finding 1 of docs/gui-review.md): "records" may edit only under plan-review/ (behaviour 3);
- * "readOnly" may call no tool but the structured output (a work response, behaviour 12), its repair turn included.
+ * "readOnly" may call no tool but the structured output (a work response, behaviour 12), its repair turn included;
+ * "readProject" may read the project with Read, Grep and Glob and change nothing (the context call of a question, S33).
  */
-export type PlanningCapability = "records" | "readOnly";
+export type PlanningCapability = "records" | "readOnly" | "readProject";
 export interface PlannerShape {
   /**
    * A call in which Claude Code may write only under plan-review/ ("records", the default), or call no tool but the

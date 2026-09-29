@@ -191,8 +191,8 @@ export type PlanningCall<Out> = Readonly<{ output: Out; reply: unknown; resultTe
 
 /**
  * A call in which Claude Code may write only under plan-review/ ("records"), or change nothing ("readOnly", a work
- * response). Halts if the project changed; a read-only call, its repair turn included, also halts if a guarded record
- * under plan-review/ changed (RecordsChanged; the program's own writes are not guarded, src/artifacts.ts).
+ * response; "readProject", the context call of a question, which may read the project). Halts if the project changed;
+ * a call that may change nothing, its repair turn included, also halts if a guarded record under plan-review/ changed (RecordsChanged; the program's own writes are not guarded, src/artifacts.ts).
  */
 export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string, schema: Out, purpose: PlanningPurpose = "planning", capability: PlanningCapability = "records", validate: Validation<Out["Type"]> | null = null): Effect.Effect<PlanningCall<Out["Type"]>, RunError, Store | Planner | Decider | Ui | RunConfig> =>
   Effect.gen(function* () {
@@ -206,7 +206,7 @@ export const planningCall = <Out extends Schema.Decoder<unknown>>(prompt: string
     const call = (text: string) =>
       Effect.gen(function* () {
         const before = yield* store.projectSnapshot();
-        const recordsBefore = capability === "readOnly" ? yield* store.recordsSnapshot() : null;
+        const recordsBefore = capability !== "records" ? yield* store.recordsSnapshot() : null;
         const mark = yield* store.journalMark;
         const check = Effect.gen(function* () {
           const changes = compareSnapshots(before, yield* store.projectSnapshot());

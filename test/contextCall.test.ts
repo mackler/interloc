@@ -97,3 +97,20 @@ test("S10: a context call whose retries are exhausted asks nothing of its own; t
   assert.deepEqual(presentedQuestions(probe.ui), []);
   assert.match(conversation(probe.dir), /\*\*Context written by Interloq:\*\*.*could not be reached/);
 });
+
+// S33 (W1-R1-1): the context call reads the project and writes nothing: its own capability, with the records guard.
+test("the context call is made with the readProject capability", async () => {
+  const { probe, written } = run({ contexts: [{ output: good }] });
+  await written();
+  assert.deepEqual(probe.planner.contextCapabilities, ["readProject"]);
+});
+
+test("a context call that changes a guarded record halts with RecordsChanged; the fallback does not catch it", async () => {
+  const { written } = run({ contexts: [{ output: good, editRecord: { file: "foreign.md", content: "x" } }] });
+  await assert.rejects(written(), (e: unknown) => (e as { _tag?: string })._tag === "RecordsChanged");
+});
+
+test("a context call that changes the project halts with ProjectChanged; the fallback does not catch it", async () => {
+  const { written } = run({ contexts: [{ output: good, touchProject: true }] });
+  await assert.rejects(written(), (e: unknown) => (e as { _tag?: string })._tag === "ProjectChanged");
+});

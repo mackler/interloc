@@ -188,6 +188,8 @@ export class ScriptedPlanner implements PlannerShape {
   terms: PlanningStep[] = [];
   /** The prompts of the context calls (S9), apart from `prompts` so that the scripts of the other calls keep their order. */
   readonly contextPrompts: string[] = [];
+  /** The capability of each context call (S33). */
+  readonly contextCapabilities: PlanningCapability[] = [];
   /** The scripted replies of the context calls, in order; without one, a context call returns SCRIPTED_CONTEXT. */
   contexts: PlanningStep[] = [];
   readonly sessionId = Effect.succeed("test-session");
@@ -211,7 +213,9 @@ export class ScriptedPlanner implements PlannerShape {
     if (purpose === "context") {
       return Effect.suspend(() => {
         this.contextPrompts.push(prompt);
+        this.contextCapabilities.push(capability);
         const step = this.contexts.shift();
+        if (step?.editRecord !== undefined) fs.writeFileSync(path.join(path.dirname(this.state.plan), step.editRecord.file), step.editRecord.content ?? "");
         if (step?.fault !== undefined) return Effect.fail(new TransportFault({ agent: "claude", message: step.fault, status: null }));
         if (step?.touchProject) fs.appendFileSync(path.join(this.state.project, "a.txt"), "changed\n");
         return Effect.succeed({ output: step === undefined ? SCRIPTED_CONTEXT : step.output, resultText: "", costUsd: 0.01 });

@@ -67,6 +67,16 @@ const denyAllButOutput: HookCallback = async (input) => {
   if (pre.tool_name === "StructuredOutput") return {};
   return { hookSpecificOutput: { hookEventName: pre.hook_event_name, permissionDecision: "deny", permissionDecisionReason: READ_ONLY_REASON } };
 };
+/** The tools a "readProject" call may use (S33): it reads the project and changes nothing. */
+const READ_TOOLS = ["Read", "Grep", "Glob", "StructuredOutput"];
+const READ_PROJECT_REASON = "This call may only read the project, with Read, Grep and Glob, and answer with the final structured output; do not modify any file.";
+/** A "readProject" call's hook, without a matcher like the read-only one, so that no unlisted tool passes. */
+const denyAllButReading: HookCallback = async (input) => {
+  const pre = input as PreToolUseHookInput;
+  if (READ_TOOLS.includes(pre.tool_name)) return {};
+  return { hookSpecificOutput: { hookEventName: pre.hook_event_name, permissionDecision: "deny", permissionDecisionReason: READ_PROJECT_REASON } };
+};
+const readProjectPermission: CanUseTool = async () => deny(READ_PROJECT_REASON);
 /** The permission callback of a read-only call: nothing is permitted, and a question is not relayed. */
 const readOnlyPermission: CanUseTool = async () => deny(READ_ONLY_REASON);
 
@@ -365,9 +375,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
           {
             permissionMode: "default",
             outputFormat: { type: "json_schema", schema: agentJsonSchema(schema) },
-            hooks: { PreToolUse: capability === "readOnly" ? [{ hooks: [denyAllButOutput] }] : [{ matcher: EDIT_TOOLS.join("|"), hooks: [restrictEdits] }] },
+            hooks: { PreToolUse: capability === "readOnly" ? [{ hooks: [denyAllButOutput] }] : capability === "readProject" ? [{ hooks: [denyAllButReading] }] : [{ matcher: EDIT_TOOLS.join("|"), hooks: [restrictEdits] }] },
           },
-          capability === "readOnly" ? () => readOnlyPermission : planningPermission(decider),
+          capability === "readOnly" ? () => readOnlyPermission : capability === "readProject" ? () => readProjectPermission : planningPermission(decider),
         );
         if (outcome.error !== null) return yield* Effect.fail(callFailure(outcome.error, outcome.failure));
         return { output: outcome.structured, resultText: outcome.resultText, costUsd: outcome.costUsd };

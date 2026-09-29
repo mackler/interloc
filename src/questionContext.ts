@@ -25,19 +25,19 @@ export const contextValidation =
 export const programWritten = (request: ContextRequest): ContextWritten => ({ context: { text: fallbackContext(request.origin), by: "program" }, terms: [] });
 
 /**
- * Writes a question's context in a fresh session (a planning call under behaviour 3, as a decision's analysis is written): the agent's paragraph
- * and terms, or, when the call fails for any reason but the user's stop, the program's paragraph with a note in
- * conversation.md, so that the question always reaches the user.
+ * Writes a question's context in a fresh session, which may read the project and change nothing (S33): the agent's
+ * paragraph and terms, or, when the call fails for any reason but the user's stop or a change the guards find, the
+ * program's paragraph with a note in conversation.md, so that the question always reaches the user.
  */
 export const writeContext = (task: string, request: ContextRequest): Effect.Effect<ContextWritten, RunError, Store | Planner | Decider | Ui | RunConfig> =>
   Effect.gen(function* () {
     const planner = yield* (yield* Planner).fresh;
-    // Under behaviour 3, as a decision's analysis is written: it may read the project, and write nothing outside plan-review/.
-    const written = yield* planningCall(contextPrompt(task, request), S.QuestionContext, "context", "records", contextValidation(request)).pipe(Effect.provideService(Planner, planner));
+    // S33: it may read the project and change nothing; the project and the guarded records are compared after the call.
+    const written = yield* planningCall(contextPrompt(task, request), S.QuestionContext, "context", "readProject", contextValidation(request)).pipe(Effect.provideService(Planner, planner));
     return { context: { text: written.output.context, by: "agent" as const }, terms: written.output.terms };
   }).pipe(
     Effect.catch((error: RunError): Effect.Effect<ContextWritten, RunError, Store> =>
-      error._tag === "UserStopped" || error._tag === "Interrupted"
+      error._tag === "UserStopped" || error._tag === "Interrupted" || error._tag === "ProjectChanged" || error._tag === "RecordsChanged"
         ? Effect.fail(error)
         : Effect.gen(function* () {
             yield* (yield* Store).converse(contextFallbackNote(describe(error)));

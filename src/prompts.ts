@@ -1524,7 +1524,7 @@ export type ContextRequest = Readonly<{
 }>;
 /**
  * The call that writes the context paragraph and the terms of a question the program composed (S9, decision Q1): a fresh
- * session, read-only, with the rules of every question; the question and its options are fixed. `validateQuestion`
+ * session that may read the project and change nothing (S33), with the rules of every question; the question and its options are fixed. `validateQuestion`
  * checks the reply's context and terms under the same rules (questionProblems, scope "context").
  */
 export function contextPrompt(task: string, request: ContextRequest): string {

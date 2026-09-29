@@ -895,3 +895,19 @@ test("a relayed question without the shape is not denied: a context call writes 
   assert.equal(q.question, "A or B?");
   assert.match(outcome.userInput ?? "", /A or B\? -> B/, "the recorded stop and its answer are unchanged");
 });
+
+// S33 (W1-R1-1): the context call's capability reads the project and changes nothing.
+test("a readProject planning call's hook lets the read tools and the structured output through and denies every other tool", async () => {
+  const fake = await planner([messages(init(), success({}))]);
+  await run(fake.planner.planning("explain the question", schema, "context", "readProject"));
+  const options = fake.sdk.calls[0].options;
+  const hooks = options.hooks?.PreToolUse ?? [];
+  assert.equal(hooks.length, 1);
+  assert.equal(hooks[0].matcher, undefined, "a matcher would let an unlisted tool pass");
+  for (const tool of ["Read", "Grep", "Glob", "StructuredOutput"]) assert.equal(decision(await runHook(options, tool, { file_path: path.join(fake.dir, "plan.md"), pattern: "x" })), undefined, tool);
+  for (const tool of ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "AskUserQuestion", "WebFetch", "FutureTool"]) {
+    assert.equal(decision(await runHook(options, tool, { file_path: path.join(fake.dir, "notes.md"), command: "ls" })), "deny", tool);
+  }
+  assert.equal((await permission(options)("Write", { file_path: path.join(fake.dir, "notes.md") }, callContext()))?.behavior, "deny");
+});
+

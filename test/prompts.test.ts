@@ -400,3 +400,4 @@ test("stepWorkingLabel names the step's state as its mark says it and that an ag
   assert.ok(planStep.includes(prompts.PLAN_STEP_STATE_LABEL.current), planStep);
   for (const label of [phaseStep, planStep]) assert.ok(label.toLowerCase().includes(prompts.AGENT_WORKING_LABEL.toLowerCase()), label);
 });
+
