@@ -239,3 +239,41 @@ test("a response to the question review whose list breaks a rule gets the valida
   assert.equal(probe.planner.prompts[2], prompts.questionRepairPrompt([{ where: "Q2", problems: [{ kind: "notLast", subject: "" }] }]));
   assert.deepEqual(JSON.parse(read(probe.dir, "questions.json")).questions.map((x: QuestionEntry) => x.question), ["question Q1?", "question Q2?"]);
 });
+
+// S16 (Q12): a question of the plan writer and an interview question outside questions.json are held to the rules, with
+// behaviour 10's validation repair turn and no Codex review; an agreed question and a turn that asks nothing are not.
+test("a plan writer's question that breaks a rule gets the validation repair turn; a second failure halts", async () => {
+  const bad = { context: "c", question: "Which database? Say.", terms: [], options: [] };
+  const good = { context: "c", question: "Which database?", terms: [], options: [] };
+  const repaired = testLayer(tempRepo(), {
+    answers: ["SQLite"],
+    steps: [{ output: { questions_for_user: [bad] }, plan: "v1" }, { output: { questions_for_user: [good] }, plan: "v1" }, { output: noQuestions, plan: "v1" }],
+    reviews: [{ issues: [] }, { issues: [] }],
+    execs: [finished],
+  });
+  await runTask(repaired.layer);
+  assert.equal(repaired.probe.planner.prompts[1], prompts.questionRepairPrompt([{ where: "questions_for_user 1", problems: [{ kind: "notLast", subject: "" }] }]));
+  const halted = testLayer(tempRepo(), { steps: [{ output: { questions_for_user: [bad] }, plan: "v1" }, { output: { questions_for_user: [bad] }, plan: "v1" }] });
+  await runFails(halted.layer, "QuestionInvalid", /questions_for_user 1/);
+});
+
+test("an interview question outside questions.json is validated, an agreed one and a turn that asks nothing are not", async () => {
+  const followUp = (context: string) => ({ ...turn("A follow-up.", ["Q1"]), current_question: { id: "F1", context, text: "Which port?", terms: [], options: [] }, asked_ids: ["Q1", "F1"] });
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["1", "8080", ""],
+    steps: [
+      { output: { questions: [q("Q1")] } },
+      { output: { ...turn("", []), current_question: { id: "Q1", context: "", text: "", terms: [], options: [] }, asked_ids: ["Q1"] } },
+      { output: followUp(" ") },
+      { output: followUp("The service listens on a port.") },
+      { output: turn("Done.", ["Q1", "F1"], "# Requirements\n\nQ1: A; F1: 8080") },
+      { output: noQuestions, plan: "v1" },
+    ],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [finished],
+    config: withQuestions,
+  });
+  await runTask(layer);
+  const repair = prompts.questionRepairPrompt([{ where: "F1", problems: [{ kind: "blankContext", subject: "" }] }]);
+  assert.equal(probe.planner.prompts.filter((p) => p === repair).length, 1, "the follow-up got one repair turn, the agreed question none");
+});

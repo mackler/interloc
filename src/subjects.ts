@@ -6,7 +6,7 @@ import { interview } from "./conversation.ts";
 import type { RunError } from "./errors.ts";
 import * as prompts from "./prompts.ts";
 import { subjectHeading } from "./render.ts";
-import { questionsValidation, type Subject, type Validation } from "./review.ts";
+import { bothValidations, questionsValidation, type Subject, userQuestionsValidation, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
 import type { DecisionAnalysis, DecisionApplied, DecisionResponse, Plan, PlannerResponse, PlanResponse, PlanWrite, PlanWriteResult, QuestionList, QuestionListResponse, RecordedPlan } from "./schema.ts";
 import { validatePlan } from "./plan.ts";
@@ -41,7 +41,7 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     heading: subjectHeading(id),
     fileLabel: "questions.json",
     reviewPrompt: prompts.questionReviewPrompt,
-    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records", validate: questionListValidation() },
+    respond: { prompt: prompts.questionRespondPrompt, schema: S.QuestionListResponse, after: (output) => writeQuestions(task, output), capability: "records", validate: bothValidations(questionListValidation<QuestionListResponse>(), userQuestionsValidation<QuestionListResponse>()) },
     applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output), validate: questionListValidation() },
     amend: null,
     proceed: prompts.PROCEED_TO_CLARIFICATION,
@@ -61,8 +61,8 @@ export function requirementsSubject(): Subject<PlannerResponse, PlanWriteResult>
     heading: subjectHeading(id),
     fileLabel: "requirements.md",
     reviewPrompt: prompts.requirementsReviewPrompt,
-    respond: { prompt: prompts.requirementsRespondPrompt, schema: S.PlannerResponse, after: null, capability: "records", validate: null },
-    applyDecisions: { prompt: prompts.requirementsApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null, validate: null },
+    respond: { prompt: prompts.requirementsRespondPrompt, schema: S.PlannerResponse, after: null, capability: "records", validate: userQuestionsValidation() },
+    applyDecisions: { prompt: prompts.requirementsApplyDecisionsPrompt, schema: S.PlanWriteResult, after: null, validate: userQuestionsValidation() },
     amend: (_review, response, round) => {
       const ids = response.dispositions.filter((d) => d.action === "accepted" || d.action === "partially_accepted").map((d) => d.id);
       if (ids.length === 0) return Effect.succeed(undefined);
@@ -90,8 +90,8 @@ export function planSubject(phase: number, withRequirements: boolean, previous: 
     heading: subjectHeading(id),
     fileLabel: "plan.json",
     reviewPrompt: (round) => prompts.planReviewPrompt(phase, round, withRequirements),
-    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlanResponse, after: (output) => savePlan(phase, output.plan, previous), capability: "records", validate: planField(validate) },
-    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWrite, after: (output) => savePlan(phase, output.plan, previous), validate: planField(validate) },
+    respond: { prompt: (round) => prompts.planRespondPrompt(phase, round), schema: S.PlanResponse, after: (output) => savePlan(phase, output.plan, previous), capability: "records", validate: bothValidations(planField<PlanResponse>(validate), userQuestionsValidation<PlanResponse>()) },
+    applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWrite, after: (output) => savePlan(phase, output.plan, previous), validate: bothValidations(planField<PlanWrite>(validate), userQuestionsValidation<PlanWrite>()) },
     amend: null,
     proceed: prompts.PROCEED_TO_IMPLEMENTATION,
     leaveOnAcceptance: false,
@@ -148,7 +148,7 @@ export function decisionSubject(k: number, phase: number, format: string, valida
     heading: subjectHeading(id),
     fileLabel: "analysis.json",
     reviewPrompt: (round) => prompts.decisionReviewPrompt(format, k, round),
-    respond: { prompt: (round) => prompts.decisionRespondPrompt(k, round), schema: S.DecisionResponse, after: (output) => save(output.analysis), capability: "records", validate: validatingField(validate) },
+    respond: { prompt: (round) => prompts.decisionRespondPrompt(k, round), schema: S.DecisionResponse, after: (output) => save(output.analysis), capability: "records", validate: bothValidations(validatingField<DecisionResponse>(validate), userQuestionsValidation<DecisionResponse>()) },
     applyDecisions: { prompt: prompts.decisionApplyDecisionsPrompt(k), schema: S.DecisionApplied, after: (output) => save(output.analysis), validate: validatingField(validate) },
     amend: null,
     proceed: prompts.PROCEED_TO_CHOICE,
@@ -172,7 +172,7 @@ export function workSubject(phase: number, withRequirements: boolean): Subject<P
     heading: subjectHeading(id),
     fileLabel: "changes.diff",
     reviewPrompt: (round) => prompts.workReviewPrompt(phase, round, withRequirements),
-    respond: { prompt: (round, context) => prompts.workRespondPrompt(phase, round, context), schema: S.PlannerResponse, after: null, capability: "readOnly", validate: null },
+    respond: { prompt: (round, context) => prompts.workRespondPrompt(phase, round, context), schema: S.PlannerResponse, after: null, capability: "readOnly", validate: userQuestionsValidation() },
     // Never issued: leaveOnDecision ends the loop instead of a planning call (G-R1-1); typed as the plan's.
     applyDecisions: { prompt: prompts.planApplyDecisionsPrompt, schema: S.PlanWrite, after: null, validate: null },
     amend: null,

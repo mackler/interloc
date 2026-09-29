@@ -1,12 +1,12 @@
 // The interview: a conversation between the user and Claude Code in the program's terminal. Separate from
 // src/interview.ts (the question phase) so that src/subjects.ts can use it without an import cycle (finding 28).
 
-import { Effect } from "effect";
+import { Effect, Result } from "effect";
 import type { RunError } from "./errors.ts";
 import { parseInterviewMessage } from "./input.ts";
 import * as prompts from "./prompts.ts";
 import { interviewSays, recordHeading } from "./render.ts";
-import { planningCall } from "./review.ts";
+import { planningCall, questionsValidation, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
 import { clarificationCount, normalizeTurn, type TurnVariant } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
@@ -14,6 +14,19 @@ import { agentContext, askOffering, numberedOptions, programContext, type Questi
 import type { QuestionOrigin } from "./question.ts";
 import { numberedOptionLabels } from "./userPrompts.ts";
 import type { InterviewStage } from "./uiEvents.ts";
+
+/**
+ * The validation of an interview turn (S16, Q12): the question it asks now, when its id is not one of questions.json
+ * (a follow-up, an accepted requirements issue), under the rules; an agreed question, whose presentation comes from the
+ * records (S18), and a turn that asks nothing are not checked.
+ */
+export const turnValidation =
+  (recorded: readonly string[]): Validation<S.InterviewTurn> =>
+  (turn) => {
+    const current = turn.current_question;
+    if (current.id.trim() === "" || recorded.includes(current.id)) return Result.succeed({ value: turn, notes: [] });
+    return questionsValidation((t: S.InterviewTurn) => [{ where: current.id, question: { context: t.current_question.context, question: t.current_question.text, terms: t.current_question.terms, options: t.current_question.options } }])(turn);
+  };
 
 /**
  * The question an interview turn asks (S7): the question it names now, with its context, terms and options, as an
@@ -41,9 +54,11 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
     // Each interface renders its own help (finding 8 of docs/gui-review.md): the terminal its """ convention, the page Shift+Enter.
     yield* ui.notify({ _tag: "InterviewOpened", heading, stage, total: clarificationCount(agreed, [], []).total });
     yield* store.converse(`## ${recordHeading(stage)}\n\n`);
+    // S16: the questions of questions.json were reviewed; any other question a turn asks is held to the rules here.
+    const recorded = (yield* store.loadQuestions()).questions.map((q) => q.id);
     let prompt = opening;
     for (;;) {
-      const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, "interview")).output);
+      const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, "interview", "records", turnValidation(recorded))).output);
       const [messageLine] = interviewSays(turn);
       yield* ui.notify({ _tag: "InterviewTurn", heading, message: turn.message, summary: turn.kind === "summary_proposed" ? turn.summary : null, ...clarificationCount(agreed, turn.asked, turn.answered) });
       yield* ui.say(messageLine);

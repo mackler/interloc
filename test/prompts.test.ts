@@ -33,11 +33,16 @@ test("the log rules explain file_change with the keys the log entries carry", ()
   }
 });
 
-test("the interview prompts prescribe the answer format that the page's numbered choices parse", () => {
+// S16 and S18: the interview asks for a question's parts in current_question under the rules of every question; an
+// agreed question of questions.json is named by its id alone, since the program shows it as it was reviewed.
+test("the interview prompts ask for the current question's parts under the rules, and for an agreed question its id alone", () => {
   const texts = [prompts.interviewOpenPrompt, prompts.interviewOpenEmptyPrompt("hello"), prompts.interviewGapsPrompt("plan-review/requirements-review/review-1.json", ["G-R1-1"])];
-  for (const text of texts) assert.match(text, /show each proposed answer on its own line in the form `<n>\. <answer>`, numbered from 1/);
-  // The fixture that the parser test uses is written in that format.
-  assert.match(NUMBERED_MESSAGE, /^1\. .+\n2\. .+/m);
+  for (const text of texts) {
+    assert.ok(text.includes(prompts.questionWritingRules()));
+    assert.match(text, /For an agreed question of plan-review\/questions\.json, give only its id/);
+    assert.match(text, /For any other question, give its context, its text, its terms and its options/);
+    assert.doesNotMatch(text, /show each proposed answer on its own line/);
+  }
 });
 
 // Plan step 2.6: the prompts of the work review and the revision of the plan after an execution phase.
@@ -281,7 +286,7 @@ test("the ids the prompts assign to agreed and follow-up questions", () => {
   const rules = [prompts.interviewOpenPrompt, prompts.interviewOpenEmptyPrompt("hello"), prompts.interviewGapsPrompt("f", ["G-R1-1"])];
   for (const text of rules) {
     assert.ok(text.includes(`${prompts.FOLLOW_UP_PREFIX}1, ${prompts.FOLLOW_UP_PREFIX}2, …`), "the interview rules assign other follow-up ids");
-    assert.match(text, /current_question: the question this message asks the user to answer now: its id and its text alone/);
+    assert.match(text, /current_question: the question this message asks the user to answer now/);
   }
 });
 

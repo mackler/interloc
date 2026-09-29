@@ -251,6 +251,10 @@ export const questionsValidation =
     return Result.isFailure(validated) ? Result.fail({ error: validated.failure, repair: questionRepairPrompt(validated.failure.questions) }) : Result.succeed({ value: output, notes: [] });
   };
 
+/** The validation of a reply's questions_for_user (S16, Q12): each question under the rules, named by its position. */
+export const userQuestionsValidation = <T extends Readonly<{ questions_for_user: readonly UserQuestion[] }>>(): Validation<T> =>
+  questionsValidation((output: T) => output.questions_for_user.map((question, i) => ({ where: `questions_for_user ${i + 1}`, question })));
+
 /** Two validations in turn: the second sees the first's value, and the notes of both are kept. */
 export const bothValidations =
   <T>(first: Validation<T>, second: Validation<T> | null): Validation<T> =>
