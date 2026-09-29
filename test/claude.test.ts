@@ -854,3 +854,44 @@ test("faults beyond the retries, then Stop at the exhaustion pause: executing fa
   await assert.rejects(run(fake.planner.executing("implement the plan", noReporter)), (e: unknown) => tag(e) === "AgentUnreachable");
   assert.equal(fake.sdk.calls.length, 2);
 });
+
+// S14 (Q2, G-R1-2): a relayed question in the shape of RELAYED_SHAPE is shown from its own parts; any other is not denied,
+// and a context call writes its context and terms while the execution call waits.
+test("a relayed question in the shape is presented from its own parts, with no context call", async () => {
+  const text = prompts.relayedQuestionText({ context: "Claude Code, the coding agent, checks the input of a tool with zod, a library, now, while it carries out the plan, so that bad input is refused.", terms: [{ term: "zod", explanation: "A library that checks the shape of data." }], question: "Should zod be declared as a dependency?" });
+  const questions = [{ question: text, options: [{ label: "Declare it", description: "add it to package.json" }, { label: "Leave it", description: "keep it the SDK's" }] }];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    yield success({ status: "needs_input", summary: "s", question: "q", remaining_work: "r" });
+  })();
+  const fake = await planner([script], ["1"]);
+  const { decider, explained } = recordingDecider();
+  await run(fake.planner.executing("implement the plan", noReporter), decider);
+  assert.deepEqual(explained, []);
+  const [q] = fake.ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : []));
+  assert.equal(q.question, "Should zod be declared as a dependency?");
+  assert.equal(q.context.by, "agent");
+  assert.match(q.context.text, /^Claude Code, the coding agent/);
+  assert.deepEqual(q.terms, [{ term: "zod", explanation: "A library that checks the shape of data." }]);
+});
+
+test("a relayed question without the shape is not denied: a context call writes its context from the question and the plan", async () => {
+  const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await permission(call.options)("AskUserQuestion", { questions }, callContext());
+    yield success({ status: "needs_input", summary: "s", question: "q", remaining_work: "r" });
+  })();
+  const fake = await planner([script], ["2"]);
+  fs.writeFileSync(path.join(fake.dir, "plan.md"), "# The plan\n\n1. Build it.\n");
+  const { decider, explained } = recordingDecider();
+  const outcome = await run(fake.planner.executing("implement the plan", noReporter), decider);
+  assert.equal(explained.length, 1);
+  assert.equal(explained[0].question, "A or B?");
+  assert.deepEqual(explained[0].origin, { kind: "relayed" });
+  assert.match(explained[0].facts, /# The plan\n\n1\. Build it\./);
+  const [q] = fake.ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : []));
+  assert.equal(q.question, "A or B?");
+  assert.match(outcome.userInput ?? "", /A or B\? -> B/, "the recorded stop and its answer are unchanged");
+});

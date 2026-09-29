@@ -1484,3 +1484,8 @@ export function contextFallbackNote(reason: string): string {
 export function transportFacts(agent: "claude" | "codex", what: string, attempts: number, fault: string): string {
   return `${agentName(agent)} could not be reached for ${what} after ${attempts} attempts; the last error was: ${fault}. Interloq waited between the attempts, each time twice as long as before. Retry again makes another full set of attempts; Stop the run ends the run and keeps its records.`;
 }
+
+/** The facts of a relayed question without the shape that a context call is given (S14, Q2): the plan being carried out. */
+export function relayedFacts(plan: string | null): string {
+  return `Claude Code asked this question while it carried out the plan, and waits for the answer; the plan is revised and reviewed with the answer before the work continues.\n${plan === null ? "plan-review/plan.md does not exist." : `The plan being carried out (plan-review/plan.md):\n${plan}`}`;
+}

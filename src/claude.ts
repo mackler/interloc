@@ -12,7 +12,7 @@ import { type ClaudeFailure, classifyClaude, errorCode } from "./transport.ts";
 import { withTransportRetry } from "./retry.ts";
 import type { ExecOutcome } from "./schema.ts";
 import { askOffering, numberedOptions, permissionOptions, programContext, type QuestionDraft } from "./offer.ts";
-import type { QuestionOrigin } from "./question.ts";
+import { parseRelayedQuestion, type QuestionOrigin } from "./question.ts";
 import { chooseOption } from "./input.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as prompts from "./prompts.ts";
@@ -117,6 +117,21 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     askOffering((p) => ui.ask(p), hint, draft, acceptable).pipe(Effect.provideService(Decider, decider), Effect.provideService(Store, store), Effect.provideService(Ui, ui));
 
   /**
+   * A relayed question as the user is shown it (S14): from its own parts when its text has the shape of RELAYED_SHAPE
+   * (G-R1-2); otherwise it is not denied, and a context call writes its context and terms from the question, the task
+   * and plan.md while the execution call waits (Q2).
+   */
+  const relayedDraft = (q: Question): Effect.Effect<QuestionDraft, CallbackError> =>
+    Effect.gen(function* () {
+      const origin: QuestionOrigin = { kind: "relayed" };
+      const options = numberedOptions(q.options);
+      const parsed = parseRelayedQuestion(q.question, q.options);
+      if (parsed !== null) return { origin, context: { text: parsed.context, by: "agent" }, terms: parsed.terms, question: parsed.question, options, decision: null };
+      const { plan } = yield* store.readContext();
+      return { origin, context: programContext(origin), terms: [], question: q.question, options, explain: prompts.relayedFacts(plan), decision: null };
+    });
+
+  /**
    * Asks the user each question; the answers are keyed by the question's index, so equal texts stay apart. A question
    * with options carries the offer; its presentation is repeated after an analysis (P1-R1-3).
    */
@@ -124,8 +139,7 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     Effect.gen(function* () {
       const answers = new Map<number, string>();
       for (const [index, q] of questions.entries()) {
-        const origin: QuestionOrigin = { kind: "relayed" };
-        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: q.question, options: numberedOptions(q.options), decision: null };
+        const draft = yield* relayedDraft(q);
         // A blank reply is asked again, the question presented again first (W1-R1-1, W1-R1-2).
         const reply = yield* offering(decider, prompts.optionOrTextPrompt, draft, (a) => a !== "");
         const chosen = chooseOption(reply, q.options.length);

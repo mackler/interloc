@@ -1,4 +1,4 @@
-// The context call (S9, decision Q1): a fresh Claude Code session writes the context paragraph and the terms of a
+// The context call (S9, decision Q1): a fresh Claude Code session, which may read the project and change nothing, writes the context paragraph and the terms of a
 // question the program composed itself, under the rules of every question; a reply that breaks them gets the repair
 // turns of behaviour 10, and a call that cannot be made or repaired leaves the program's own paragraph (S10, G-R1-1).
 
@@ -25,14 +25,15 @@ export const contextValidation =
 export const programWritten = (request: ContextRequest): ContextWritten => ({ context: { text: fallbackContext(request.origin), by: "program" }, terms: [] });
 
 /**
- * Writes a question's context in a fresh session (read-only, as a decision's analysis is written): the agent's paragraph
+ * Writes a question's context in a fresh session (a planning call under behaviour 3, as a decision's analysis is written): the agent's paragraph
  * and terms, or, when the call fails for any reason but the user's stop, the program's paragraph with a note in
  * conversation.md, so that the question always reaches the user.
  */
 export const writeContext = (task: string, request: ContextRequest): Effect.Effect<ContextWritten, RunError, Store | Planner | Decider | Ui | RunConfig> =>
   Effect.gen(function* () {
     const planner = yield* (yield* Planner).fresh;
-    const written = yield* planningCall(contextPrompt(task, request), S.QuestionContext, "context", "readOnly", contextValidation(request)).pipe(Effect.provideService(Planner, planner));
+    // Under behaviour 3, as a decision's analysis is written: it may read the project, and write nothing outside plan-review/.
+    const written = yield* planningCall(contextPrompt(task, request), S.QuestionContext, "context", "records", contextValidation(request)).pipe(Effect.provideService(Planner, planner));
     return { context: { text: written.output.context, by: "agent" as const }, terms: written.output.terms };
   }).pipe(
     Effect.catch((error: RunError): Effect.Effect<ContextWritten, RunError, Store> =>
