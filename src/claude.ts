@@ -258,8 +258,18 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       const allowed = await inCallback(
         Effect.gen(function* () {
           // S12: the input in prose, and the context written by a context call made while the execution call waits.
-          const origin: QuestionOrigin = { kind: "permission", tool: toolName, input: prompts.toolInputProse(input) };
-          const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.permissionQuestion(toolName, input), options: permissionOptions, explain: prompts.permissionFacts(toolName, input), decision: null };
+          // S34: the input under plain labels, a field without one under its own name, explained as a term.
+          const origin: QuestionOrigin = { kind: "permission", tool: toolName, input: prompts.toolInputLines(input) };
+          const draft: QuestionDraft = {
+            origin,
+            context: programContext(origin),
+            terms: prompts.toolInputTerms(input),
+            question: prompts.permissionQuestion(toolName, input),
+            options: permissionOptions,
+            details: `${prompts.TOOL_INPUT_HEADING}\n\n${prompts.toolInputLines(input)}`,
+            explain: prompts.permissionFacts(toolName, input),
+            decision: null,
+          };
           const reply = yield* offering(decider, prompts.permissionPrompt, draft);
           return reply.toLowerCase() === "y";
         }),

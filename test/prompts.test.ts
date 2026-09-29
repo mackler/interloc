@@ -401,3 +401,18 @@ test("stepWorkingLabel names the step's state as its mark says it and that an ag
   for (const label of [phaseStep, planStep]) assert.ok(label.toLowerCase().includes(prompts.AGENT_WORKING_LABEL.toLowerCase()), label);
 });
 
+// S34 (W1-R1-2, P2-R1-2): a tool's input as the user reads it.
+test("toolInputLines labels the known fields in plain words and keeps each unknown field's own name; toolInputTerms explains those", () => {
+  const known = { file_path: "/a", old_string: "x", new_string: "y", replace_all: true, content: "c", command: "ls", description: "d", pattern: "p", path: "/p", url: "https://e" };
+  const lines = prompts.toolInputLines(known);
+  // No key is shown as an identifier ("file_path: …" or its quoted name); a label may use an English word such as "command".
+  for (const key of Object.keys(known)) assert.ok(!new RegExp(`(^|\\n)\\s*- ${key}:`).test(lines) && !lines.includes(`"${key}"`), `${key} in ${lines}`);
+  for (const key of ["file_path", "old_string", "new_string", "replace_all"]) assert.ok(!lines.includes(key), key);
+  assert.deepEqual(prompts.toolInputTerms(known), []);
+  assert.notEqual(prompts.toolInputLines({ overwrite: true }), prompts.toolInputLines({ dry_run: true }));
+  assert.match(prompts.toolInputLines({ overwrite: true }), /"overwrite"/);
+  assert.deepEqual(prompts.toolInputTerms({ overwrite: true, edits: [{ old_string: "a", mode: "m" }] }).map((t) => t.term), ["overwrite", "mode"]);
+  assert.ok(prompts.unknownSettingExplanation.trim() !== "");
+  // A multi-line value stays readable, and nested fields are labeled too.
+  assert.ok(!prompts.toolInputLines({ edits: [{ old_string: "a", new_string: "b" }] }).includes("old_string"));
+});

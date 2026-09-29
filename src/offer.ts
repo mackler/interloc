@@ -6,7 +6,7 @@ import { Effect } from "effect";
 import type { RunError } from "./errors.ts";
 import { chooseOption, isDecide, parseExtraRounds, parseTransportAnswer, parseUnchangedAnswer } from "./input.ts";
 import * as prompts from "./prompts.ts";
-import type { OptionAnswer, PresentedQuestion, QuestionContextText, QuestionOrigin, Term } from "./question.ts";
+import type { ContextWritten, OptionAnswer, PresentedQuestion, QuestionContextText, QuestionOrigin, Term } from "./question.ts";
 import { renderChoice, renderQuestionRecord } from "./render.ts";
 import { Decider, Store, Ui } from "./services.ts";
 
@@ -93,6 +93,15 @@ export const limitOptions = (proceed: string | null): readonly OfferedOption[] =
   ];
 };
 
+/**
+ * A draft with the context a context call wrote (S34): its paragraph, its terms, and the draft's own terms that it did
+ * not explain again (a term the call explains replaces the draft's fixed explanation of it).
+ */
+const withContext = (draft: QuestionDraft, written: ContextWritten): QuestionDraft => ({
+  ...draft,
+  context: written.context,
+  terms: [...written.terms, ...draft.terms.filter((t) => !written.terms.some((w) => w.term === t.term))],
+});
 /** The context and terms a context call writes for a question the program composed (S9), before it is presented. */
 const explain = (draft: QuestionDraft, facts: string) =>
   Effect.gen(function* () {
@@ -119,7 +128,7 @@ export const askOffering = <E>(
   Effect.gen(function* () {
     const ui = yield* Ui;
     const store = yield* Store;
-    const explained = draft.explain === undefined ? draft : { ...draft, ...(yield* explain(draft, draft.explain)) };
+    const explained = draft.explain === undefined ? draft : withContext(draft, yield* explain(draft, draft.explain));
     const question = presentedQuestion(explained, yield* ui.nextQuestion);
     const present = ui.notify({ _tag: "QuestionPresented", question });
     yield* present;

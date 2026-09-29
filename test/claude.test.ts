@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { programWritten } from "../src/questionContext.ts";
+import { questionMarkdown } from "../src/render.ts";
 import type { ContextRequest } from "../src/prompts.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -600,7 +601,7 @@ test("an execution permission request offers Help me decide over Allow and Deny"
   assert.equal(request.question, "Claude Code wants to run the command rm -rf build. Should it be allowed?");
   // S12: the context call is given the tool and its input in prose, not the input's JSON.
   assert.equal(explained.length, 1);
-  assert.match(explained[0].facts, /its tool Bash with this input:\ncommand: rm -rf build\n/);
+  assert.match(explained[0].facts, /its tool Bash with this input:\ncommand \(The command\): rm -rf build\n/);
   assert.ok(!explained[0].facts.includes("{"), explained[0].facts);
   assert.deepEqual(request.options.map((o) => o.label), [prompts.PERMISSION_ALLOW, prompts.PERMISSION_DENY]);
   assert.equal(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")).option, prompts.PERMISSION_ALLOW);
@@ -911,3 +912,45 @@ test("a readProject planning call's hook lets the read tools and the structured 
   assert.equal((await permission(options)("Write", { file_path: path.join(fake.dir, "notes.md") }, callContext()))?.behavior, "deny");
 });
 
+// S34 (W1-R1-2, P2-R1-2): a permission request shows every field of the tool's input, named in plain words or, for a
+// field Interloq has no words for, under its own name explained as a term, whether or not the context call succeeded.
+const permissionAsked = async (tool: string, input: Record<string, unknown>, explain?: DeciderShape["explain"]) => {
+  const script: Script = (call) => (async function* () {
+    yield init();
+    await permission(call.options)(tool, input, callContext());
+    yield success({ status: "finished", summary: "done", question: "", remaining_work: "" });
+  })();
+  const fake = await planner([script], ["n"]);
+  const { decider } = recordingDecider();
+  await run(fake.planner.executing("implement the plan", noReporter), explain === undefined ? decider : { ...decider, explain });
+  const [q] = fake.ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : []));
+  return { q, conversation: fs.readFileSync(path.join(fake.dir, "conversation.md"), "utf8") };
+};
+
+test("an Edit permission shows the file and both texts under plain labels, never the raw keys, with the program's context", async () => {
+  const { q, conversation } = await permissionAsked("Edit", { file_path: "/tmp/config", old_string: "safe", new_string: "unsafe" });
+  assert.equal(q.context.by, "program");
+  for (const text of [q.details, questionMarkdown(q), conversation]) {
+    for (const shown of ["/tmp/config", "safe", "unsafe", prompts.TOOL_INPUT_HEADING]) assert.ok(text.includes(shown), `${shown} in ${text}`);
+    for (const raw of ["file_path", "old_string", "new_string"]) assert.ok(!text.includes(raw), `${raw} in ${text}`);
+  }
+});
+
+test("an unknown field keeps its own name, explained as a term, with and without the context call", async () => {
+  const overwrite = await permissionAsked("FutureTool", { overwrite: true });
+  const dryRun = await permissionAsked("FutureTool", { dry_run: true });
+  assert.notEqual(overwrite.q.details, dryRun.q.details);
+  assert.deepEqual(overwrite.q.terms, [{ term: "overwrite", explanation: prompts.unknownSettingExplanation }]);
+  assert.deepEqual(dryRun.q.terms, [{ term: "dry_run", explanation: prompts.unknownSettingExplanation }]);
+  const agent = await permissionAsked("FutureTool", { overwrite: true }, (request) =>
+    Effect.succeed({ context: { text: "Written by Claude Code.", by: "agent" as const }, terms: [{ term: "overwrite", explanation: "Replaces the file if it exists." }, { term: "FutureTool", explanation: "A tool." }] }),
+  );
+  assert.deepEqual(agent.q.terms, [{ term: "overwrite", explanation: "Replaces the file if it exists." }, { term: "FutureTool", explanation: "A tool." }]);
+});
+
+test("the context call's facts name the unknown fields and ask for each to be explained as a term", async () => {
+  const facts = prompts.permissionFacts("FutureTool", { overwrite: true, file_path: "/x" });
+  assert.match(facts, /overwrite/);
+  assert.match(facts, /file_path \(The file\): \/x/);
+  assert.ok(facts.includes(prompts.unknownSettingsRequest(["overwrite"])));
+});
