@@ -11,11 +11,14 @@ import { planningCall, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
 import { type Decider, Planner, type RunConfig, Store, type Ui } from "./services.ts";
 
-/** The reply's context and terms under the rules of every question, the program's question and options fixed (scope "context"). */
+/**
+ * The reply's context and terms under the rules of every question, the program's question and options fixed (scope
+ * "context"); a term must occur in what the user is shown, the facts excluded (S36, CONTEXT_TERMS_RULE).
+ */
 export const contextValidation =
   (request: ContextRequest): Validation<S.QuestionContext> =>
   (reply) => {
-    const problems = questionProblems({ context: reply.context, question: request.question, terms: reply.terms, options: request.options, details: `${request.details}\n${request.facts}` }, "context");
+    const problems = questionProblems({ context: reply.context, question: request.question, terms: reply.terms, options: request.options, details: request.details }, "context");
     if (problems.length === 0) return Result.succeed({ value: reply, notes: [] });
     const questions = [{ where: "the context of the question", problems }];
     return Result.fail({ error: new QuestionInvalid({ questions }), repair: questionRepairPrompt(questions) });

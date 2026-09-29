@@ -114,3 +114,16 @@ test("a context call that changes the project halts with ProjectChanged; the fal
   const { written } = run({ contexts: [{ output: good, touchProject: true }] });
   await assert.rejects(written(), (e: unknown) => (e as { _tag?: string })._tag === "ProjectChanged");
 });
+
+// S36 (W1-R1-4): a term must occur in what the user is shown, not only in the facts the context call is given.
+test("a term found only in the hidden facts gets the repair turn; one in the displayed details passes; the prompt says so", async () => {
+  const onlyInFacts = { ...good, terms: [{ term: "npm", explanation: "The package manager of Node.js." }] };
+  const hidden = run({ contexts: [{ output: onlyInFacts }, { output: good }] });
+  await hidden.written();
+  assert.equal(hidden.probe.planner.contextPrompts[1], prompts.questionRepairPrompt([{ where: "the context of the question", problems: [{ kind: "termAbsent", subject: "npm" }] }]));
+  const { contextValidation } = await import("../src/questionContext.ts");
+  const { Result } = await import("effect");
+  assert.ok(Result.isSuccess(contextValidation({ ...request, details: "The command: npm install zod" })(onlyInFacts)));
+  assert.ok(Result.isFailure(contextValidation(request)(onlyInFacts)));
+  assert.ok(prompts.contextPrompt("t", request).includes(prompts.CONTEXT_TERMS_RULE));
+});

@@ -1586,17 +1586,24 @@ export type ContextRequest = Readonly<{
  * session that may read the project and change nothing (S33), with the rules of every question; the question and its options are fixed. `validateQuestion`
  * checks the reply's context and terms under the same rules (questionProblems, scope "context").
  */
+/**
+ * Where a context call's terms may occur (S36, W1-R1-4): only in what the user is shown, which `contextValidation` in
+ * src/questionContext.ts checks; the facts are for the agent's understanding.
+ */
+export const CONTEXT_TERMS_RULE =
+  "Every term you list must occur, in exactly those words, in your paragraph, the question, the options or what the user is shown with the question; the facts for your understanding are not shown to the user, so a word that occurs only there cannot be a term.";
 export function contextPrompt(task: string, request: ContextRequest): string {
   const options = request.options.length === 0 ? "(none: the user answers in his own words)" : request.options.map((o, i) => optionLine(i, o)).join("\n");
-  const record = [request.details, request.facts].filter((t) => t.trim() !== "").join("\n\n");
+  const shown = request.details.trim() === "" ? "" : `What the user is shown with the question:\n${request.details}\n`;
+  const facts = request.facts.trim() === "" ? "" : `Facts for your understanding, not shown to the user:\n${request.facts}\n`;
   return `Interloq, the program that runs this task, is about to ask the user the question below. Write the context paragraph that the user reads before it, and list the terms in it that a reader may not know. You may read the project to understand it; do not modify any file, do not use the AskUserQuestion tool, and do not answer or change the question.
 ${questionWritingRules()}
-The question and its options are fixed and are shown after your paragraph; the paragraph places the reader before he is asked. Return in context the paragraph and in terms each term with its explanation, the term in the exact words in which it appears in the paragraph, the question, the options or the record below.
+The question and its options are fixed and are shown after your paragraph; the paragraph places the reader before he is asked. Return in context the paragraph and in terms each term with its explanation. ${CONTEXT_TERMS_RULE}
 
 The task of the run: ${task}
 
 Where the question arises: ${originLine(request.origin, request.decision)}
-${record === "" ? "" : `What the program records of it:\n${record}\n`}
+${shown}${facts}
 The question: ${request.question}
 The options, in this order:
 ${options}`;
