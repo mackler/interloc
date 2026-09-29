@@ -4,7 +4,7 @@ import * as prompts from "../../src/prompts.ts";
 import { decodeServer, type RunEvent, type ServerMessage, type Stamped } from "../../src/protocol.ts";
 import { foreseenPhases, phaseName, type UiEvent } from "../../src/uiEvents.ts";
 import { promptOf } from "../../src/userPrompts.ts";
-import { waiting, type Band, bandsOf, callStartedAt, currentPlanStep, dismissUnsent, executing, initialState, keepUnsent, planStepState, progressOf, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
+import { type ShownPlan, shownPlan, waiting, type Band, bandsOf, callStartedAt, currentPlanStep, dismissUnsent, executing, initialState, keepUnsent, planStepState, progressOf, protocolError, reduce, showsTime, type ViewState } from "./state.ts";
 
 // Plan step 4.2: the page's reducer.
 const hello = (current: number | null = 1): ServerMessage => ({ type: "hello", cwd: "/p", current, incarnation: "a" });
@@ -20,6 +20,8 @@ const stamp = (events: readonly RunEvent[], times?: readonly number[]): Stamped[
 const live = (events: readonly RunEvent[], run = 1, times?: readonly number[]): ServerMessage[] => [hello(run), { type: "replay", runs: [] }, ...stamp(events, times).map(({ time, event }, seq): ServerMessage => ({ type: "event", run, seq, time, event }))];
 const fold = (messages: readonly ServerMessage[], from: ViewState = initialState): ViewState => messages.reduce(reduce, from);
 const replayed = (events: readonly RunEvent[], run = 1, current: number | null = run, times?: readonly number[]): ViewState => fold([hello(current), { type: "replay", runs: [{ id: run, events: stamp(events, times) }] }]);
+/** A shown plan without its stages' rendering keys: the plan it shows. */
+const bare = (p: ShownPlan | null) => (p === null ? null : { stages: p.stages.map(({ key: _key, ...st }) => st) });
 const bodies = (s: ViewState) => s.run?.left.map((m) => `${m.author}:${m.body}`) ?? [];
 
 describe("ordering and the panels", () => {
@@ -921,13 +923,14 @@ describe("the whole run in the timeline", () => {
 
   test("the plan hangs under the Implementation of its phase, and a revision moves it there (Q5, Q9)", () => {
     const first = [started, foreseen(false, 1), began({ kind: "planning", n: 1 }), notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "pending"), step: null })];
+    const plans = (x: ViewState) => x.run?.timeline.map((e) => bare(e.plan));
     const one = fold(live(first));
-    expect(one.run?.timeline.map((e) => e.plan)).toEqual([null, recorded("S1", "pending"), null]);
+    expect(plans(one)).toEqual([null, recorded("S1", "pending"), null]);
     const revised = fold(live([...first, foreseen(false, 2), notified({ _tag: "PlanChanged", phase: 2, plan: recorded("S2", "pending"), step: null })]));
-    expect(revised.run?.timeline.map((e) => e.plan)).toEqual([null, null, null, null, recorded("S2", "pending"), null]);
+    expect(plans(revised)).toEqual([null, null, null, null, recorded("S2", "pending"), null]);
     // A phase that was not foreseen (a replay of an older run) takes the plan when it begins.
-    const late = fold(live([started, notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "done"), step: null }), began({ kind: "execution", n: 1 })]));
-    expect(late.run?.timeline[0].plan).toEqual(recorded("S1", "done"));
+    const late = fold(live([started, notified({ _tag: "PlanChanged", phase: 1, plan: recorded("S1", "pending"), step: null }), began({ kind: "execution", n: 1 })]));
+    expect(bare(late.run?.timeline[0].plan ?? null)).toEqual(recorded("S1", "pending"));
   });
 
   test("a started step is current only when it is the entry's current step, its phase is active and an execution call runs", () => {
@@ -1165,5 +1168,97 @@ describe("the current step of the plan", () => {
         if (last !== undefined && last[1] === "started") expect(current).toEqual([`${last[0]}:current`]);
       }),
     );
+  });
+});
+
+// Issue #54 (Q3, Q6): an ended Implementation keeps the steps it acted on; a surviving step follows later revisions, a
+// removed one stays as it was at the phase's end; the next Implementation shows what remains. Derived by the fold alone.
+describe("the steps an Implementation acted on", () => {
+  type Status = "pending" | "started" | "done" | "unfinished";
+  type Step = Readonly<{ id: string; label: string; status: Status }>;
+  const planOf = (stages: readonly (readonly [string, readonly Step[]])[]) => ({
+    stages: stages.map(([title, steps], i) => ({ number: i + 1, title, steps: steps.map((x, j) => ({ id: x.id, number: j + 1, label: x.label, text: `text of ${x.label}`, status: x.status })) })),
+  });
+  const planChanged = (phase: number, plan: ReturnType<typeof planOf>, step: StepReportLike = null) => notified({ _tag: "PlanChanged", phase, plan, step });
+  type StepReportLike = Readonly<{ id: string; status: "started" | "done" }> | null;
+  const phase = (kind: "planning" | "execution" | "work", n: number) => ({ kind, n });
+  const begin = (kind: "planning" | "execution" | "work", n: number) => notified({ _tag: "PhaseBegan", phase: phase(kind, n) });
+  const end = (kind: "planning" | "execution" | "work", n: number, result = "converged") => notified({ _tag: "PhaseEnded", phase: phase(kind, n), result });
+  const call = notified({ _tag: "AgentCallStarted", agent: "claude", purpose: "execution" });
+  const callEnded = notified({ _tag: "AgentCallEnded", agent: "claude", ok: true });
+
+  // The plan of Planning 1: stage A with S1 and S3, stage B with S4 and S2 (S2 never touched).
+  const v1 = (s: Record<string, Status> = {}) => planOf([["A", [{ id: "S1", label: "one", status: s.S1 ?? "pending" }, { id: "S3", label: "three", status: s.S3 ?? "pending" }]], ["B", [{ id: "S4", label: "four", status: s.S4 ?? "pending" }, { id: "S2", label: "two", status: s.S2 ?? "pending" }]]]);
+  // The revision of Planning 2: S1 removed; stage 1 is now "B'" with S5, S4 (renumbered, relabeled) and S2; S3 done in stage 2 "A'".
+  const v2 = (s: Record<string, Status> = {}) => planOf([["B'", [{ id: "S5", label: "five", status: s.S5 ?? "pending" }, { id: "S4", label: "four revised", status: s.S4 ?? "unfinished" }, { id: "S2", label: "two", status: s.S2 ?? "pending" }]], ["A'", [{ id: "S3", label: "three", status: "done" }]]]);
+
+  const implementation1: RunEvent[] = [
+    started,
+    notified({ _tag: "PhasesForeseen", phases: foreseenPhases(false, 1) }),
+    begin("planning", 1),
+    planChanged(1, v1()),
+    end("planning", 1),
+    begin("execution", 1),
+    call,
+    planChanged(1, v1({ S1: "started" }), { id: "S1", status: "started" }),
+    planChanged(1, v1({ S1: "started", S3: "started" }), { id: "S3", status: "started" }),
+    planChanged(1, v1({ S1: "started", S3: "done" }), { id: "S3", status: "done" }),
+    planChanged(1, v1({ S1: "started", S3: "done", S4: "started" }), { id: "S4", status: "started" }),
+    callEnded,
+    // The end of the call turns the started steps unfinished while the entry is still active (src/run.ts).
+    planChanged(1, v1({ S1: "unfinished", S3: "done", S4: "unfinished" })),
+    end("execution", 1, "aborted"),
+  ];
+  const revision: RunEvent[] = [begin("work", 1), end("work", 1), notified({ _tag: "PhasesForeseen", phases: foreseenPhases(false, 2) }), begin("planning", 2), planChanged(2, v2()), end("planning", 2)];
+  const implementation2: RunEvent[] = [begin("execution", 2), call, planChanged(2, v2({ S4: "started" }), { id: "S4", status: "started" }), planChanged(2, v2({ S4: "done" }), { id: "S4", status: "done" }), callEnded, end("execution", 2, "finished")];
+
+  const entry = (s: ViewState, label: string) => s.run!.timeline.find((e) => e.label === label)!;
+  /** An entry's shown plan: per stage its key and title, per step its id, number, label, text and status. */
+  const shown = (s: ViewState, label: string) => entry(s, label).plan?.stages.map((st) => [st.key, st.title, st.steps.map((x) => `${x.id} ${x.number} ${x.label} (${x.text}) ${x.status}`)]) ?? null;
+  const both = (events: RunEvent[]) => [fold(live(events)), replayed(events)];
+
+  test("right after its end, an Implementation shows only the steps it acted on", () => {
+    for (const s of both(implementation1)) {
+      expect(shown(s, "Implementation")).toEqual([
+        ["current-1", "A", ["S1 1 one (text of one) unfinished", "S3 2 three (text of three) done"]],
+        ["current-2", "B", ["S4 1 four (text of four) unfinished"]],
+      ]);
+    }
+  });
+
+  test("after a revision, the ended Implementation keeps its steps: a surviving one follows the revision, a removed one stays as it was", () => {
+    for (const s of both([...implementation1, ...revision])) {
+      expect(shown(s, "Implementation 1")).toEqual([
+        ["current-1", "B'", ["S4 2 four revised (text of four revised) unfinished"]],
+        ["record-1", "A", ["S1 1 one (text of one) unfinished"]],
+        ["current-2", "A'", ["S3 1 three (text of three) done"]],
+      ]);
+      // The next Implementation shows what remains: not the done S3, not the removed S1.
+      expect(shown(s, "Implementation 2")).toEqual([["current-1", "B'", ["S5 1 five (text of five) pending", "S4 2 four revised (text of four revised) unfinished", "S2 3 two (text of two) pending"]]]);
+    }
+  });
+
+  test("a step worked in two phases appears under both, each with the status it had there", () => {
+    for (const s of both([...implementation1, ...revision, ...implementation2])) {
+      expect(shown(s, "Implementation 1")?.[0]).toEqual(["current-1", "B'", ["S4 2 four revised (text of four revised) unfinished"]]);
+      expect(shown(s, "Implementation 2")).toEqual([["current-1", "B'", ["S4 2 four revised (text of four revised) done"]]]);
+    }
+  });
+
+  test("a step done in an earlier phase is not repeated in a later phase's record, nor a step it never touched", () => {
+    const s = fold(live([...implementation1, ...revision, ...implementation2]));
+    const ids = (label: string) => entry(s, label).record?.stages.flatMap((st) => st.steps.map((x) => x.id));
+    expect(ids("Implementation 1")).toEqual(["S1", "S3", "S4"]);
+    expect(ids("Implementation 2")).toEqual(["S4"]);
+  });
+
+  test("a halted Implementation keeps its acted steps right after Ended", () => {
+    const halted = [...implementation1.slice(0, -1), { _tag: "Ended", code: 1 } as RunEvent];
+    for (const s of both(halted)) expect(shown(s, "Implementation")?.flatMap(([, , steps]) => steps)).toEqual(["S1 1 one (text of one) unfinished", "S3 2 three (text of three) done", "S4 1 four (text of four) unfinished"]);
+  });
+
+  test("shownPlan of an entry that is not an Implementation is null", () => {
+    const s = fold(live(implementation1));
+    expect(shownPlan(entry(s, "Planning"), s.run!.plan)).toBe(null);
   });
 });

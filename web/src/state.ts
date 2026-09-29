@@ -8,7 +8,7 @@ import { interviewSays, optionLines, relayedQuestionMarkdown, relayedQuestionSay
 import { correctionCount } from "../../src/issueLog.ts";
 import { countOfKind, type LoopResult, type Phase, phaseName, type StepReport, type UiEvent } from "../../src/uiEvents.ts";
 import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
-import type { RecordedPlan, StepStatus } from "../../src/schema.ts";
+import type { RecordedPlan, RecordedStep, StepStatus } from "../../src/schema.ts";
 
 export type Author = "program" | "user" | "codex" | "claude";
 /**
@@ -52,6 +52,12 @@ export type StepState = TimelineState | "skipped";
 export type StepCount = Readonly<{ answered: number; total: number }>;
 export type TimelineStep = Readonly<{ kind: "formulate" | "clarification"; label: string; state: StepState; count: StepCount | null; base: StepCount; groups: readonly RoundGroup[] }>;
 /**
+ * The plan as an Implementation entry shows it (issue #54): its stages, each with a rendering `key` that is unique within
+ * the entry (`current-<n>` for a stage of the current plan, `record-<n>` for one that holds only steps a revision removed).
+ */
+export type ShownStage = Readonly<{ key: string; number: number; title: string; steps: readonly RecordedStep[] }>;
+export type ShownPlan = Readonly<{ stages: readonly ShownStage[] }>;
+/**
  * A phase of the run in the timeline. `label` is numbered by the count of its kind in the timeline (issue #6), and is
  * renumbered when that count changes; `plan` is the current plan, on the Implementation entry that carries it out (Q5, Q9).
  */
@@ -61,7 +67,8 @@ export type TimelineEntry = Readonly<{
   groups: readonly RoundGroup[];
   steps: readonly TimelineStep[];
   state: TimelineState;
-  plan: RecordedPlan | null;
+  /** What the entry shows of the plan (issue #54): derived by `shownPlan` from the entry and the current plan, never set otherwise. */
+  plan: ShownPlan | null;
   /** The publication times of the phase's PhaseBegan and of its end (PhaseEnded, or the run's Ended): null before (issue #50, Q2). */
   began: string | null;
   ended: string | null;
@@ -71,6 +78,10 @@ export type TimelineEntry = Readonly<{
    * clears it, and only a new report of the step makes it current again.
    */
   currentStep: string | null;
+  /** The ids of the steps of the plan whose status changed, or that were reported, while the entry was active (issue #54, Q3). */
+  acted: readonly string[];
+  /** An ended Implementation's steps as they stood when it ended, those of `acted` alone (issue #54, Q3, Q6); null before its end. */
+  record: RecordedPlan | null;
 }>;
 /** An agent call that runs; calls nest when a decision is taken inside an execution call (P1-R2-1). */
 export type AgentCall = Readonly<{ agent: "claude" | "codex"; purpose: string; label: string; startedAt: string }>;
@@ -234,16 +245,18 @@ const relabel = (run: RunView): RunView => {
   const messages = (list: readonly Message[]) => (list.some((m) => band(m.band) !== m.band) ? list.map((m) => ({ ...m, band: band(m.band) })) : list);
   return { ...run, timeline: run.timeline.map((e) => ({ ...e, label: nameOf(e.phase) })), left: messages(run.left), right: messages(run.right), phase: band(run.phase) };
 };
-const newEntry = (phase: Phase, state: TimelineState, plan: RecordedPlan | null): TimelineEntry => ({
+const newEntry = (phase: Phase, state: TimelineState): TimelineEntry => ({
   phase,
   label: "",
   groups: [],
   steps: phase.kind === "questions" ? [newStep("formulate", null, state), ...(state === "ahead" ? [newStep("clarification", null, "ahead")] : [])] : [],
   state,
-  plan,
+  plan: null,
   began: null,
   ended: null,
   currentStep: null,
+  acted: [],
+  record: null,
 });
 /** The index of the last element that satisfies `p`, or -1 (the page's library has no findLastIndex). */
 const lastIndex = <T>(list: readonly T[], p: (t: T) => boolean): number => list.reduce((found, t, i) => (p(t) ? i : found), -1);
@@ -258,11 +271,65 @@ const currentStepIndex = (steps: readonly TimelineStep[]): number => {
   return active >= 0 ? active : lastIndex(steps, (st) => st.state !== "ahead" && st.state !== "notReached" && st.state !== "skipped");
 };
 /**
- * How a step of the plan shows in the rail (issue #6, G-R1-2): current only while its Implementation entry is active and
- * an execution call runs; a started step otherwise shows as unfinished.
+ * How a step of the plan shows in the rail (issue #6, G-R1-2; issue #53): current only when it is the entry's current step
+ * (`currentPlanStep`); any other started step shows as unfinished.
  */
 export const planStepState = (entry: Pick<TimelineEntry, "state" | "currentStep">, step: Readonly<{ id: string; status: StepStatus }>, executing: boolean): "done" | "current" | "unfinished" | "pending" =>
   step.status === "done" ? "done" : step.status === "started" ? (currentPlanStep(entry, executing) === step.id ? "current" : "unfinished") : step.status === "unfinished" ? "unfinished" : "pending";
+/**
+ * The plan an entry shows (issue #54). An ended Implementation shows its record: each step with the status it had at
+ * the end, and the number, label, text and stage of the current plan while the step is in it (Q6), else as recorded
+ * (a stage `record-<n>`). The Implementation that carries the current plan and has not ended shows it without the
+ * steps done before it began. Any other entry shows nothing.
+ */
+export const shownPlan = (entry: TimelineEntry, current: RunView["plan"]): ShownPlan | null => {
+  if (entry.phase.kind !== "execution") return null;
+  const n = entry.phase.n;
+  const stages: readonly ShownStage[] =
+    entry.record !== null
+      ? recordShown(entry.record, current?.plan ?? null)
+      : current !== null && current.phase === n
+        ? current.plan.stages.map((st) => ({ key: `current-${st.number}`, number: st.number, title: st.title, steps: st.steps.filter((x) => x.status !== "done" || entry.acted.includes(x.id)) }))
+        : [];
+  const shown = stages.filter((st) => st.steps.length > 0);
+  return shown.length === 0 ? null : { stages: shown };
+};
+/** A record's steps placed as the current plan places them, the removed ones in their recorded stages after those. */
+const recordShown = (record: RecordedPlan, current: RecordedPlan | null): readonly ShownStage[] => {
+  const now = new Map((current?.stages ?? []).flatMap((st) => st.steps.map((x) => [x.id, { stage: st, step: x }] as const)));
+  const placed = record.stages.flatMap((st) =>
+    st.steps.map((x) => {
+      const there = now.get(x.id);
+      return there === undefined
+        ? { key: `record-${st.number}`, number: st.number, title: st.title, step: x }
+        : { key: `current-${there.stage.number}`, number: there.stage.number, title: there.stage.title, step: { ...there.step, status: x.status } };
+    }),
+  );
+  const keys = placed.map((p) => p.key).filter((k, i, all) => all.indexOf(k) === i);
+  const rank = (key: string) => (key.startsWith("current-") ? 0 : 1);
+  // The page's library has no toSorted: each sort is over a fresh copy.
+  const stages = keys.map((key) => {
+    const members = placed.filter((p) => p.key === key);
+    return { key, number: members[0].number, title: members[0].title, steps: [...members.map((p) => p.step)].sort((a, b) => a.number - b.number) };
+  });
+  return [...stages].sort((a, b) => a.number - b.number || rank(a.key) - rank(b.key));
+};
+/** The run with every entry's shown plan derived again (issue #54, P1-R2-1): after every event that changes the plan, an entry's state or its record. */
+const reshow = (run: RunView): RunView => ({ ...run, timeline: run.timeline.map((e) => ({ ...e, plan: shownPlan(e, run.plan) })) });
+const statusesOf = (plan: RecordedPlan | null): ReadonlyMap<string, StepStatus> => new Map((plan?.stages ?? []).flatMap((st) => st.steps.map((x) => [x.id, x.status] as const)));
+/** The steps an active Implementation has acted on after a PlanChanged (issue #54, Q3): those whose status changed, and the step reported. */
+const actedAfter = (acted: readonly string[], before: RecordedPlan | null, after: RecordedPlan, step: StepReport | null): readonly string[] => {
+  const previous = statusesOf(before);
+  const changed = after.stages.flatMap((st) => st.steps.filter((x) => previous.get(x.id) !== x.status).map((x) => x.id));
+  const all = [...acted, ...changed, ...(step === null ? [] : [step.id])];
+  return all.filter((id, i) => all.indexOf(id) === i);
+};
+/** An Implementation entry at its end, with the steps it acted on as they stand in the current plan (issue #54, Q3). */
+const recorded = (e: TimelineEntry, current: RunView["plan"]): TimelineEntry => {
+  if (e.phase.kind !== "execution") return e;
+  const stages = (current?.plan.stages ?? []).map((st) => ({ ...st, steps: st.steps.filter((x) => e.acted.includes(x.id)) })).filter((st) => st.steps.length > 0);
+  return { ...e, record: { stages } };
+};
 /** The step of the plan that is current in the entry (issue #53, G-R1-1): where the rail puts the running indicator; null when none. */
 export const currentPlanStep = (entry: Pick<TimelineEntry, "state" | "currentStep">, executing: boolean): string | null => (entry.state === "active" && executing ? entry.currentStep : null);
 /**
@@ -342,15 +409,14 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
   switch (event._tag) {
     case "PhaseBegan": {
       // Issue #6: the foreseen entry becomes active, with its first step; a phase not foreseen is appended.
-      const plan = run.plan !== null && event.phase.kind === "execution" && run.plan.phase === event.phase.n ? run.plan.plan : null;
       const foreseen = run.timeline.some((e) => samePhase(e.phase, event.phase));
       const begin = (e: TimelineEntry): TimelineEntry => ({ ...e, state: "active", began: time, steps: e.steps.map((st, i) => (i === 0 ? { ...st, state: "active" } : st)) });
-      const timeline = foreseen ? run.timeline.map((e) => (samePhase(e.phase, event.phase) ? begin(e) : e)) : [...run.timeline, { ...newEntry(event.phase, "active", plan), began: time }];
+      const timeline = foreseen ? run.timeline.map((e) => (samePhase(e.phase, event.phase) ? begin(e) : e)) : [...run.timeline, { ...newEntry(event.phase, "active"), began: time }];
       const next = { ...run, timeline };
-      return relabel({ ...next, phase: bandOf(event.phase, time, countIn(next, event.phase)) });
+      return reshow(relabel({ ...next, phase: bandOf(event.phase, time, countIn(next, event.phase)) }));
     }
     case "PhaseEnded":
-      return { ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done", ended: time, currentStep: null }, "done") : e)) };
+      return reshow({ ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? recorded(endSteps({ ...e, state: "done", ended: time, currentStep: null }, "done"), run.plan) : e)) });
     case "RoundBegan":
       // A decision loop is a loop inside a phase that the progress panel does not show (D12 of the decision-support plan).
       return isDecision(event.subject) ? run : { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
@@ -451,13 +517,14 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     case "PhasesForeseen": {
       // Issue #6: every phase known and not yet in the timeline is added ahead; the labels follow the new counts.
       const added = event.phases.filter((p) => !run.timeline.some((e) => samePhase(e.phase, p)));
-      const plan = (p: Phase) => (run.plan !== null && p.kind === "execution" && run.plan.phase === p.n ? run.plan.plan : null);
-      return relabel({ ...run, foreseen: event.phases, timeline: [...run.timeline, ...added.map((p) => newEntry(p, "ahead", plan(p)))] });
+      return reshow(relabel({ ...run, foreseen: event.phases, timeline: [...run.timeline, ...added.map((p) => newEntry(p, "ahead"))] }));
     }
     case "PlanChanged": {
-      // Q5, Q9: the plan on the Implementation of its phase alone.
+      // Q5, Q9: the plan on the Implementation of its phase. Issue #54: the active one records the steps it acts on.
       const carries = (e: TimelineEntry) => e.phase.kind === "execution" && e.phase.n === event.phase;
-      return { ...run, plan: { phase: event.phase, plan: event.plan }, timeline: run.timeline.map((e) => (carries(e) ? { ...e, plan: event.plan, currentStep: currentAfter(e.currentStep, event.step, event.plan) } : e.plan === null ? e : { ...e, plan: null })) };
+      const acting = (e: TimelineEntry): TimelineEntry => (e.state === "active" ? { ...e, acted: actedAfter(e.acted, run.plan?.plan ?? null, event.plan, event.step) } : e);
+      const timeline = run.timeline.map((e) => (carries(e) ? { ...acting(e), currentStep: currentAfter(e.currentStep, event.step, event.plan) } : e));
+      return reshow({ ...run, plan: { phase: event.phase, plan: event.plan }, timeline });
     }
     case "ClaudeSaid":
       // Issue #5: Claude's prose is attributed as data, not by a prefix in its text.
@@ -491,8 +558,10 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
       }
       case "Notified":
         return notifiedEvent(r, event.event, time);
-      case "Ended":
-        return { ...r, ended: event.code, pending: null, activity: "", busy: false, calls: [], retry: null, timeline: r.timeline.map((e) => endEntry(e, event.code, time)) };
+      case "Ended": {
+        const ended: RunView = { ...r, ended: event.code, pending: null, activity: "", busy: false, calls: [], retry: null, timeline: r.timeline.map((e) => (e.state === "active" ? recorded(endEntry(e, event.code, time), r.plan) : endEntry(e, event.code, time))) };
+        return reshow(ended);
+      }
     }
   })();
   return { ...next, nextSeq: run.nextSeq + 1 };

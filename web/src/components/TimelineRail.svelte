@@ -71,7 +71,7 @@
         {/if}
         {#if entry.plan !== null}
           <ol class="plan" aria-label={PLAN_LIST_LABEL}>
-            {#each entry.plan.stages as stage (stage.number)}
+            {#each entry.plan.stages as stage (stage.key)}
               <li class="stage">
                 <span class="m3-font-label-medium" data-stage>{stageHeading(stage.number, stage.title)}</span>
                 <ol>

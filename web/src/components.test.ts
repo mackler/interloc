@@ -373,7 +373,7 @@ describe("PromptWidget", () => {
 });
 
 /** The fields of a timeline entry that its tests do not concern: the entry of a phase with no times yet. */
-const fresh = { began: null, ended: null, currentStep: null } as const;
+const fresh = { began: null, ended: null, currentStep: null, acted: [], record: null } as const;
 
 describe("TimelineRail", () => {
   const cycle = (round: number, raised: number | null, counted: number | null = raised) => ({ round, raised, counted, reviewIds: [] });
@@ -783,8 +783,8 @@ describe("DecisionView", () => {
 describe("TimelineRail: the plan", () => {
   const recorded = (text = "Add the **schema**.") => ({
     stages: [
-      { number: 1, title: "the schema and its records", steps: [{ id: "S1", number: 1, label: "Structured user questions (Q1)", text, status: "done" as const }, { id: "S2", number: 2, label: "The store", text: "x", status: "started" as const }] },
-      { number: 2, title: "the page", steps: [{ id: "S3", number: 1, label: "The rail", text: "y", status: "unfinished" as const }, { id: "S4", number: 2, label: "The tooltip", text: "z", status: "pending" as const }] },
+      { key: "current-1", number: 1, title: "the schema and its records", steps: [{ id: "S1", number: 1, label: "Structured user questions (Q1)", text, status: "done" as const }, { id: "S2", number: 2, label: "The store", text: "x", status: "started" as const }] },
+      { key: "current-2", number: 2, title: "the page", steps: [{ id: "S3", number: 1, label: "The rail", text: "y", status: "unfinished" as const }, { id: "S4", number: 2, label: "The tooltip", text: "z", status: "pending" as const }] },
     ],
   });
   const entry = (state: TimelineEntry["state"], plan: TimelineEntry["plan"]): TimelineEntry => ({ ...fresh, phase: { kind: "execution", n: 1 }, label: "Implementation", state, groups: [], steps: [], plan, currentStep: "S2" });
