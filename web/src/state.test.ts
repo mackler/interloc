@@ -1328,3 +1328,11 @@ describe("the pending question", () => {
     );
   });
 });
+
+// S28: an answered question keeps its terms in the transcript, where its explanations stay reachable.
+test("the question of an answered exchange carries its terms", () => {
+  const q: UiEvent = { _tag: "QuestionPresented", question: { ...presentedOf(presentedEvent("Which zod?", [])), terms: [{ term: "zod", explanation: "A library." }] } };
+  const s = fold(live([started, notified(q), asked(1, prompts.optionOrTextPrompt), { _tag: "Answered", prompt: 1, text: "x" }]));
+  expect(s.run?.left[0].terms).toEqual([{ term: "zod", explanation: "A library." }]);
+  expect(s.run?.left[1].terms ?? []).toEqual([]);
+});

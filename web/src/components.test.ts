@@ -1217,6 +1217,25 @@ describe("QuestionPane's regions", () => {
     expect(one(root, ".top .details").textContent).toContain("Use SQLite.");
   });
 
+  // S28: every occurrence of a term in the context, the details, the question and the options carries its explanation,
+  // reachable by hover and by keyboard; Escape closes it.
+  test("a term's occurrences open its tooltip on focus and on hover; Escape closes it", () => {
+    const root = show(QuestionPane, { widget: withQuestion(), onAnswer: () => undefined });
+    const marks = [...root.querySelectorAll<HTMLElement>(".term")];
+    expect(marks.map((m) => m.closest(".context, .question-text")?.className.split(" ")[0])).toEqual(["context", "question-text"]);
+    marks[1].focus();
+    marks[1].dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    flushSync();
+    expect(one(root, "[role=tooltip]").textContent).toContain("The program this task builds.");
+    expect(marks[1].getAttribute("aria-describedby")).toBe(one(root, "[role=tooltip]").id);
+    marks[1].dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    flushSync();
+    expect(root.querySelector("[role=tooltip]")).toBe(null);
+    marks[0].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    flushSync();
+    expect(root.querySelector("[role=tooltip]")).not.toBe(null);
+  });
+
   test("Show the conversation calls its handler", () => {
     let shown = 0;
     const root = show(QuestionPane, { widget: withQuestion(), onAnswer: () => undefined, onShowConversation: () => void shown++ });
@@ -1313,4 +1332,15 @@ test("the question pane and the terminal's confirmation both take endingOf from 
   const pane = (await import("./components/QuestionPane.svelte?raw")).default;
   const terminal = (await import("../../src/confirmEnd.ts?raw")).default;
   for (const source of [pane, terminal]) expect(source).toMatch(/import \{[^}]*\bendingOf\b[^}]*\} from "(\.\.\/\.\.\/\.\.\/src|\.)\/input\.ts"/);
+});
+
+// S28: the terms of an answered question in the transcript, and of the question beside its analysis, are marked.
+test("a transcript message with terms marks them; the question beside an analysis marks its terms", async () => {
+  const root = show(MessageView, { message: { key: "k", author: "program", heading: null, body: "Should **zod** be used?", format: "markdown", time: "2026-09-27T14:00:00.000Z", showTime: true, band: null, terms: [{ term: "zod", explanation: "A library." }] } });
+  expect(one(root, ".term").textContent).toBe("zod");
+  const { default: DecisionView } = await import("./components/DecisionView.svelte");
+  const presented = { number: 2, origin: { kind: "relayed" }, context: { text: "zod checks data.", by: "agent" }, terms: [{ term: "zod", explanation: "A library." }], question: "Use zod?", options: [], details: "", decision: null };
+  const analyzed = { _tag: "DecisionAnalyzed", decision: 1, question: "Use zod?", presented, options: [], analysis: { decision: "d", columns: [], recommendation: { option: "", reason: "" } } } as never;
+  const view = show(DecisionView, { event: analyzed, narrow: false, onShowConversation: () => undefined });
+  expect([...view.querySelectorAll(".question .term")].length).toBe(2);
 });

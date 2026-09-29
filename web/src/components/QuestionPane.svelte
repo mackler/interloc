@@ -15,6 +15,8 @@
   import { type Ending, endingOf } from "../../../src/input.ts";
   import ConfirmEndDialog from "./ConfirmEndDialog.svelte";
   import { render } from "../markdown.ts";
+  import { textHtml } from "../terms.ts";
+  import TermText from "./TermText.svelte";
 
   // The typed text is the page's draft of this prompt (../draft.ts, finding 5): App keeps it per (incarnation, run,
   // prompt) and withdraws it with a notice when another tab answers first [error prevention].
@@ -74,12 +76,12 @@
       <div class="top">
         {#if question.context.text.trim() !== ""}
           <div class="context m3-font-body-medium">
-            <div class="markdown">{@html render(question.context.text)}</div>
+            <TermText class="markdown" html={render(question.context.text)} terms={question.terms} />
             {#if question.context.by === "program"}<p class="by m3-font-body-small">{PROGRAM_CONTEXT_NOTE}</p>{/if}
           </div>
         {/if}
         {#if question.details.trim() !== ""}
-          <div class="details markdown m3-font-body-medium">{@html render(question.details)}</div>
+          <TermText class="details markdown m3-font-body-medium" html={render(question.details)} terms={question.terms} />
         {/if}
         {#if question.terms.length > 0}
           <dl class="terms m3-font-body-small" aria-label={TERMS_HEADING}>
@@ -91,14 +93,14 @@
         {/if}
       </div>
     {/if}
-    <p class="question-text m3-font-title-medium">{question === null ? widget.hint : question.question}</p>
+    <p class="question-text m3-font-title-medium">{#if question === null}{widget.hint}{:else}<TermText inline html={textHtml(question.question)} terms={question.terms} />{/if}</p>
     <div class="bottom">
       {#if question !== null && question.options.length > 0}
         <div class="options m3-font-body-medium" role="group" aria-label={PROPOSED_ANSWERS_LABEL}>
           {#each question.options as option, i (i)}
             {#if "token" in option.answer}
               {@const token = option.answer.token}
-              <Card variant="outlined" onclick={() => send(token)}><span class="token">{token}.</span> {option.label}{#if option.description !== ""} — {option.description}{/if}</Card>
+              <Card variant="outlined" onclick={() => send(token)}><span class="token">{token}.</span> <TermText inline html={textHtml(option.description === "" ? option.label : `${option.label} — ${option.description}`)} terms={question.terms} /></Card>
             {:else}
               <div class="numeric"><strong>{option.label}</strong>{#if option.description !== ""} — {option.description}{/if}<br /><span class="m3-font-body-small">{NUMERIC_OPTION_NOTE}</span></div>
             {/if}
@@ -153,9 +155,7 @@
   .terms { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; }
   .terms dt { font-weight: 600; }
   .terms dd { margin: 0; }
-  .markdown :global(:first-child) { margin-top: 0; }
-  .markdown :global(:last-child) { margin-bottom: 0; }
-  .markdown :global(pre) { overflow-x: auto; }
+  .top :global(.markdown pre) { overflow-x: auto; }
   .question-text { margin: 0; flex-shrink: 0; overflow-wrap: anywhere; }
   .bottom { flex: 1 1 auto; min-height: 6rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
   /* One card per row at every width; a card grows with its text, and a long unbroken token (a path) wraps. */

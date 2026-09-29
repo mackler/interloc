@@ -16,7 +16,8 @@ export type Author = "program" | "user" | "codex" | "claude";
  * One chat message. `markdown` is rendered and sanitised; a program's plain text is shown as it is. `time` is the ISO
  * time its event was published (issue #1); `showTime` whether the time is shown, or only given to assistive technology.
  */
-export type Message = Readonly<{ key: string; author: Author; heading: string | null; body: string; format: "text" | "markdown"; time: string; showTime: boolean; band: Band | null }>;
+/** `terms`: the explanations of the words of an answered question (S28), marked where the message shows them. */
+export type Message = Readonly<{ key: string; author: Author; heading: string | null; body: string; format: "text" | "markdown"; time: string; showTime: boolean; band: Band | null; terms?: readonly Readonly<{ term: string; explanation: string }>[] }>;
 /**
  * The phase a message belongs to, as its panel shows it (issue #15): a band of one tone per kind of phase, opened by a
  * label with the phase's name and the time it began. `key` is unique per phase of a run; null before any phase.
@@ -582,7 +583,7 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
         const dismissed = dismisses ? r.analysis : r.dismissed;
         // S26: the question joins the transcript with its answer, as an ordinary exchange.
         const own = r.pending !== null && r.pending.asked.prompt === event.prompt ? r.pending : null;
-        const asked = own === null ? r : own.question !== null ? withLeft(r, { ...message(r, own.presentedAt ?? time, "program", questionMarkdown(own.question), "markdown"), key: `${r.id}-${r.nextSeq}-question` }) : withLeft(r, { ...message(r, own.presentedAt ?? time, "program", own.hint, "text"), key: `${r.id}-${r.nextSeq}-question` });
+        const asked = own === null ? r : own.question !== null ? withLeft(r, { ...message(r, own.presentedAt ?? time, "program", questionMarkdown(own.question), "markdown"), key: `${r.id}-${r.nextSeq}-question`, terms: own.question.terms }) : withLeft(r, { ...message(r, own.presentedAt ?? time, "program", own.hint, "text"), key: `${r.id}-${r.nextSeq}-question` });
         return { ...withLeft(asked, message(asked, time, "user", chosen?.label ?? event.text, "markdown")), pending: r.pending?.asked.prompt === event.prompt ? null : r.pending, answered: [...r.answered, event.prompt], analysis, dismissed };
       }
       case "Notified":

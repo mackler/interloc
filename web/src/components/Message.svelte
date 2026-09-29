@@ -6,6 +6,7 @@
   // the title. It never changes, so the panel's polite live region announces it once, with the message.
   // The side of a message is its author's: Interloq and Claude on the left, the user and Codex on the right (issue #2).
   import { render } from "../markdown.ts";
+  import TermText from "./TermText.svelte";
   import type { Author, Message } from "../state.ts";
   import { clockTime, fullTime } from "../time.ts";
 
@@ -17,7 +18,12 @@
 <article class="message {message.author}" data-author={message.author}>
   <header class="m3-font-label-medium">{AUTHOR[message.author]}{#if message.heading !== null} · {message.heading}{/if}<time class="time m3-font-label-small" class:visually-hidden={!message.showTime} datetime={message.time} title={fullTime(message.time)}>{clockTime(message.time)}</time></header>
   {#if message.format === "markdown"}
-    <div class="body markdown m3-font-body-medium">{@html render(message.body)}</div>
+    {#if (message.terms ?? []).length > 0}
+      <!-- S28: an answered question keeps its terms' explanations in the transcript. -->
+      <TermText class="body markdown m3-font-body-medium" html={render(message.body)} terms={message.terms ?? []} />
+    {:else}
+      <div class="body markdown m3-font-body-medium">{@html render(message.body)}</div>
+    {/if}
   {:else}
     <div class="body text m3-font-body-medium">{message.body.replace(/^\n+|\n+$/g, "")}</div>
   {/if}

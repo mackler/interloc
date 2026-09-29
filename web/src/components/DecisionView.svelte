@@ -18,6 +18,8 @@
   import { CONTEXT_BY_PROGRAM, decisionViewHeading, ENLARGE_WINDOW_NOTICE, recommendedOption, RECOMMENDATION_HEADING, SCROLL_SIDEWAYS_HINT, SHOW_CONVERSATION } from "../../../src/prompts.ts";
   import { type EntryView, viewOf } from "../../../src/analysisView.ts";
   import type { UiEvent } from "../../../src/uiEvents.ts";
+  import { textHtml } from "../terms.ts";
+  import TermText from "./TermText.svelte";
 
   type Props = { event: Extract<UiEvent, { _tag: "DecisionAnalyzed" }>; narrow: boolean; onShowConversation: () => void };
   let { event, narrow, onShowConversation }: Props = $props();
@@ -63,8 +65,9 @@
   <!-- S22: the question the analysis is for, as the user was shown it: its context apart, then the question itself
        [recognition rather than recall: what is being decided stays beside the arguments]. -->
   <div class="question">
-    <p class="question-context m3-font-body-medium">{event.presented.context.text}{#if event.presented.context.by === "program"} <span class="by">({CONTEXT_BY_PROGRAM})</span>{/if}</p>
-    <p class="question-text m3-font-title-small">{event.presented.question}</p>
+    <!-- S28: the question's terms carry their explanations here too; the analysis text does not. -->
+    <p class="question-context m3-font-body-medium"><TermText inline html={textHtml(event.presented.context.text)} terms={event.presented.terms} />{#if event.presented.context.by === "program"} <span class="by">({CONTEXT_BY_PROGRAM})</span>{/if}</p>
+    <p class="question-text m3-font-title-small"><TermText inline html={textHtml(event.presented.question)} terms={event.presented.terms} /></p>
   </div>
   {#if narrow}
     <p class="narrow m3-font-body-medium" role="alert">{ENLARGE_WINDOW_NOTICE}</p>
