@@ -1031,3 +1031,31 @@ describe("waiting during a retry's backoff", () => {
     expect(w([started, notified(call), notified(failed)])).toEqual([false, false]);
   });
 });
+
+// Issue #50 (Q2): each phase's begin and end from its events' publication times, for the rail's duration.
+describe("phase times", () => {
+  const foreseen = (questions: boolean, iterations: number) => notified({ _tag: "PhasesForeseen", phases: foreseenPhases(questions, iterations) });
+  const planning = { kind: "planning" as const, n: 1 };
+  const times = (s: ViewState) => s.run?.timeline.map((e) => [e.label, e.began, e.ended]) ?? [];
+
+  test("PhaseBegan and PhaseEnded stamp the entry; an entry ahead has neither; live and replay agree", () => {
+    const events: RunEvent[] = [started, foreseen(false, 1), notified({ _tag: "PhaseBegan", phase: planning }), notified({ _tag: "PhaseEnded", phase: planning, result: "converged" })];
+    const seconds = [0, 1, 10, 670];
+    for (const s of [fold(live(events, 1, seconds)), replayed(events, 1, 1, seconds)]) {
+      expect(times(s)).toEqual([["Planning", at(10), at(670)], ["Implementation", null, null], ["Work review", null, null]]);
+    }
+  });
+
+  test("a run that ends while a phase is active ends that phase at the time of Ended; the phases not reached keep none", () => {
+    const events: RunEvent[] = [started, foreseen(false, 1), notified({ _tag: "PhaseBegan", phase: planning }), { _tag: "Ended", code: 130 }];
+    const seconds = [0, 1, 10, 95];
+    for (const s of [fold(live(events, 1, seconds)), replayed(events, 1, 1, seconds)]) {
+      expect(times(s)).toEqual([["Planning", at(10), at(95)], ["Implementation", null, null], ["Work review", null, null]]);
+    }
+  });
+
+  test("a phase not foreseen is stamped when it begins", () => {
+    const s = fold(live([started, notified({ _tag: "PhaseBegan", phase: planning })], 1, [0, 7]));
+    expect(times(s)).toEqual([["Planning", at(7), null]]);
+  });
+});

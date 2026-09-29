@@ -50,7 +50,17 @@ export type TimelineStep = Readonly<{ kind: "formulate" | "clarification" | "fol
  * A phase of the run in the timeline. `label` is numbered by the count of its kind in the timeline (issue #6), and is
  * renumbered when that count changes; `plan` is the current plan, on the Implementation entry that carries it out (Q5, Q9).
  */
-export type TimelineEntry = Readonly<{ phase: Phase; label: string; groups: readonly RoundGroup[]; steps: readonly TimelineStep[]; state: TimelineState; plan: RecordedPlan | null }>;
+export type TimelineEntry = Readonly<{
+  phase: Phase;
+  label: string;
+  groups: readonly RoundGroup[];
+  steps: readonly TimelineStep[];
+  state: TimelineState;
+  plan: RecordedPlan | null;
+  /** The publication times of the phase's PhaseBegan and of its end (PhaseEnded, or the run's Ended): null before (issue #50, Q2). */
+  began: string | null;
+  ended: string | null;
+}>;
 /** An agent call that runs; calls nest when a decision is taken inside an execution call (P1-R2-1). */
 export type AgentCall = Readonly<{ agent: "claude" | "codex"; purpose: string; label: string; startedAt: string }>;
 /** The prompt the run waits on, with every choice it offers (the catalog's and those of the preceding event). */
@@ -220,6 +230,8 @@ const newEntry = (phase: Phase, state: TimelineState, plan: RecordedPlan | null)
   steps: phase.kind === "questions" ? [newStep("formulate", null, state), ...(state === "ahead" ? [newStep("clarification", null, "ahead")] : [])] : [],
   state,
   plan,
+  began: null,
+  ended: null,
 });
 /** The index of the last element that satisfies `p`, or -1 (the page's library has no findLastIndex). */
 const lastIndex = <T>(list: readonly T[], p: (t: T) => boolean): number => list.reduce((found, t, i) => (p(t) ? i : found), -1);
@@ -284,10 +296,10 @@ const newStep = (kind: TimelineStep["kind"], count: TimelineStep["count"], state
  * An entry when the run ends with `code`: the active one done or stopped; after a halt, what is ahead not reached (issue #6);
  * after success, the active one's steps never begun skipped (`endSteps`).
  */
-const endEntry = (e: TimelineEntry, code: number): TimelineEntry => {
+const endEntry = (e: TimelineEntry, code: number, time: string): TimelineEntry => {
   const end = code === 0 ? "done" : "stopped";
   const unreached = (st: TimelineStep): TimelineStep => (code !== 0 && st.state === "ahead" ? { ...st, state: "notReached" } : st);
-  if (e.state === "active") return endSteps({ ...e, state: end, steps: e.steps.map(unreached) }, end);
+  if (e.state === "active") return endSteps({ ...e, state: end, steps: e.steps.map(unreached), ended: time }, end);
   return code !== 0 && e.state === "ahead" ? { ...e, state: "notReached", steps: e.steps.map(unreached) } : e;
 };
 /** The entry with its active steps ended in `state`, and the steps it never began skipped: its phase is over. */
@@ -306,13 +318,13 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       // Issue #6: the foreseen entry becomes active, with its first step; a phase not foreseen is appended.
       const plan = run.plan !== null && event.phase.kind === "execution" && run.plan.phase === event.phase.n ? run.plan.plan : null;
       const foreseen = run.timeline.some((e) => samePhase(e.phase, event.phase));
-      const begin = (e: TimelineEntry): TimelineEntry => ({ ...e, state: "active", steps: e.steps.map((st, i) => (i === 0 ? { ...st, state: "active" } : st)) });
-      const timeline = foreseen ? run.timeline.map((e) => (samePhase(e.phase, event.phase) ? begin(e) : e)) : [...run.timeline, newEntry(event.phase, "active", plan)];
+      const begin = (e: TimelineEntry): TimelineEntry => ({ ...e, state: "active", began: time, steps: e.steps.map((st, i) => (i === 0 ? { ...st, state: "active" } : st)) });
+      const timeline = foreseen ? run.timeline.map((e) => (samePhase(e.phase, event.phase) ? begin(e) : e)) : [...run.timeline, { ...newEntry(event.phase, "active", plan), began: time }];
       const next = { ...run, timeline };
       return relabel({ ...next, phase: bandOf(event.phase, time, countIn(next, event.phase)) });
     }
     case "PhaseEnded":
-      return { ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done" }, "done") : e)) };
+      return { ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? endSteps({ ...e, state: "done", ended: time }, "done") : e)) };
     case "RoundBegan":
       // A decision loop is a loop inside a phase that the progress panel does not show (D12 of the decision-support plan).
       return isDecision(event.subject) ? run : { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
@@ -445,7 +457,7 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
       case "Notified":
         return notifiedEvent(r, event.event, time);
       case "Ended":
-        return { ...r, ended: event.code, pending: null, activity: "", busy: false, calls: [], retry: null, timeline: r.timeline.map((e) => endEntry(e, event.code)) };
+        return { ...r, ended: event.code, pending: null, activity: "", busy: false, calls: [], retry: null, timeline: r.timeline.map((e) => endEntry(e, event.code, time)) };
     }
   })();
   return { ...next, nextSeq: run.nextSeq + 1 };

@@ -372,14 +372,17 @@ describe("PromptWidget", () => {
   });
 });
 
+/** The fields of a timeline entry that its tests do not concern: the entry of a phase with no times yet. */
+const fresh = { began: null, ended: null } as const;
+
 describe("TimelineRail", () => {
   const cycle = (round: number, raised: number | null, counted: number | null = raised) => ({ round, raised, counted, reviewIds: [] });
   test("phases in order with their state, and the cycles grouped under each review with their issues, no limit", () => {
     const root = show(TimelineRail, {
       busy: true,
       timeline: [
-        { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [cycle(1, 0)], corrections: 0, result: "converged", done: true }], steps: [], plan: null },
-        { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "active", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 3, 1), cycle(3, null)], corrections: 2, result: null, done: false }], steps: [], plan: null },
+        { ...fresh, phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [{ subject: "questions", heading: "Question review", rounds: [cycle(1, 0)], corrections: 0, result: "converged", done: true }], steps: [], plan: null },
+        { ...fresh, phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "active", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 3, 1), cycle(3, null)], corrections: 2, result: null, done: false }], steps: [], plan: null },
       ],
     });
     const entries = [...root.querySelectorAll("[data-state]")].map((e) => `${e.getAttribute("data-state")}:${e.querySelector("[data-label]")?.textContent?.trim()}`);
@@ -395,7 +398,7 @@ describe("TimelineRail", () => {
 
   test("a finished loop collapses to its one line, for each way it can end", () => {
     const finished = (result: "converged" | "proceed" | "revise", corrections: number) =>
-      show(TimelineRail, { busy: false, timeline: [{ phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections, result, done: true }], steps: [], plan: null }] });
+      show(TimelineRail, { busy: false, timeline: [{ ...fresh, phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections, result, done: true }], steps: [], plan: null }] });
     const summary = (root: HTMLElement) => [...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim());
     const converged = finished("converged", 2);
     expect(summary(converged)).toEqual([prompts.loopSummary(2, 2, "converged")]);
@@ -406,7 +409,7 @@ describe("TimelineRail", () => {
 
   // Issue #21: Gather Requirements shows its steps, the clarification's count, and #14's labels and cycle lines with them.
   const questionReview = { subject: "questions" as const, heading: "Question review", rounds: [cycle(1, 1), cycle(2, 0)], corrections: 1, result: "converged" as const, done: true };
-  const gather = (state: TimelineEntry["state"], steps: TimelineStep[]): TimelineEntry => ({ phase: { kind: "questions" }, label: "Gather Requirements", state, groups: [], steps, plan: null });
+  const gather = (state: TimelineEntry["state"], steps: TimelineStep[]): TimelineEntry => ({ ...fresh, phase: { kind: "questions" }, label: "Gather Requirements", state, groups: [], steps, plan: null });
   const step = (kind: TimelineStep["kind"], label: string, state: TimelineStep["state"], count: TimelineStep["count"], groups: RoundGroup[] = []): TimelineStep => ({ kind, label, state, count, groups });
   const stepRows = (root: HTMLElement) => [...root.querySelectorAll("[data-step]")].map((e) => `${e.getAttribute("data-step")}:${e.querySelector("[data-step-label]")?.textContent?.trim()}:${e.getAttribute("aria-current") ?? "-"}`);
 
@@ -432,8 +435,8 @@ describe("TimelineRail", () => {
 
   // The re-check after #21: #14's labels and cycle lines render beside the steps of Gather Requirements.
   test("Gather Requirements with its steps, a planning loop's cycles and Implementation, together", () => {
-    const planning: TimelineEntry = { phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections: 2, result: "converged", done: true }], steps: [], plan: null };
-    const implementation: TimelineEntry = { phase: { kind: "execution", n: 1 }, label: "Implementation 1", state: "active", groups: [], steps: [], plan: null };
+    const planning: TimelineEntry = { ...fresh, phase: { kind: "planning", n: 1 }, label: "Planning 1", state: "done", groups: [{ subject: { plan: 1 }, heading: "Planning phase 1", rounds: [cycle(1, 2), cycle(2, 0)], corrections: 2, result: "converged", done: true }], steps: [], plan: null };
+    const implementation: TimelineEntry = { ...fresh, phase: { kind: "execution", n: 1 }, label: "Implementation 1", state: "active", groups: [], steps: [], plan: null };
     const root = show(TimelineRail, { busy: false, timeline: [gather("done", [step("formulate", prompts.stepLabel("formulate"), "done", null, [questionReview]), step("clarification", "Clarification", "done", { answered: 2, total: 2 })]), planning, implementation] });
     expect([...root.querySelectorAll("[data-label]")].map((e) => e.textContent?.trim())).toEqual(["Gather Requirements", "Planning 1", "Implementation 1"]);
     expect([...root.querySelectorAll("[data-summary]")].map((e) => e.textContent?.trim())).toEqual([prompts.loopSummary(2, 1, "converged"), prompts.loopSummary(2, 2, "converged")]);
@@ -763,8 +766,8 @@ describe("TimelineRail: the plan", () => {
       { number: 2, title: "the page", steps: [{ id: "S3", number: 1, label: "The rail", text: "y", status: "unfinished" as const }, { id: "S4", number: 2, label: "The tooltip", text: "z", status: "pending" as const }] },
     ],
   });
-  const entry = (state: TimelineEntry["state"], plan: TimelineEntry["plan"]): TimelineEntry => ({ phase: { kind: "execution", n: 1 }, label: "Implementation", state, groups: [], steps: [], plan });
-  const ahead = (kind: "planning" | "work", state: TimelineEntry["state"]): TimelineEntry => ({ phase: { kind, n: 1 }, label: kind === "planning" ? "Planning" : "Work review", state, groups: [], steps: [], plan: null });
+  const entry = (state: TimelineEntry["state"], plan: TimelineEntry["plan"]): TimelineEntry => ({ ...fresh, phase: { kind: "execution", n: 1 }, label: "Implementation", state, groups: [], steps: [], plan });
+  const ahead = (kind: "planning" | "work", state: TimelineEntry["state"]): TimelineEntry => ({ ...fresh, phase: { kind, n: 1 }, label: kind === "planning" ? "Planning" : "Work review", state, groups: [], steps: [], plan: null });
   const rows = (root: HTMLElement) => [...root.querySelectorAll("[data-plan-step]")].map((e) => `${e.getAttribute("data-plan-step")}:${e.querySelector("[data-plan-step-label]")?.textContent?.trim()}`);
 
   test("the stages and the numbered steps hang under the Implementation that carries the plan, each with its mark", () => {
@@ -794,7 +797,7 @@ describe("TimelineRail: the plan", () => {
 
   test("a step its phase ended without has a mark and a name of its own, apart from ahead and not reached", () => {
     const step = (kind: TimelineStep["kind"], state: TimelineStep["state"]): TimelineStep => ({ kind, label: prompts.stepLabel(kind), state, count: null, groups: [] });
-    const questions: TimelineEntry = { phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [], steps: [step("formulate", "done"), step("clarification", "skipped")], plan: null };
+    const questions: TimelineEntry = { ...fresh, phase: { kind: "questions" }, label: "Gather Requirements", state: "done", groups: [], steps: [step("formulate", "done"), step("clarification", "skipped")], plan: null };
     const root = show(TimelineRail, { busy: false, executing: false, timeline: [questions, { ...entry("notReached", null), steps: [step("formulate", "notReached")] }, { ...ahead("work", "ahead"), steps: [step("formulate", "ahead")] }] });
     const mark = (state: string) => root.querySelector(`[data-step=${state}] .mark`);
     expect(mark("skipped")?.getAttribute("aria-label")).toBe(prompts.TIMELINE_STATE_LABEL.skipped);
@@ -864,7 +867,7 @@ describe("TimelineRail: the plan", () => {
 // Issue #42 (Q7): an indeterminate indicator written by hand, with no value and no completion, and the elapsed time of
 // the current call beside it, ticking once per second.
 describe("TimelineRail: the busy indicator", () => {
-  const active: TimelineEntry = { phase: { kind: "planning", n: 1 }, label: "Planning", state: "active", groups: [], steps: [], plan: null };
+  const active: TimelineEntry = { ...fresh, phase: { kind: "planning", n: 1 }, label: "Planning", state: "active", groups: [], steps: [], plan: null };
   afterEach(() => vi.useRealTimers());
 
   test("it is indeterminate: a progressbar without a value, and no element sized or moved by a value", () => {
