@@ -86,6 +86,7 @@ new name. Material online describes v3 in most cases and is not a source.
 | `Cause.squash` | Cause.d.ts:827 | `(self) => unknown` |
 | `Cause.pretty` | Cause.d.ts:1192 | `(cause) => string` |
 | `Ref.make` / `get` / `set` / `update` | Ref.d.ts:149 / 175 / 210 / 587 | `make(value) => Effect<Ref<A>>`; `set(self, value)`; `update(self, f)` |
+| `Ref.updateAndGet` (read 29 Sep, S6 of issues #46 and #59) | Ref.d.ts:617 | dual: `(self, f: (a) => A) => Effect<A>`: the new value; the run's question counter in `src/ui.ts` and `src/webUi.ts` |
 | `Ref.modify` (read 26 Sep, web GUI stage 3.2) | Ref.d.ts:397 | dual: `(self, f: (a) => readonly [B, A]) => Effect<B>`: reads and replaces in one step (the web Ui's prompt table, the run manager's state) |
 
 ## Services and Layers

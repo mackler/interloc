@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { planRepairPrompt, withOffer } from "../src/prompts.ts";
+import * as prompts from "../src/prompts.ts";
 import * as S from "../src/schema.ts";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -8,7 +9,7 @@ import { test } from "node:test";
 import { Effect, Fiber } from "effect";
 import { run } from "../src/run.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
-import { finished, issue, respond, runFails, runTask, scriptedRecordedPlan, tempRepo, testLayer } from "./helpers.ts";
+import { finished, issue, respond, runFails, runTask, scriptedRecordedPlan, tempRepo, testLayer, presentedQuestions, presentedSubjects } from "./helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
 
@@ -45,7 +46,7 @@ test("a rejected issue raised again produces one prompt", async () => {
   });
   await runTask(layer);
   assert.equal(probe.ui.asked.length, 1);
-  assert.match(probe.ui.asked[0], /issue B, raised again/);
+  assert.match(presentedSubjects(probe.ui)[0], /issue B, raised again/);
   const entries = (await probe.loadLog()).filter((e) => e.id === "B");
   assert.deepEqual(entries.map((e) => e.superseded === true), [true, true, false]);
   // Finding 15: the decision on the reraised issue is one typed decision, so it is in the issue log too.
@@ -120,7 +121,7 @@ test("an accepted issue without a plan change: a corrective turn, then the pause
   });
   await runFails(layer, "AcceptedWithoutChange", /plan\.json is unchanged/);
   assert.equal(probe.ui.asked.length, 1);
-  assert.match(probe.ui.asked[0] ?? "", /r = retry; p = proceed/);
+  assert.equal(probe.ui.asked[0], prompts.withOffer(prompts.unchangedPrompt));
   assert.deepEqual((await probe.loadLog()).map((e) => [e.id, e.action]), [["A", "accepted"]]);
 });
 
@@ -176,7 +177,11 @@ test("the round limit offers to proceed to implementation", async () => {
   });
   assert.equal(await runTask(layer), 1);
   // Decision support (decision Q6): the limit is a choice between options, so it carries the offer.
-  assert.equal(probe.ui.asked[0], withOffer("1 cycles completed without convergence. Number = additional cycles; p = proceed to implementation with the plan as it is; 0 = stop > "));
+  assert.equal(probe.ui.asked[0], withOffer(prompts.limitPrompt));
+  // S5: the question says how many cycles were completed, and the proceed option says what proceeding does.
+  const limit = probe.ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : []))[0];
+  assert.equal(limit.question, prompts.limitQuestion("Planning phase 1", 1));
+  assert.match(limit.options[0].description, /proceed to implementation with the plan as it is/i);
 });
 
 test("a reversal and a disputed self-correction each produce a prompt and a decided_by_user entry", async () => {

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import type { PresentedQuestion } from "../src/question.ts";
+import { recordSubject } from "../src/prompts.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -83,6 +85,9 @@ export class ScriptedUi implements UiShape {
   readonly said: string[] = [];
   readonly asked: string[] = [];
   readonly notified: UiEvent[] = [];
+  /** The presentations and asks in the order they happened (S7): "presented <n>" and "ask". */
+  readonly order: string[] = [];
+  private questions = 0;
   private readonly answers: ScriptedAnswer[];
   private readonly asks = readiness();
   constructor(answers: readonly ScriptedAnswer[]) {
@@ -93,10 +98,16 @@ export class ScriptedUi implements UiShape {
     return this.asks.wait();
   }
   notify(event: UiEvent): Effect.Effect<void> {
-    return Effect.sync(() => void this.notified.push(event));
+    return Effect.sync(() => {
+      this.notified.push(event);
+      if (event._tag === "QuestionPresented") this.order.push(`presented ${event.question.number}`);
+    });
   }
   say(text: string): Effect.Effect<void> {
     return Effect.sync(() => void this.said.push(text));
+  }
+  get nextQuestion(): Effect.Effect<number> {
+    return Effect.sync(() => ++this.questions);
   }
   /** The commands are the terminal's (src/input.ts): "q" ends the run at a one-line prompt. */
   ask(prompt: string): Effect.Effect<string, UserStopped> {
@@ -115,6 +126,7 @@ export class ScriptedUi implements UiShape {
   private take(prompt: string, interpret: (text: string) => Effect.Effect<string, UserStopped>): Effect.Effect<string, UserStopped> {
     return Effect.suspend(() => {
       this.asked.push(prompt);
+      this.order.push("ask");
       this.asks.signal();
       const answer = this.answers.shift();
       if (answer === undefined) return Effect.die(new Error(`no scripted answer for: ${prompt}`));
@@ -125,6 +137,11 @@ export class ScriptedUi implements UiShape {
     });
   }
 }
+
+/** The questions presented to the user, in order, each time it is presented (S5). */
+export const presentedQuestions = (ui: ScriptedUi): PresentedQuestion[] => ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : []));
+/** What each presented question is about, as its decision is recorded (S7): the subject of user-decisions.md, then the question. */
+export const presentedSubjects = (ui: ScriptedUi): string[] => presentedQuestions(ui).map((q) => `${recordSubject(q.origin, q.question)} | ${q.question}`);
 
 /** `hang` makes the call wait until it is interrupted, recording the abort signal it was given. */
 /** `onCall` runs when the call begins, before anything else (a test captures the state the call finds). */

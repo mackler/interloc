@@ -4,13 +4,13 @@ import * as path from "node:path";
 import { test } from "node:test";
 import { Cause, Effect, Exit, Layer, Option } from "effect";
 import { decisionLoop } from "../src/decision.ts";
-import { askOffering, limitOptions, numberedOptions, type OfferedQuestion, permissionOptions } from "../src/offer.ts";
+import { askOffering, limitOptions, numberedOptions, type OfferedOption, permissionOptions, type QuestionDraft } from "../src/offer.ts";
 import * as prompts from "../src/prompts.ts";
 import { withOffer } from "../src/prompts.ts";
 import type { RunError } from "../src/errors.ts";
 import type { ArguedColumn, Column, DecisionAnalysis, Entry } from "../src/schema.ts";
 import { Decider, type DecisionQuestion, type Services, Store, Ui } from "../src/services.ts";
-import { issue, respond, tempRepo, testLayer, type TestOptions } from "./helpers.ts";
+import { issue, respond, tempRepo, testLayer, type TestOptions, presentedQuestions, presentedSubjects } from "./helpers.ts";
 
 /** The column as an argued one (a test fails on an unclear column). */
 const argued = (column: Column): ArguedColumn => {
@@ -115,7 +115,7 @@ test("a disputed issue pauses as in behavior 7", async () => {
   });
   const end = await Effect.runPromise(loop(layer));
   assert.equal(end.result, "converged");
-  assert.ok(probe.ui.asked.some((a) => /issue D1-R1-1, raised again/.test(a)), probe.ui.asked.join("\n"));
+  assert.ok(presentedSubjects(probe.ui).some((a) => /issue D1-R1-1, raised again/.test(a)), presentedSubjects(probe.ui).join("\n"));
   assert.deepEqual((await probe.loadLog({ decision: 1 })).filter((e) => e.source === "user").map((e) => [e.id, e.rationale]), [["D1-R1-1", "keep it"]]);
 });
 
@@ -124,7 +124,9 @@ test("0 at the cycle limit halts with RoundLimitStop; p proceeds to the choice",
   await fails((await setUp({ ...rejected, answers: ["0"] })).layer, "RoundLimitStop");
   const proceeding = await setUp({ ...rejected, answers: ["p"] });
   assert.equal((await Effect.runPromise(loop(proceeding.layer))).result, "proceed");
-  assert.ok(proceeding.probe.ui.asked.some((a) => /proceed to your choice with the analysis as it is/.test(a)));
+  // S5: the proceed choice is an option of the presented question, described in the subject's words.
+  const limit = proceeding.probe.ui.notified.flatMap((e) => (e._tag === "QuestionPresented" && e.question.origin.kind === "limit" ? [e.question] : []));
+  assert.ok(limit.some((q) => q.options.some((o) => /proceed to your choice with the analysis as it is/i.test(o.description))));
 });
 
 test("an invalid analysis gets one repair turn; a second invalid reply halts", async () => {
@@ -168,19 +170,22 @@ test("the Decider of a phase runs a decision loop recorded in that phase", async
 
 // Decision support, plan step 3.4 (D2, P1-R1-3, P1-R1-4): the ask that carries the offer.
 const offered = numberedOptions(question.options);
-const offering = (layer: Layer.Layer<Services>, q: OfferedQuestion, presented: string[] = [], prompt = "Pick > ") =>
+/** A question as askOffering takes it (S7): a relayed question with the given text and options. */
+const draftOf = (q: Readonly<{ question: string; options: readonly OfferedOption[] }>): QuestionDraft => ({ origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: q.question, options: q.options, decision: null });
+const offering = (layer: Layer.Layer<Services>, q: Readonly<{ question: string; options: readonly OfferedOption[] }>, prompt = "Pick > ") =>
   Effect.runPromise(Effect.gen(function* () {
     const ui = yield* Ui;
-    return yield* askOffering((p) => ui.ask(p), prompt, q, Effect.sync(() => void presented.push("present")));
+    return yield* askOffering((p) => ui.ask(p), prompt, draftOf(q));
   }).pipe(Effect.provide(layer)));
+/** How often the question was presented: first, and again after an analysis or a rejected answer. */
+const presentations = (probe: { ui: { notified: { _tag: string }[] } }) => probe.ui.notified.filter((e) => e._tag === "QuestionPresented").length;
 const analyzed = (probe: { ui: { notified: { _tag: string }[] } }) => probe.ui.notified.filter((e) => e._tag === "DecisionAnalyzed");
 
 test("/decide runs a decision, shows it, restores the presentation and asks again; the answer is recorded as the chosen option", async () => {
   const { layer, probe } = await setUp({ answers: ["/decide", "2"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
-  const presented: string[] = [];
-  assert.equal(await offering(layer, { question: question.question, options: offered }, presented), "2");
+  assert.equal(await offering(layer, { question: question.question, options: offered }), "2");
   assert.deepEqual(probe.ui.asked, [withOffer("Pick > "), withOffer("Pick > ")]);
-  assert.deepEqual(presented, ["present"], "the presentation is restored before the reask, once");
+  assert.equal(presentations(probe), 2, "presented first, and again before the reask, once");
   const shown = analyzed(probe);
   assert.equal(shown.length, 1);
   assert.deepEqual(shown[0], { _tag: "DecisionAnalyzed", decision: 1, question: question.question, options: question.options, analysis: analysis() });
@@ -195,7 +200,7 @@ test("free text after an analysis is recorded without an option; q stops and rec
   const quit = await setUp({ answers: ["/decide", "q"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
   const exit = await Effect.runPromiseExit(Effect.gen(function* () {
     const ui = yield* Ui;
-    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: question.question, options: offered }, Effect.void);
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", draftOf({ question: question.question, options: offered }));
   }).pipe(Effect.provide(quit.layer)));
   assert.ok(Exit.isFailure(exit));
   assert.ok(!fs.existsSync(path.join(quit.probe.dir, "decision-1/chosen.json")));
@@ -254,11 +259,13 @@ test("a disputed pause offers Help me decide; the analysis runs in the phase, an
     reviews: [{ issues: [issue("P1-R1-1")] }, { issues: [issue("P1-R1-1")] }, { issues: [] }, { issues: [] }, { issues: [] }],
     execs: [finishedExec],
   });
-  const asked = probe.ui.asked.filter((a) => a.includes("raised again"));
-  assert.deepEqual(asked.length, 2);
-  assert.ok(asked.every((a) => a.startsWith(prompts.OFFER_LINE)));
-  assert.ok(probe.ui.said.includes(`  1. ${prompts.REVIEWER_POSITION} - p e`), "the options are listed for the terminal");
-  assert.ok(probe.ui.notified.some((e) => e._tag === "OptionsPresented"));
+  // The pause is presented, asked with the offer, presented again after the analysis and asked again.
+  assert.equal(presentedSubjects(probe.ui).filter((a) => a.includes("raised again")).length, 2);
+  assert.deepEqual(probe.ui.asked.slice(0, 2), [prompts.withOffer(prompts.decisionPrompt), prompts.withOffer(prompts.decisionPrompt)]);
+  // S5: the options are presented with the question, each with the number that chooses it.
+  const presented = probe.ui.notified.flatMap((e) => (e._tag === "QuestionPresented" && e.question.origin.kind === "pause" ? [e.question] : []));
+  assert.ok(presented.length > 0);
+  assert.deepEqual(presented[0].options[0], { label: prompts.REVIEWER_POSITION, description: "p e", answer: { token: "1" } });
   assert.deepEqual(json(probe.dir, "decision-1/question.json").phase, { kind: "planning", n: 1 });
   assert.equal(json(probe.dir, "decision-1/chosen.json").option, prompts.REVIEWER_POSITION);
   assert.match(fs.readFileSync(path.join(probe.dir, "user-decisions.md"), "utf8"), new RegExp(`Decision: ${prompts.REVIEWER_POSITION.replace(/[()]/g, "\\$&")}: p e`));
@@ -306,14 +313,13 @@ test("at the cycle limit Help me decide is offered, and a number afterwards adds
 test("with a predicate, a rejected answer is asked again and not recorded; without one, an empty answer is the choice", async () => {
   const notEmpty = (a: string) => a !== "";
   const retried = await setUp({ answers: ["/decide", "", "2"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
-  const presented: string[] = [];
   const answer = await Effect.runPromise(Effect.gen(function* () {
     const ui = yield* Ui;
-    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: question.question, options: offered }, Effect.sync(() => void presented.push("present")), notEmpty);
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", draftOf({ question: question.question, options: offered }), notEmpty);
   }).pipe(Effect.provide(retried.layer)));
   assert.equal(answer, "2");
   assert.deepEqual(json(retried.probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "2", option: "PostgreSQL" });
-  assert.equal(presented.length, 2, "presented again after the analysis and after the rejected answer");
+  assert.equal(presentations(retried.probe), 3, "presented first, again after the analysis, and after the rejected answer");
   const empty = await setUp({ answers: ["/decide", ""], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
   assert.equal(await offering(empty.layer, { question: question.question, options: offered }), "");
   assert.deepEqual(json(empty.probe.dir, "decision-1/chosen.json"), { version: 2, decision: 1, answer: "", option: null });
@@ -325,13 +331,13 @@ test("askOffering notifies AnswerRejected once per rejected answer, never for an
   const withPredicate = await setUp({ answers: ["/decide", "", "2"], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });
   await Effect.runPromise(Effect.gen(function* () {
     const ui = yield* Ui;
-    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: question.question, options: offered }, Effect.void, (a) => a !== "");
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", draftOf({ question: question.question, options: offered }), (a) => a !== "");
   }).pipe(Effect.provide(withPredicate.layer)));
   assert.equal(rejectedCount(withPredicate.probe), 1);
   const fewOptions = await setUp({ answers: ["", "x"] });
   await Effect.runPromise(Effect.gen(function* () {
     const ui = yield* Ui;
-    return yield* askOffering((p) => ui.ask(p), "Pick > ", { question: "q", options: offered.slice(0, 1) }, Effect.void, (a) => a !== "");
+    return yield* askOffering((p) => ui.ask(p), "Pick > ", draftOf({ question: "q", options: offered.slice(0, 1) }), (a) => a !== "");
   }).pipe(Effect.provide(fewOptions.layer)));
   assert.equal(rejectedCount(fewOptions.probe), 1);
   const without = await setUp({ answers: ["/decide", ""], steps: [{ output: analysis() }], reviews: [{ issues: [] }] });

@@ -7,8 +7,12 @@ import * as prompts from "./prompts.ts";
 
 export type Choice = Readonly<{ label: string; sends: string }>;
 export type PromptKind = "decision" | "limit" | "limitNoProceed" | "unchanged" | "transport" | "execInput" | "optionOrText" | "permission" | "interviewMessage" | "confirmSummary" | "startOrTalk" | "unknown";
-/** Choices that come from the preceding event rather than from the text: a relayed question's options, or the interview's numbered answers. */
-export type Extra = "none" | "questionOptions" | "numberedAnswers";
+/**
+ * The widget of a prompt (S8): its kind, recognized by the prompt's fixed hint; the controls that are not options of the
+ * question (continuing without a decision, finishing the clarification, confirming, starting, the offer, ending the run);
+ * whether free text is meaningful; and the quit of its input mode. The options themselves come with the question
+ * (`QuestionPresented`), each with the answer that chooses it.
+ */
 export type UserPrompt = Readonly<{
   kind: PromptKind;
   text: string;
@@ -16,67 +20,45 @@ export type UserPrompt = Readonly<{
   mode: "ask" | "message";
   choices: readonly Choice[];
   free: "none" | "line" | "message";
-  extra: Extra;
 }>;
 
 const QUIT_ASK: Choice = { label: "Quit", sends: "q" };
 const QUIT_MESSAGE: Choice = { label: "Quit", sends: "/quit" };
-const entry = (kind: PromptKind, text: string, mode: UserPrompt["mode"], choices: readonly Choice[], free: UserPrompt["free"], extra: Extra = "none"): UserPrompt => ({
+const entry = (kind: PromptKind, text: string, mode: UserPrompt["mode"], choices: readonly Choice[], free: UserPrompt["free"]): UserPrompt => ({
   kind,
   text,
   mode,
   choices: [...choices, mode === "ask" ? QUIT_ASK : QUIT_MESSAGE],
   free,
-  extra,
 });
 
-// The texts with parameters, recognised by their fixed parts (built from src/prompts.ts, so they cannot drift).
-const DECISION = prompts.decisionPrompt("\u0000").split("\u0000");
-const LIMIT = prompts.limitPrompt(0, "\u0000").split("\u0000");
-const LIMIT_PREFIX = LIMIT[0].replace(/^0/, "");
-const NO_PROCEED = prompts.limitNoProceedPrompt(0).replace(/^0/, "");
-/** The text after a leading whole number, or null when the text does not begin with one. */
-const afterNumber = (text: string): string | null => {
-  const match = /^[0-9]+/.exec(text);
-  return match === null ? null : text.slice(match[0].length);
+/** Each kind's hint, a fixed text of src/prompts.ts (S8): the one source of what the terminal shows and the page recognizes. */
+export const HINTS: Readonly<Record<Exclude<PromptKind, "unknown">, string>> = {
+  decision: prompts.decisionPrompt,
+  limit: prompts.limitPrompt,
+  limitNoProceed: prompts.limitNoProceedPrompt,
+  unchanged: prompts.unchangedPrompt,
+  transport: prompts.transportPrompt,
+  execInput: prompts.execInputPrompt,
+  optionOrText: prompts.optionOrTextPrompt,
+  permission: prompts.permissionPrompt,
+  interviewMessage: prompts.interviewMessagePrompt,
+  confirmSummary: prompts.confirmSummaryPrompt,
+  startOrTalk: prompts.startOrTalkPrompt,
 };
 
 const FIXED: ReadonlyMap<string, (text: string) => UserPrompt> = new Map([
-  [prompts.execInputPrompt, (t: string) => entry("execInput", t, "ask", [], "line")],
-  [prompts.optionOrTextPrompt, (t: string) => entry("optionOrText", t, "ask", [], "line", "questionOptions")],
-  [prompts.permissionPrompt, (t: string) => entry("permission", t, "ask", [{ label: "Allow", sends: "y" }, { label: "Deny", sends: "n" }], "none")],
-  [prompts.interviewMessagePrompt, (t: string) => entry("interviewMessage", t, "message", [{ label: prompts.END_CLARIFICATION, sends: "/done" }], "message", "numberedAnswers")],
-  [prompts.confirmSummaryPrompt, (t: string) => entry("confirmSummary", t, "message", [{ label: "Confirm", sends: "" }], "message")],
-  [prompts.startOrTalkPrompt, (t: string) => entry("startOrTalk", t, "message", [{ label: "Start planning", sends: "" }], "message")],
-  [
-    prompts.unchangedPrompt,
-    (t: string) =>
-      entry(
-        "unchanged",
-        t,
-        "ask",
-        [
-          { label: prompts.UNCHANGED_RETRY, sends: prompts.UNCHANGED_ANSWERS.retry },
-          { label: prompts.UNCHANGED_PROCEED, sends: prompts.UNCHANGED_ANSWERS.proceed },
-          { label: prompts.UNCHANGED_STOP, sends: prompts.UNCHANGED_ANSWERS.stop },
-        ],
-        "none",
-      ),
-  ],
-  [
-    prompts.transportPrompt,
-    (t: string) =>
-      entry(
-        "transport",
-        t,
-        "ask",
-        [
-          { label: prompts.TRANSPORT_RETRY_AGAIN, sends: prompts.TRANSPORT_ANSWERS.retry },
-          { label: prompts.TRANSPORT_STOP, sends: prompts.TRANSPORT_ANSWERS.stop },
-        ],
-        "none",
-      ),
-  ],
+  [HINTS.decision, (t: string) => entry("decision", t, "ask", [{ label: "No decision", sends: "" }], "line")],
+  [HINTS.limit, (t: string) => entry("limit", t, "ask", [], "line")],
+  [HINTS.limitNoProceed, (t: string) => entry("limitNoProceed", t, "ask", [], "line")],
+  [HINTS.unchanged, (t: string) => entry("unchanged", t, "ask", [], "none")],
+  [HINTS.transport, (t: string) => entry("transport", t, "ask", [], "none")],
+  [HINTS.execInput, (t: string) => entry("execInput", t, "ask", [], "line")],
+  [HINTS.optionOrText, (t: string) => entry("optionOrText", t, "ask", [], "line")],
+  [HINTS.permission, (t: string) => entry("permission", t, "ask", [], "none")],
+  [HINTS.interviewMessage, (t: string) => entry("interviewMessage", t, "message", [{ label: prompts.END_CLARIFICATION, sends: "/done" }], "message")],
+  [HINTS.confirmSummary, (t: string) => entry("confirmSummary", t, "message", [{ label: "Confirm", sends: "" }], "message")],
+  [HINTS.startOrTalk, (t: string) => entry("startOrTalk", t, "message", [{ label: "Start planning", sends: "" }], "message")],
 ]);
 
 /**
@@ -91,16 +73,7 @@ export const promptOf = (text: string): UserPrompt => {
   return { ...entry, text, choices: [...entry.choices.slice(0, -1), { label: prompts.HELP_ME_DECIDE, sends: DECIDE }, quit] };
 };
 
-const promptOfText = (text: string): UserPrompt => {
-  const fixed = FIXED.get(text);
-  if (fixed !== undefined) return fixed(text);
-  if (text.startsWith(DECISION[0]) && text.endsWith(DECISION[1]) && text.length >= DECISION[0].length + DECISION[1].length) return entry("decision", text, "ask", [{ label: "No decision", sends: "" }], "line", "questionOptions");
-  const rest = afterNumber(text);
-  if (rest !== null && rest === NO_PROCEED) return entry("limitNoProceed", text, "ask", [{ label: "Stop", sends: "0" }], "line");
-  if (rest !== null && rest.startsWith(LIMIT_PREFIX) && rest.endsWith(LIMIT[1]) && rest.length >= LIMIT_PREFIX.length + LIMIT[1].length)
-    return entry("limit", text, "ask", [{ label: "Proceed", sends: "p" }, { label: "Stop", sends: "0" }], "line");
-  return entry("unknown", text, "ask", [], "line");
-};
+const promptOfText = (text: string): UserPrompt => FIXED.get(text)?.(text) ?? entry("unknown", text, "ask", [], "line");
 
 const NUMBERED_LINE = /^\s*([1-9][0-9]*)[.):]\s+(\S.*)$/;
 /** The numbered proposed answers of an interview message (`<n>. <answer>`, one per line; `<n>)` and `<n>:` tolerated), as choices sending the number. */

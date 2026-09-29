@@ -5,6 +5,7 @@ import { issue, respond } from "./helpers.ts";
 import { viewOf } from "../src/analysisView.ts";
 import type { Argument, DecisionAnalysis, Entry } from "../src/schema.ts";
 import { OPPOSES_MARKER } from "../src/prompts.ts";
+import * as prompts from "../src/prompts.ts";
 
 // Finding 27 / recommendation D: the Store writes; the text of the records is composed here.
 test("subject headings", () => {
@@ -146,4 +147,51 @@ test("analysisLines marks exactly the texts that oppose the column's option, and
   assert.ok(expected.some(([, text]) => text.startsWith("  ")), "a bullet's continuation line is in the fixture");
   const unclear = lines.indexOf("Option 2: PostgreSQL");
   assert.deepEqual(lines.slice(unclear, unclear + 4), ["Option 2: PostgreSQL", "", "  It could mean a server", "  or a hosted service."]);
+});
+
+// S8: every question is printed in the one shape: heading with its number, the line saying where it came from, the
+// context set apart and indented, the terms, the question itself apart from the context, the options with their answers.
+test("questionLines prints the heading, the origin, the context, the terms, the question and the options, in that order", async () => {
+  const { questionLines } = await import("../src/render.ts");
+  const q = {
+    number: 4,
+    origin: { kind: "relayed" as const },
+    context: { text: "Claude Code, the coding agent, is writing the tool's input check.", by: "agent" as const },
+    terms: [{ term: "zod", explanation: "a library that checks the shape of data" }],
+    question: "Should zod be declared as a dependency?",
+    options: [
+      { label: "Declare it", description: "add it to package.json", answer: { token: "1" } },
+      { label: "More cycles", description: "", answer: { numeric: true as const } },
+    ],
+    decision: null,
+  };
+  const lines = questionLines(q);
+  const at = (text: string) => lines.findIndex((l) => l.includes(text));
+  assert.equal(lines.find((l) => l.trim() !== ""), prompts.questionTitle(4));
+  const order = [prompts.originLine(q.origin, null).slice(0, 30), q.context.text, prompts.TERMS_HEADING, "zod: a library", q.question, "1. Declare it — add it to package.json", "More cycles (type the number)"].map(at);
+  assert.ok(order.every((i, n) => i >= 0 && (n === 0 || i > order[n - 1])), JSON.stringify({ order, lines }));
+  // The context is indented and set apart by blank lines; the question is not indented.
+  assert.match(lines[at(q.context.text)], /^ {4}\S/);
+  assert.equal(lines[at(q.context.text) - 1], "");
+  assert.equal(lines[at(q.question)], q.question);
+  assert.equal(lines[at(q.question) - 1], "");
+  // A context the program wrote is marked as the program's.
+  assert.ok(questionLines({ ...q, context: { text: "x", by: "program" } }).some((l) => l.includes(prompts.CONTEXT_BY_PROGRAM)));
+  assert.ok(!lines.some((l) => l.includes(prompts.CONTEXT_BY_PROGRAM)));
+});
+
+test("a question inside a decision says in its origin line that it belongs to that decision and why it is asked (issue #57)", () => {
+  const line = prompts.originLine({ kind: "planner", heading: "Decision 2" }, 2);
+  assert.match(line, /Decision 2/);
+  assert.match(line, new RegExp(prompts.HELP_ME_DECIDE));
+  assert.match(line, /undetermined/);
+  assert.doesNotMatch(prompts.originLine({ kind: "planner", heading: "Planning 1" }, null), /belongs to Decision/);
+});
+
+test("conversation.md records a question under its displayed number with the record's id beside it (S6)", async () => {
+  const { renderQuestionRecord } = await import("../src/render.ts");
+  const q = { number: 3, origin: { kind: "clarification" as const, id: "Q1" }, context: { text: "c", by: "agent" as const }, terms: [], question: "Which?", options: [], decision: null };
+  assert.match(renderQuestionRecord(q), /^### Question 3 \(Q1\)\n/);
+  assert.match(renderQuestionRecord({ ...q, origin: { kind: "relayed" } }), /^### Question 3\n/);
+  assert.match(renderQuestionRecord({ ...q, origin: { kind: "pause", heading: "Planning phase 1", pause: "reraised", id: "P1-R1-2" } }), /^### Question 3 \(P1-R1-2\)\n/);
 });

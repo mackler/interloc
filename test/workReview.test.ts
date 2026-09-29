@@ -8,7 +8,7 @@ import { limitNoProceedPrompt, execInputPrompt, planApplyDecisionsPrompt, withOf
 import { readCheckpoint } from "../src/records.ts";
 import type { ExecOutcome } from "../src/schema.ts";
 import type { StoreShape } from "../src/services.ts";
-import { finished, issue, respond, runFails, runTask, tempRepo, testLayer } from "./helpers.ts";
+import { finished, issue, respond, runFails, runTask, tempRepo, testLayer, presentedQuestions, presentedSubjects } from "./helpers.ts";
 
 // Plan step 2.8: the work review after every execution phase (the task; decisions Q7, Q13, Q14, G-R1-1).
 const noQuestions = { questions_for_user: [] };
@@ -98,7 +98,7 @@ test("(b3) changes.diff is rewritten for every round: an outside change after an
     store: changeAfterResponse(repo, () => fs.appendFileSync(path.join(repo, "a.txt"), "outside change\n")),
   });
   assert.equal(await runTask(layer), 1);
-  assert.match(probe.ui.asked[0], /unexplained change to changes\.diff/);
+  assert.match(presentedSubjects(probe.ui)[0], /unexplained change to changes\.diff/);
   assert.match(read(probe.dir, "work-review-1/changes.diff"), /\+outside change/);
 });
 
@@ -112,7 +112,7 @@ test("(c) exit (iii): a decision on a reraised work issue leaves for planning 2 
     execs: [finished, finished],
   });
   assert.equal(await runTask(layer), 2);
-  assert.match(probe.ui.asked[0], /issue W1-R1-1, raised again/);
+  assert.match(presentedSubjects(probe.ui)[0], /issue W1-R1-1, raised again/);
   assert.deepEqual(workLog(probe.dir).at(-1)?.action, "decided_by_user");
   assert.match(read(probe.dir, "user-decisions.md"), /act on it/);
   assert.equal((await capture.verify())?.stage, "decided");
@@ -174,7 +174,7 @@ test("(c3) exit (ii), identical content: a diff back to an earlier round's text,
     store: changeAfterResponse(repo, change),
   });
   assert.equal(await runTask(layer), 2);
-  assert.match(probe.ui.asked[2], /alternating versions of changes\.diff/);
+  assert.match(presentedSubjects(probe.ui)[2], /alternating versions of changes\.diff/);
   assert.equal((await capture.verify())?.stage, "decided");
 });
 
@@ -200,7 +200,7 @@ test("(e) the round limit of a work review has no p, and p stops the run", async
   });
   await runFails(layer, "RoundLimitStop", /Work review 1/);
   // Decision support (decision Q6): Stop or more cycles is a choice, so it carries the offer.
-  assert.equal(probe.ui.asked[0], withOffer(limitNoProceedPrompt(1)));
+  assert.equal(probe.ui.asked[0], withOffer(limitNoProceedPrompt));
 });
 
 test("(f) a Codex turn of the work review that changes the project halts with ProjectChanged", async () => {

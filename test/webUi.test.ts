@@ -28,7 +28,7 @@ test("say, notify, and a prompt with its answer become events in order", async (
   const { ui, events } = await withUi();
   await run(ui.say("hello"));
   await run(ui.notify({ _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } }));
-  const fiber = Effect.runFork(ui.ask(prompts.decisionPrompt("issue A")));
+  const fiber = Effect.runFork(ui.ask(prompts.decisionPrompt));
   const prompt = await pendingPrompt(ui);
   assert.equal(await run(ui.answer(prompt, "keep it")), true);
   assert.equal(await run(Fiber.join(fiber)), "keep it");
@@ -97,7 +97,7 @@ test("an answer interrupted while Answered is in the sink still resolves the ask
   const entered = await run(Deferred.make<void>());
   const release = await run(Deferred.make<void>());
   const ui = await run(makeWebUi((e) => (e._tag === "Answered" ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release))) : Effect.void)));
-  const asking = Effect.runFork(ui.ask(prompts.decisionPrompt("issue A")));
+  const asking = Effect.runFork(ui.ask(prompts.decisionPrompt));
   const prompt = await pendingPrompt(ui);
   const answering = Effect.runFork(ui.answer(prompt, "the decision"));
   await run(Deferred.await(entered));
@@ -113,7 +113,7 @@ test("an answer interrupted while Answered is in the sink still resolves the ask
 
 test("of two concurrent answers to one prompt exactly one is taken", async () => {
   const { ui, events } = await withUi();
-  const asking = Effect.runFork(ui.ask(prompts.decisionPrompt("issue A")));
+  const asking = Effect.runFork(ui.ask(prompts.decisionPrompt));
   const prompt = await pendingPrompt(ui);
   const taken = await run(Effect.all([ui.answer(prompt, "one"), ui.answer(prompt, "two")], { concurrency: 2 }));
   assert.deepEqual(taken.filter((t) => t).length, 1);

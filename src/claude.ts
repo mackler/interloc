@@ -11,9 +11,9 @@ import { ClaudeCallFailed, type RunError, TransportFault } from "./errors.ts";
 import { type ClaudeFailure, classifyClaude, errorCode } from "./transport.ts";
 import { withTransportRetry } from "./retry.ts";
 import type { ExecOutcome } from "./schema.ts";
-import { askOffering, numberedOptions, permissionOptions } from "./offer.ts";
+import { askOffering, numberedOptions, permissionOptions, programContext, type QuestionDraft } from "./offer.ts";
+import type { QuestionOrigin } from "./question.ts";
 import { chooseOption } from "./input.ts";
-import { relayedQuestionSays } from "./render.ts";
 import { agentJsonSchema } from "./jsonSchema.ts";
 import * as prompts from "./prompts.ts";
 import * as S from "./schema.ts";
@@ -113,8 +113,8 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
   });
 
   /** An ask with the offer of decision support (D2), run inside a callback: the services it needs are provided here. */
-  const offering = (decider: DeciderShape, prompt: string, question: Parameters<typeof askOffering>[2], present: Effect.Effect<void>, acceptable?: (answer: string) => boolean): Effect.Effect<string, CallbackError> =>
-    askOffering((p) => ui.ask(p), prompt, question, present, acceptable).pipe(Effect.provideService(Decider, decider), Effect.provideService(Store, store), Effect.provideService(Ui, ui));
+  const offering = (decider: DeciderShape, hint: string, draft: QuestionDraft, acceptable?: (answer: string) => boolean): Effect.Effect<string, CallbackError> =>
+    askOffering((p) => ui.ask(p), hint, draft, acceptable).pipe(Effect.provideService(Decider, decider), Effect.provideService(Store, store), Effect.provideService(Ui, ui));
 
   /**
    * Asks the user each question; the answers are keyed by the question's index, so equal texts stay apart. A question
@@ -124,15 +124,14 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
     Effect.gen(function* () {
       const answers = new Map<number, string>();
       for (const [index, q] of questions.entries()) {
-        const present = ui.notify({ _tag: "QuestionAsked", question: q.question, options: q.options });
-        yield* present;
-        for (const line of relayedQuestionSays(q)) yield* ui.say(line);
+        const origin: QuestionOrigin = { kind: "relayed" };
+        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: q.question, options: numberedOptions(q.options), decision: null };
         // A blank reply is asked again, the question presented again first (W1-R1-1, W1-R1-2).
-        const reply = yield* offering(decider, prompts.optionOrTextPrompt, { question: q.question, options: numberedOptions(q.options) }, present, (a) => a !== "");
+        const reply = yield* offering(decider, prompts.optionOrTextPrompt, draft, (a) => a !== "");
         const chosen = chooseOption(reply, q.options.length);
         const answer = chosen === null ? reply : q.options[chosen].label;
         answers.set(index, answer);
-        yield* store.converse(`**Question from Claude Code:** ${q.question}\n\n**User answer:** ${answer}\n\n`);
+        yield* store.converse(`**User answer:** ${answer}\n\n`);
       }
       return answers;
     });
@@ -234,8 +233,9 @@ export const makeClaudePlanner: Effect.Effect<PlannerShape, never, Sdk | Ui | St
       }
       const allowed = await inCallback(
         Effect.gen(function* () {
-          yield* ui.say(`\nClaude Code requests permission: ${toolName} ${JSON.stringify(input)}`);
-          const reply = yield* offering(decider, prompts.permissionPrompt, { question: prompts.permissionQuestion(toolName, JSON.stringify(input)), options: permissionOptions }, Effect.void);
+          const origin: QuestionOrigin = { kind: "permission", tool: toolName, input: JSON.stringify(input) };
+          const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.permissionQuestion(toolName, JSON.stringify(input)), options: permissionOptions, decision: null };
+          const reply = yield* offering(decider, prompts.permissionPrompt, draft);
           return reply.toLowerCase() === "y";
         }),
         false,

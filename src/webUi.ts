@@ -26,6 +26,7 @@ export const makeWebUi = (sink: (event: RunEvent) => Effect.Effect<void>): Effec
     // The dialogue is serialized as in the terminal: a second concurrent prompt waits for the first answer.
     const dialogue = yield* Semaphore.make(1);
     const prompts = yield* Ref.make<Prompts>({ next: 1, waiting: null });
+    const questions = yield* Ref.make(0);
 
     /** Shows the prompt and waits for its first answer; an interruption withdraws the prompt. */
     const waitFor = (text: string): Effect.Effect<string> =>
@@ -55,6 +56,7 @@ export const makeWebUi = (sink: (event: RunEvent) => Effect.Effect<void>): Effec
     return {
       say: (text) => sink({ _tag: "Said", text }),
       notify: (event) => sink({ _tag: "Notified", event }),
+      nextQuestion: Ref.updateAndGet(questions, (n) => n + 1),
       ask,
       askMessage,
       // The take, the Answered event and the completion of the prompt are one uninterruptible step (finding 11 of

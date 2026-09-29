@@ -4,11 +4,11 @@
 import { Result, Schema } from "effect";
 import * as S from "./schema.ts";
 import type { UiEvent } from "./uiEvents.ts";
-import type { Choice, Extra, PromptKind } from "./userPrompts.ts";
+import type { Choice, PromptKind } from "./userPrompts.ts";
 
 
 /** A prompt the run waits on, with its widget (src/userPrompts.ts). `prompt` numbers the prompts of a run. */
-export type Asked = Readonly<{ _tag: "Asked"; prompt: number; text: string; kind: PromptKind; mode: "ask" | "message"; choices: readonly Choice[]; free: "none" | "line" | "message"; extra: Extra }>;
+export type Asked = Readonly<{ _tag: "Asked"; prompt: number; text: string; kind: PromptKind; mode: "ask" | "message"; choices: readonly Choice[]; free: "none" | "line" | "message" }>;
 /** What happened in a run, in order: the run's Ui calls and its start and end. */
 export type RunEvent =
   | Readonly<{ _tag: "Started"; project: string; task: string }>
@@ -51,6 +51,39 @@ const PhaseSchema = Schema.Union([Schema.Struct({ kind: Schema.Literal("question
 const AgentSchema = Schema.Literals(["claude", "codex"]);
 const round = { subject: SubjectIdSchema, round: Int };
 
+const withHeading = { heading: Str };
+/** QuestionOrigin of src/question.ts, variant by variant (S5). */
+const QuestionOriginSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("clarification"), id: Str }),
+  Schema.Struct({ kind: Schema.Literal("followUp"), id: Str }),
+  Schema.Struct({ kind: Schema.Literal("reply") }),
+  Schema.Struct({ kind: Schema.Literal("startOrTalk") }),
+  Schema.Struct({ kind: Schema.Literal("confirmSummary") }),
+  Schema.Struct({ kind: Schema.Literal("planner"), ...withHeading }),
+  Schema.Struct({ kind: Schema.Literal("relayed") }),
+  Schema.Struct({ kind: Schema.Literal("execStop"), phase: Int, status: Str }),
+  Schema.Struct({ kind: Schema.Literal("permission"), tool: Str, input: Str }),
+  Schema.Struct({ kind: Schema.Literal("pause"), ...withHeading, pause: Schema.Literals(["reraised", "secondClarification", "disputedSelfCorrection"]), id: Str }),
+  Schema.Struct({ kind: Schema.Literal("pause"), ...withHeading, pause: Schema.Literal("reversal"), id: Str, reverses: Str }),
+  Schema.Struct({ kind: Schema.Literal("pause"), ...withHeading, pause: Schema.Literal("repeatedUnderNewId"), id: Str, repeats: Str }),
+  Schema.Struct({ kind: Schema.Literal("pause"), ...withHeading, pause: Schema.Literal("unexplained"), fileLabel: Str, round: Int }),
+  Schema.Struct({ kind: Schema.Literal("pause"), ...withHeading, pause: Schema.Literal("identical"), fileLabel: Str }),
+  Schema.Struct({ kind: Schema.Literal("pause"), ...withHeading, pause: Schema.Literal("idle"), idle: Int }),
+  Schema.Struct({ kind: Schema.Literal("limit"), ...withHeading, limit: Int }),
+  Schema.Struct({ kind: Schema.Literal("unchanged"), ...withHeading, fileLabel: Str, accepted: Schema.Array(Str) }),
+  Schema.Struct({ kind: Schema.Literal("transport"), agent: AgentSchema, what: Str, attempts: Int, fault: Str }),
+]);
+/** PresentedQuestion of src/question.ts (S5). */
+export const PresentedQuestionSchema = Schema.Struct({
+  number: Int,
+  origin: QuestionOriginSchema,
+  context: Schema.Struct({ text: Str, by: Schema.Literals(["agent", "program"]) }),
+  terms: Schema.Array(S.Term),
+  question: Str,
+  options: Schema.Array(Schema.Struct({ label: Str, description: Str, answer: Schema.Union([Schema.Struct({ token: Str }), Schema.Struct({ numeric: Schema.Literal(true) })]) })),
+  decision: Schema.NullOr(Int),
+});
+
 /** UiEvent of src/uiEvents.ts, variant by variant. */
 export const UiEventSchema = Schema.Union([
   tagged("PhaseBegan", { phase: PhaseSchema }),
@@ -69,11 +102,10 @@ export const UiEventSchema = Schema.Union([
   tagged("TransportRetrying", { agent: AgentSchema, attempt: Int, of: Int, delaySeconds: Schema.Finite, fault: Str }),
   tagged("TransportRecovered", { agent: AgentSchema }),
   tagged("AgentReconnecting", { agent: AgentSchema, by: Schema.Literal("sdk"), attempt: Schema.NullOr(Int), of: Schema.NullOr(Int), delayMs: Schema.NullOr(Int), detail: Str }),
-  tagged("QuestionAsked", { question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) }),
   tagged("InterviewTurn", { heading: Str, message: Str, summary: Schema.NullOr(Str), answered: Int, total: Int }),
   tagged("InterviewOpened", { heading: Str, stage: Schema.Literals(["clarification", "followUp", "conversation"]), total: Int }),
   tagged("ClaudeSaid", { text: Str }),
-  tagged("OptionsPresented", { question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })) }),
+  tagged("QuestionPresented", { question: PresentedQuestionSchema }),
   tagged("AnswerRejected", {}),
   tagged("DecisionAnalyzed", { decision: Int, question: Str, options: Schema.Array(Schema.Struct({ label: Str, description: Str })), analysis: S.DecisionAnalysis }),
   tagged("PhasesForeseen", { phases: Schema.Array(PhaseSchema) }),
@@ -92,7 +124,6 @@ export const RunEventSchema = Schema.Union([
     mode: Schema.Literals(["ask", "message"]),
     choices: Schema.Array(ChoiceSchema),
     free: Schema.Literals(["none", "line", "message"]),
-    extra: Schema.Literals(["none", "questionOptions", "numberedAnswers"]),
   }),
   tagged("Answered", { prompt: Int, text: Str }),
   tagged("Notified", { event: UiEventSchema }),

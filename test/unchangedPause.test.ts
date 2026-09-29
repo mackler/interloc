@@ -10,17 +10,18 @@ import { promptOf } from "../src/userPrompts.ts";
 const intended = { [prompts.UNCHANGED_RETRY]: "retry", [prompts.UNCHANGED_PROCEED]: "proceed", [prompts.UNCHANGED_STOP]: "stop" } as const;
 
 for (const interview of [false, true]) {
-  test(`every button of the pause sends the answer its label names, and exactly one option matches it (${interview ? "requirements" : "corrective"})`, () => {
+  // S8: the pause's options are its cards, each sending the answer it shows; the widget adds only the offer and the quit.
+  test(`every option of the pause sends the answer its label names, and exactly one option matches it (${interview ? "requirements" : "corrective"})`, () => {
     const widget = promptOf(prompts.withOffer(prompts.unchangedPrompt));
     assert.equal(widget.kind, "unchanged");
-    const buttons = widget.choices.filter((c) => c.sends !== "q" && c.sends !== DECIDE);
-    assert.deepEqual(buttons.map((c) => c.label), [prompts.UNCHANGED_RETRY, prompts.UNCHANGED_PROCEED, prompts.UNCHANGED_STOP]);
+    assert.deepEqual(widget.choices.filter((c) => c.sends !== "q" && c.sends !== DECIDE), []);
     assert.ok(widget.choices.some((c) => c.label === prompts.HELP_ME_DECIDE && c.sends === DECIDE), "the pause carries no offer");
     const options = unchangedOptions(interview);
-    assert.deepEqual(options.map((o) => o.label), buttons.map((c) => c.label));
-    for (const button of buttons) {
-      assert.equal(parseUnchangedAnswer(button.sends), intended[button.label as keyof typeof intended]);
-      assert.deepEqual(options.filter((o) => o.matches(button.sends)).map((o) => o.label), [button.label]);
+    assert.deepEqual(options.map((o) => o.label), [prompts.UNCHANGED_RETRY, prompts.UNCHANGED_PROCEED, prompts.UNCHANGED_STOP]);
+    for (const option of options) {
+      const sends = "token" in option.answer ? option.answer.token : "";
+      assert.equal(parseUnchangedAnswer(sends), intended[option.label as keyof typeof intended]);
+      assert.deepEqual(options.filter((o) => o.matches(sends)).map((o) => o.label), [option.label]);
     }
   });
 }

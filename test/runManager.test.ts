@@ -12,7 +12,6 @@ import { program } from "../src/program.ts";
 import type { RunEvent } from "../src/protocol.ts";
 import { type Broadcast, type Listener, makePublisher, makeRunManager, type Refusal, type RunManager } from "../src/runManager.ts";
 import { subscribeBounded } from "../src/webServer.ts";
-import { numberedChoices } from "../src/userPrompts.ts";
 import { FakeSdk, init, messages, success, turn } from "./fakeSdk.ts";
 import { finished, scriptedPlan, type TestOptions, tempDir, tempRepo, testWiring } from "./helpers.ts";
 import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
@@ -160,11 +159,11 @@ test("an interview's numbered answer sent through the manager reaches Claude Cod
   await run(h.manager.answer(h.manager.incarnation, id, opening.prompt, "let us talk"));
   const you = await pendingAsk(h, id);
   assert.equal(you.kind, "interviewMessage");
-  assert.equal(you.extra, "numberedAnswers");
-  const turnEvent = eventsOf(h, id).flatMap((e) => (e._tag === "Notified" && e.event._tag === "InterviewTurn" ? [e.event] : [])).at(-1);
-  const choice = numberedChoices(turnEvent?.message ?? "")[1];
-  assert.deepEqual(choice, { label: "2. SQLite - no server needed", sends: "2" });
-  await run(h.manager.answer(h.manager.incarnation, id, you.prompt, choice.sends));
+  // S5: the turn's question is presented before the prompt, its options with the answers that choose them.
+  const presented = eventsOf(h, id).flatMap((e) => (e._tag === "Notified" && e.event._tag === "QuestionPresented" ? [e.event.question] : [])).at(-1);
+  const choice = presented?.options[1];
+  assert.deepEqual(choice, { label: "SQLite", description: "no server needed", answer: { token: "2" } });
+  await run(h.manager.answer(h.manager.incarnation, id, you.prompt, "token" in choice.answer ? choice.answer.token : ""));
   const confirm = await pendingAsk(h, id);
   assert.equal(confirm.kind, "confirmSummary");
   await run(h.manager.answer(h.manager.incarnation, id, confirm.prompt, ""));

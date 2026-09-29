@@ -6,15 +6,15 @@ import { Effect, Ref, Result, Schema } from "effect";
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { AgentReplyInvalid, ProjectChanged, RecordsChanged, ReviewedFileChanged, type RunError } from "./errors.ts";
 import type { LoopResult } from "./uiEvents.ts";
-import { type Question, validateQuestions } from "./question.ts";
-import { questionRepairPrompt, correctivePrompt, transportReviewWhat, transportWhat, unchangedPrompt, unchangedQuestion, decisionPrompt, limitNoProceedPrompt, limitPrompt, limitQuestion, repairReplyPrompt, type RespondContext } from "./prompts.ts";
+import { type Question, type QuestionOrigin, validateQuestions } from "./question.ts";
+import * as prompts from "./prompts.ts";
+import { questionRepairPrompt, correctivePrompt, transportReviewWhat, transportWhat, repairReplyPrompt, type RespondContext } from "./prompts.ts";
 import { correctiveValidation } from "./round.ts";
-import { askOffering, limitOptions, numberedOptions, unchangedOptions } from "./offer.ts";
+import { agentContext, askOffering, limitOptions, numberedOptions, programContext, type QuestionDraft, unchangedOptions } from "./offer.ts";
 import { answerOf, parseUnchangedAnswer } from "./input.ts";
-import { optionLines } from "./render.ts";
-import { advance, initialState, type Option, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
+import { advance, type Asks, initialState, type Option, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "./reviewState.ts";
 import * as S from "./schema.ts";
-import type { PlannerResponse, Review } from "./schema.ts";
+import type { PlannerResponse, Review, UserQuestion } from "./schema.ts";
 import { type Decider, Planner, type PlanningCapability, type PlanningPurpose, type PlanningResult, Reviewer, RunConfig, type Services, Store, type StoreError, Ui } from "./services.ts";
 import { compareJournaled, compareSnapshots } from "./snapshot.ts";
 import { withTransportRetry } from "./retry.ts";
@@ -68,26 +68,34 @@ export type Subject<R extends PlannerResponse = PlannerResponse, D = unknown> = 
 }>;
 
 /**
- * Asks one decision at a pause or on a question of the plan writer: its options, when it has any, are presented (a
- * notification for the page, numbered lines for the terminal) and the ask carries the offer of decision support; an
- * answer that is an option's number stands for that option.
+ * The question a decision of a review loop asks (S7): a pause of behaviour 7 with its fixed question and the
+ * program's context, or Claude Code's question with its own; `decision` is k inside decision k (issue #57).
  */
-export const askWithOptions = (subject: string, options: readonly Option[]): Effect.Effect<string, RunError, Ui | Store | Decider> =>
+export const decisionDraft = (heading: string, asks: Asks, options: readonly Option[], decision: number | null): QuestionDraft => {
+  if (asks.kind === "planner") return plannerDraft(asks.question, heading, decision);
+  const origin: QuestionOrigin = { kind: "pause", heading, ...asks.pause };
+  return { origin, context: programContext(origin), terms: [], question: prompts.pauseQuestion(asks.pause), options: numberedOptions(options), decision };
+};
+/** A question Claude Code returned with a plan or a response (S7): its context, terms and options as it wrote them. */
+export const plannerDraft = (question: UserQuestion, heading: string, decision: number | null): QuestionDraft => {
+  const origin: QuestionOrigin = { kind: "planner", heading };
+  return { origin, context: agentContext(question.context, origin), terms: question.terms, question: question.question, options: numberedOptions(question.options), decision };
+};
+
+/** Asks one decision (S7): the question presented, the offer where it has options; an answer that is an option's number stands for that option. */
+export const askDecisionQuestion = (draft: QuestionDraft): Effect.Effect<string, RunError, Ui | Store | Decider> =>
   Effect.gen(function* () {
     const ui = yield* Ui;
-    const present = options.length > 0 ? ui.notify({ _tag: "OptionsPresented", question: subject, options }) : Effect.void;
-    yield* present;
-    for (const line of optionLines(options)) yield* ui.say(line);
-    const answer = yield* askOffering((p) => ui.ask(p), decisionPrompt(subject), { question: subject, options: numberedOptions(options) }, present);
-    return answerOf(answer, options);
+    const answer = yield* askOffering((p) => ui.ask(p), prompts.decisionPrompt, draft);
+    return answerOf(answer, draft.options);
   });
 
-/** Reads one decision outside a review loop (a question of the plan writer). An empty answer records nothing and returns "". */
-export const askDecision = (subject: string, phase: number, round: number, options: readonly Option[] = []): Effect.Effect<string, RunError, Ui | Store | Decider> =>
+/** Reads one decision on a question of the plan writer, outside a review loop. An empty answer records nothing and returns "". */
+export const askPlannerQuestion = (question: UserQuestion, heading: string, phase: number, round: number): Effect.Effect<string, RunError, Ui | Store | Decider> =>
   Effect.gen(function* () {
     const store = yield* Store;
-    const decision = yield* askWithOptions(subject, options);
-    if (decision !== "") yield* store.appendDecision({ subject, id: null, decision, phase, round });
+    const decision = yield* askDecisionQuestion(plannerDraft(question, heading, null));
+    if (decision !== "") yield* store.appendDecision({ subject: prompts.recordSubject({ kind: "planner", heading }, question.question), id: null, decision, phase, round });
     return decision;
   });
 
@@ -270,6 +278,8 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
     const reviewer = yield* Reviewer;
     const { id, heading, fileLabel } = subject;
     const phase = subject.phase;
+    /** The decision this loop works out, whose questions belong to it (issue #57); null for the other subjects. */
+    const within = typeof id === "object" && "decision" in id ? id.decision : null;
     // One thread per review loop (behaviour 5): the session is held by this loop, not by the adapter.
     const session = yield* reviewer.startPhase;
 
@@ -346,18 +356,19 @@ export const reviewLoop = <R extends PlannerResponse, D>(subject: Subject<R, D>)
           case "AskLimit": {
             // The limit is a choice between options (decision Q6), so it carries the offer; the answer is passed on as typed.
             const { proceed } = state.setup;
-            const prompt = proceed === null ? limitNoProceedPrompt(command.limit) : limitPrompt(command.limit, proceed);
-            const question = { question: limitQuestion(heading, command.limit), options: limitOptions(proceed) };
-            return { kind: "LimitAnswer", answer: yield* askOffering((p) => ui.ask(p), prompt, question, Effect.void) };
+            const origin: QuestionOrigin = { kind: "limit", heading, limit: command.limit };
+            const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.limitQuestion(heading, command.limit), options: limitOptions(proceed), decision: within };
+            return { kind: "LimitAnswer", answer: yield* askOffering((p) => ui.ask(p), proceed === null ? prompts.limitNoProceedPrompt : prompts.limitPrompt, draft) };
           }
           case "AskUnchanged": {
             // Issue #30: Retry, Proceed or Stop, with the offer of decision support; an answer that is none of them is asked again.
-            const question = { question: unchangedQuestion(heading, fileLabel), options: unchangedOptions(command.retry === "interview") };
-            const answer = yield* askOffering((p) => ui.ask(p), unchangedPrompt, question, Effect.void, (a) => parseUnchangedAnswer(a) !== null);
+            const origin: QuestionOrigin = { kind: "unchanged", heading, fileLabel, accepted: command.accepted };
+            const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.unchangedQuestion(heading, fileLabel), options: unchangedOptions(command.retry === "interview"), decision: within };
+            const answer = yield* askOffering((p) => ui.ask(p), prompts.unchangedPrompt, draft, (a) => parseUnchangedAnswer(a) !== null);
             return { kind: "UnchangedAnswer", answer: parseUnchangedAnswer(answer)! };
           }
           case "AskDecision":
-            return { kind: "DecisionGiven", text: yield* askWithOptions(command.subject, command.options) };
+            return { kind: "DecisionGiven", text: yield* askDecisionQuestion(decisionDraft(heading, command.asks, command.options, within)) };
           case "CallReviewer": {
             // Before the turn's guard takes its snapshot, so that it is not counted as a change during the turn.
             if (subject.prepare !== null) yield* subject.prepare;

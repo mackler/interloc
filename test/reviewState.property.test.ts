@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import fc from "fast-check";
-import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type Transition } from "../src/reviewState.ts";
+import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, subjectOf, type Transition } from "../src/reviewState.ts";
 import type { Action, Review } from "../src/schema.ts";
 import { issue, respond } from "./helpers.ts";
 
@@ -217,7 +217,7 @@ const pausesOf = (trace: readonly ReviewCommand[]): string[] =>
   trace.flatMap((c) => {
     if (c.kind === "AskLimit") return ["limit"];
     if (c.kind !== "AskDecision") return [];
-    return [/unexplained change/.test(c.subject) ? "unexplained" : /alternating versions/.test(c.subject) ? "identical" : /produced no amendment/.test(c.subject) ? "idle" : c.subject];
+    return [c.asks.kind === "pause" && (c.asks.pause.pause === "unexplained" || c.asks.pause.pause === "identical" || c.asks.pause.pause === "idle") ? c.asks.pause.pause : subjectOf("", c.asks)];
   });
 
 test("property: a work review's first exit, its round and its pauses equal the independent model's", () => {
@@ -228,7 +228,7 @@ test("property: a work review's first exit, its round and its pauses equal the i
       assert.equal(finished, expected.exit);
       assert.equal(state.round, expected.round, "the exit's round");
       assert.deepEqual(pausesOf(trace), expected.pauses);
-      for (const c of trace) if (c.kind === "AskDecision") assert.doesNotMatch(c.subject, UNREACHABLE, "a pause the generator cannot reach occurred");
+      for (const c of trace) if (c.kind === "AskDecision") assert.doesNotMatch(subjectOf("", c.asks), UNREACHABLE, "a pause the generator cannot reach occurred");
     }),
     RUNS,
   );

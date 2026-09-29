@@ -34,6 +34,8 @@ export interface UiShape {
   readonly askMessage: (prompt: string) => Effect.Effect<string, UserStopped>;
   /** A structured event of the run (decision Q5). The terminal prints nothing for it; the records do not depend on it. */
   readonly notify: (event: UiEvent) => Effect.Effect<void>;
+  /** The number of the next question the user is asked (S6): one sequence for the run, from 1, whatever produced the question. */
+  readonly nextQuestion: Effect.Effect<number>;
 }
 export class Ui extends Context.Service<Ui, UiShape>()("plan-review/Ui") {}
 

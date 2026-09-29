@@ -3,6 +3,7 @@
 import { pathOf } from "./artifacts.ts";
 import { FILE_CHANGE_FIELD, type LogEntry, type Review } from "./schema.ts";
 import type { InterviewStage } from "./uiEvents.ts";
+import type { PauseOrigin, QuestionOrigin } from "./question.ts";
 
 const SEVERITY = `Severity: blocking = the work cannot succeed with the file as written; major = the file as written will produce a defect or omits something required; minor = everything else.`;
 
@@ -194,14 +195,6 @@ Do not use the AskUserQuestion tool.`;
 /** The prefix of an agreed question's id (Q1, Q2, …) and of a follow-up's id (F1, F2, …), issue #35 (Q6). */
 export const AGREED_QUESTION_PREFIX = "Q";
 export const FOLLOW_UP_PREFIX = "F";
-/** A question as the header of its decision names it (issue #35, Q5 and Q6): the text alone, prefixed by its number. */
-export function questionHeading(id: string, text: string): string {
-  const agreed = new RegExp(`^${AGREED_QUESTION_PREFIX}(\\d+)$`).exec(id);
-  if (agreed !== null) return `Question ${agreed[1]}: ${text}`;
-  const followUp = new RegExp(`^${FOLLOW_UP_PREFIX}(\\d+)$`).exec(id);
-  return followUp === null ? text : `Follow-up question ${followUp[1]}: ${text}`;
-}
-
 export function questionListPrompt(task: string): string {
   return `Do not write a plan yet. Read the task below and inspect the codebase without changing anything.
 Return in 'questions' the questions whose answers you need from the user before you can write an implementation plan for the task.
@@ -429,30 +422,29 @@ Return the complete output again, corrected. Do not modify any file.`;
 // ---- prompts to the user ------------------------------------------------------------------------
 // The texts the program shows when it waits for the user. src/userPrompts.ts maps each to its widget.
 
+/**
+ * The input hints (S8): the line under a question that says how to answer it in the terminal, one fixed text per kind
+ * of prompt, without parameters, so that src/userPrompts.ts recognizes the kind by it. The question itself, its context
+ * and its options are presented before it (`questionLines` in src/render.ts); the page shows its own controls instead.
+ */
 /** A decision at a pause (behaviour 7) or on a question from Claude Code. */
-export function decisionPrompt(subject: string): string {
-  return `Decision on: ${subject} (Enter = none, q = quit) > `;
-}
+export const decisionPrompt = "Answer with the number or label of an option, or in your own words; Enter = continue without deciding; q = end the run > ";
 /** The round limit, with the choice to proceed without convergence. The user reads "cycles" (issue #14). */
-export function limitPrompt(limit: number, proceedLabel: string): string {
-  return `${limit} cycles completed without convergence. Number = additional cycles; p = ${proceedLabel}; 0 = stop > `;
-}
+export const limitPrompt = "p = proceed without convergence; a number = that many more cycles; 0 = stop the run; q = end the run > ";
 /** The round limit of a subject without a proceed choice (the work review, Q13). */
-export function limitNoProceedPrompt(limit: number): string {
-  return `${limit} cycles completed without convergence. Number = additional cycles; 0 = stop > `;
-}
+export const limitNoProceedPrompt = "A number = that many more cycles; 0 = stop the run; q = end the run > ";
 /** The user's input at a stop of an execution phase whose report carried none. */
-export const execInputPrompt = "Your input for Claude Code (q = quit) > ";
+export const execInputPrompt = "Your answer for Claude Code (q = end the run) > ";
 /** The answer to a question that Claude Code asked with AskUserQuestion. */
-export const optionOrTextPrompt = "Number or free text (q = quit) > ";
+export const optionOrTextPrompt = "Answer with the number of an option, or in your own words (q = end the run) > ";
 /** A permission request of Claude Code. */
-export const permissionPrompt = "Allow? (y = yes, anything else = no, q = quit) > ";
+export const permissionPrompt = "y = allow; anything else = do not allow (q = end the run) > ";
 /** A message of the interview. */
 export const interviewMessagePrompt = "You > ";
 /** The confirmation of the interview's summary. */
 export const confirmSummaryPrompt = "Enter = confirm the summary; any other text continues the conversation > ";
 /** The choice after an empty agreed question list (behaviour 2). */
-export const startOrTalkPrompt = "\nClaude Code and Codex agree that no question is needed. Enter = start planning; any other text opens a conversation with Claude Code > ";
+export const startOrTalkPrompt = "Enter = start planning; any other text opens a conversation with Claude Code > ";
 
 // ---- status lines to the user (issue #14: "Gather Requirements", "Implementation", "cycle") -----------------------
 
@@ -623,17 +615,13 @@ ${QUESTION_OPTIONS_RULE}`;
  */
 export function pagePromptText(kind: string, offeredText: string): string {
   const text = withoutOffer(offeredText).text;
-  const decision = decisionPrompt("\u0000").split("\u0000");
   switch (kind) {
     case "decision":
-      return `Decision on: ${text.slice(decision[0].length, text.length - decision[1].length)}`;
+      return "Choose an option, answer in your own words, or continue without deciding.";
     case "limit":
-    case "limitNoProceed": {
-      const cycles = /^[0-9]+/.exec(text)?.[0] ?? "The";
-      return kind === "limit"
-        ? `${cycles} cycles completed without convergence. Add cycles, proceed without convergence, or stop.`
-        : `${cycles} cycles completed without convergence. Add cycles or stop.`;
-    }
+      return "Proceed without convergence, add cycles, or stop the run.";
+    case "limitNoProceed":
+      return "Add cycles, or stop the run.";
     case "execInput":
       return "Your input for Claude";
     case "optionOrText":
@@ -1047,6 +1035,8 @@ export function unchangedDecisionLine(answer: "retry" | "proceed" | "stop", file
   return `**User decision:** ${what} after cycle ${round} of ${heading}.\n\n`;
 }
 
+/** The answers of the cycle limit's options (S8); a whole number above zero adds that many cycles. */
+export const LIMIT_ANSWERS = { proceed: "p", stop: "0" } as const;
 export const LIMIT_PROCEED = "Proceed without convergence";
 export const LIMIT_STOP = "Stop the run";
 export const LIMIT_MORE = "Continue with more cycles";
@@ -1188,4 +1178,163 @@ export function reconnectingActivity(attempt: number | null, of: number | null, 
 export function thrownText(text: string, code: string | null): string {
   if (code === null || text.includes(code)) return text === "" ? "the call failed without a message" : text;
   return text === "" ? code : `${text} (${code})`;
+}
+
+// ---- the one presentation of a question (S5–S8, issues #46, #57, #59) -----------------------------------------------
+
+/** The heading of every question the user is asked: its number in the run, one sequence whatever produced it (issue #46). */
+export function questionTitle(n: number): string {
+  return `Question ${n}`;
+}
+/** The note beside a context paragraph that the program wrote itself (S7, S10). */
+export const CONTEXT_BY_PROGRAM = "written by Interloq";
+/** The heading of the explanations of terms in the terminal (decision Q6). */
+export const TERMS_HEADING = "Terms:";
+const agentWords = (agent: "claude" | "codex"): string => (agent === "claude" ? "Claude Code, the coding agent," : "Codex, the reviewing agent,");
+/**
+ * Where a question came from, in ordinary words (S5): the subdued line under its heading. A question inside decision k
+ * says that it belongs to the analysis the user asked for, and why it is asked (issue #57).
+ */
+export function originLine(origin: QuestionOrigin, decision: number | null): string {
+  const within =
+    decision === null
+      ? ""
+      : ` This question belongs to Decision ${decision}, the analysis you asked for with "${HELP_ME_DECIDE}": Claude Code cannot work out the arguments for and against an option whose meaning is undetermined, so it asks you first. The analysis follows once you have answered.`;
+  return `${originText(origin)}.${within}`;
+}
+const originText = (origin: QuestionOrigin): string => {
+  switch (origin.kind) {
+    case "clarification":
+      return "One of the questions Claude Code and Codex agreed to ask you before the plan is written";
+    case "followUp":
+      return "A further question Claude Code asks you while it clarifies the task";
+    case "reply":
+      return "Claude Code, the planning agent, waits for your reply while it clarifies the task";
+    case "startOrTalk":
+      return "Asked before the plan is written";
+    case "confirmSummary":
+      return "Asked at the end of the clarification of the task";
+    case "planner":
+      return `Asked by Claude Code, the planning agent, during ${origin.heading}`;
+    case "relayed":
+      return "Asked by Claude Code, the coding agent, while it carries out the plan";
+    case "execStop":
+      return "Claude Code, the coding agent, has stopped carrying out the plan";
+    case "permission":
+      return "Claude Code, the coding agent, asks for permission while it carries out the plan";
+    case "pause":
+      return origin.pause === "unexplained" || origin.pause === "identical" || origin.pause === "idle"
+        ? `Asked because the review in ${origin.heading} is not making progress`
+        : `Asked because Claude Code and Codex disagree during ${origin.heading}`;
+    case "limit":
+      return `Asked because ${origin.heading} has used all its rounds of review`;
+    case "unchanged":
+      return `Asked because Claude Code accepted points of the review in ${origin.heading} but did not change the file`;
+    case "transport":
+      return `Asked because ${origin.agent === "claude" ? "Claude Code" : "Codex"} could not be reached`;
+  }
+};
+
+/** The subject of a decision in user-decisions.md and conversation.md, records the agents read: the ids, never the displayed number. */
+export function recordSubject(origin: QuestionOrigin, question: string): string {
+  const text = question.replace(/\s+/g, " ");
+  switch (origin.kind) {
+    case "pause":
+      return pauseSubject(origin);
+    case "planner":
+    case "relayed":
+      return `question from Claude Code: ${text}`;
+    case "clarification":
+    case "followUp":
+      return `question ${origin.id}: ${text}`;
+    default:
+      return text;
+  }
+}
+const pauseSubject = (p: PauseOrigin): string => {
+  switch (p.pause) {
+    case "reraised":
+      return `issue ${p.id}, raised again after Claude Code did not accept it in full`;
+    case "secondClarification":
+      return `issue ${p.id}, for which one clarification exchange did not produce a disposition`;
+    case "disputedSelfCorrection":
+      return `the accepted correction for ${p.id}, which Claude Code now considers wrong`;
+    case "reversal":
+      return `issue ${p.id} against the accepted correction for ${p.reverses}`;
+    case "repeatedUnderNewId":
+      return `issue ${p.id}, a repetition of issue ${p.repeats}`;
+    case "unexplained":
+      return unexplainedChangeSubject(p.fileLabel, p.heading, p.round);
+    case "identical":
+      return alternatingSubject(p.fileLabel);
+    case "idle":
+      return idleSubject(p.idle);
+  }
+};
+
+/** The question a pause of behaviour 7 asks, its interrogative sentence last (issue #34). */
+export function pauseQuestion(p: PauseOrigin): string {
+  switch (p.pause) {
+    case "reraised":
+    case "secondClarification":
+    case "reversal":
+    case "repeatedUnderNewId":
+      return "Codex has raised a point that Claude Code does not accept in full. Should Codex's position or Claude Code's position stand?";
+    case "disputedSelfCorrection":
+      return "Claude Code now considers wrong a correction it made earlier for a point that Codex raised. Should the correction stand, as Codex asked, or be withdrawn, as Claude Code now holds?";
+    case "unexplained":
+      return `${p.fileLabel} changed, although Claude Code accepted no point of the review and corrected nothing of its own. What should happen to the change?`;
+    case "identical":
+      return `${p.fileLabel} has returned to a version it had before, so the review alternates between two versions. Which of the two versions is correct?`;
+    case "idle":
+      return `Claude Code has accepted no point of the review for ${p.idle} rounds in a row. What should Claude Code and Codex do about the points that led to no change?`;
+  }
+}
+/** The question after an empty agreed question list (behaviour 2). */
+export const START_OR_TALK_QUESTION = "Claude Code and Codex agree that no question needs to be put to you before the plan is written. Do you want planning to start now, or do you first want to tell Claude Code more about the task?";
+/** The question of a clarification turn that asks no particular question: its context is Claude Code's message. */
+export const REPLY_QUESTION = "What do you want to reply to Claude Code?";
+/** The question of the summary's confirmation. */
+export const CONFIRM_SUMMARY_QUESTION = "Claude Code has written this summary of the requirements from the clarification. Does it state the requirements correctly?";
+/** The question at a stop of an execution phase whose report carried no question the user was asked. */
+export function execStopQuestion(description: string): string {
+  const said = description.trim() === "" ? "Claude Code gave no description of why it stopped." : `Claude Code says: ${description.trim()}`;
+  return `${said} What should Claude Code know or do when the plan is revised?`;
+}
+
+/**
+ * The fixed context paragraph of a question the program composes (S7, S10): the components, what they do, where they
+ * are, when they act and why, filled in with the facts of the case; shown as written by the program.
+ */
+export function fallbackContext(origin: QuestionOrigin): string {
+  const interloq = "Interloq, the orchestrator that runs this task, starts two AI agents in this project and passes their work between them: Claude Code, the planning and coding agent, writes the plan and carries it out, and Codex, the reviewing agent, checks each document and the finished work.";
+  switch (origin.kind) {
+    case "clarification":
+    case "followUp":
+      return `${interloq} Before the plan is written, Claude Code asks you questions in a conversation, so that the plan follows your decisions and not its own assumptions.`;
+    case "reply":
+      return `${interloq} Before the plan is written, Claude Code clarifies the task with you in a conversation.`;
+    case "startOrTalk":
+      return `${interloq} Before the plan is written, Claude Code proposed the questions it needed answered, and Codex checked that list; the list is empty. You can add information in a conversation first, so that the plan takes it into account.`;
+    case "confirmSummary":
+      return `${interloq} At the end of the clarification, Claude Code writes a summary of your answers, the requirements document, which Codex then checks and from which the plan is written. Your confirmation makes it the record the plan must follow.`;
+    case "planner":
+      return `${interloq} While Claude Code writes or revises a document during ${origin.heading}, it may find a decision that only you can make. It asks you here rather than deciding on an assumption, so that the plan follows your choice.`;
+    case "relayed":
+      return `${interloq} While Claude Code carries out the plan, changing the project's files, it may need a decision it cannot take on its own. It stops and asks you, and the plan is revised and reviewed with your answer before the work continues.`;
+    case "execStop":
+      return `${interloq} Claude Code stopped carrying out the plan before it was finished (status: ${origin.status}). What you write here is recorded and given to Claude Code, which revises the plan with it; Codex reviews the revision before the work continues.`;
+    case "permission":
+      return `${interloq} While Claude Code carries out the plan, it asks before it uses a tool that Interloq's permission settings do not allow on their own: here ${origin.tool}. If you allow it, the tool runs in this project; if not, Claude Code is told so and continues without it. The question protects the project from an action you did not intend.`;
+    case "pause":
+      return origin.pause === "unexplained" || origin.pause === "identical" || origin.pause === "idle"
+        ? `${interloq} During ${origin.heading}, Codex reviews a document in rounds and Claude Code answers each point and amends the document. When the rounds stop making progress, Interloq halts the review and asks you how to continue, so that the agents do not go round in circles at your cost.`
+        : `${interloq} During ${origin.heading}, Codex reviews a document in rounds, and Claude Code accepts, rejects or questions each point it raises. When the two keep disagreeing about a point, Interloq stops the review and asks you to settle it, so that the document follows your judgment rather than whichever agent insists longer.`;
+    case "limit":
+      return `${interloq} During ${origin.heading}, Codex reviews a document in rounds until it raises no further point; the configuration allows ${origin.limit} rounds. They are used up without agreement, so Interloq asks you whether to continue, accept the document as it is, or stop, because further rounds take time and cost money.`;
+    case "unchanged":
+      return `${interloq} During ${origin.heading}, Claude Code accepted points ${origin.accepted.join(", ")} of Codex's review but did not change ${origin.fileLabel}, the file under review, even after being told so. Interloq asks you how to continue, because an accepted point that changes nothing would otherwise be reviewed again and again.`;
+    case "transport":
+      return `${interloq} Every call to an agent goes over the network. ${agentWords(origin.agent)} could not be reached for ${origin.what} after ${origin.attempts} attempts; the last error was: ${origin.fault}. Interloq waited and tried again automatically. It now asks you whether to try again or stop the run; the run's records are kept either way.`;
+  }
 }

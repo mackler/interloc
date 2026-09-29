@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { RunError } from "../src/errors.ts";
 import { describe } from "../src/errors.ts";
-import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, type Transition } from "../src/reviewState.ts";
+import { advance, initialState, type ReviewCommand, type ReviewEvent, type ReviewSetup, type ReviewState, subjectOf, type Transition } from "../src/reviewState.ts";
 import type { LogEntry } from "../src/schema.ts";
 import { issue, respond } from "./helpers.ts";
 import * as prompts from "../src/prompts.ts";
+
+/** The record's subject of a decision the loop asks (S7): composed from what it asks by the one function. */
+const askedSubject = (c: ReviewCommand, state: ReviewState): string => {
+  assert.equal(c.kind, "AskDecision");
+  return c.kind === "AskDecision" ? subjectOf(state.setup.heading, c.asks) : "";
+};
 
 // Finding 13 (and 14, 15) of docs/functional-design-review.md; decision Q7: the review loop as a pure
 // state machine. The scenario tests of test/run.test.ts remain the behavioural specification; these
@@ -62,10 +68,11 @@ test("a counted review saves the review, reports the count, and asks about each 
   assert.match(says(t), /raised again/);
   assert.deepEqual(last(t), {
     kind: "AskDecision",
-    subject: "issue A, raised again after Claude Code did not accept it in full",
+    asks: { kind: "pause", pause: { pause: "reraised", id: "A" } },
     id: "A",
     options: [{ label: prompts.REVIEWER_POSITION, description: "p e" }, { label: prompts.PLANNER_POSITION, description: "r" }],
   });
+  assert.equal(askedSubject(last(t), t.state), "issue A, raised again after Claude Code did not accept it in full");
   const kept = advance(t.state, { kind: "DecisionGiven", text: "keep the rejection" });
   assert.equal(kept.commands[0].kind, "RecordDecision");
   assert.deepEqual(last(kept), { kind: "CallPlanner", round: 1 });
@@ -113,7 +120,7 @@ test("the pauses ask in the decided order and a decision leads to ApplyDecisions
   const subjects: string[] = [];
   let step = t;
   while (last(step).kind === "AskDecision") {
-    subjects.push((last(step) as { subject: string }).subject);
+    subjects.push(askedSubject(last(step), step.state));
     step = advance(step.state, { kind: "DecisionGiven", text: subjects.length === 1 ? "answer" : "" });
   }
   assert.deepEqual(subjects.map((s) => s.split(",")[0].split(" against")[0]), ["issue A", "the accepted correction for C", "issue B", "issue N", "question from Claude Code: Which?"]);
@@ -126,7 +133,7 @@ test("the pauses ask in the decided order and a decision leads to ApplyDecisions
 test("an unexplained change asks; no decision leads on, a decision applies and observes again", () => {
   const t = run(afterReview(), response([["A", "rejected"]]), { kind: "FileObserved", hash: "h1", text: "" });
   assert.match(says(t), /changed in cycle 1 without an accepted issue/);
-  assert.match((last(t) as { subject: string }).subject, /^the unexplained change to plan\.md in Planning phase 1, cycle 1$/);
+  assert.match(askedSubject(last(t), t.state), /^the unexplained change to plan\.md in Planning phase 1, cycle 1$/);
   assert.equal(last(t).kind, "AskDecision");
   const onward = advance(t.state, { kind: "DecisionGiven", text: "" });
   assert.deepEqual(last(onward), { kind: "CallReviewer", round: 2 });
@@ -151,7 +158,7 @@ test("idle rounds: the prompt after maxIdleRounds, a decision applies and is obs
   const t = run(afterReview(), { kind: "ResponseDecoded", response: respond([["A", "rejected"]]), resultText: "", costUsd: null }, { kind: "FileObserved", hash: "h0", text: "" });
   const idle = run(start({ maxIdleRounds: 1 }), { kind: "ReviewDecoded", review: { issues: [issue("A")] } }, response([["A", "rejected"]]), { kind: "FileObserved", hash: "h0", text: "" });
   assert.match(says(idle), /accepted no issue in 1 consecutive cycles\. Issues of cycle 1 without amendment:/);
-  assert.equal((last(idle) as { subject: string }).subject, "the issues of the last 1 cycles that produced no amendment");
+  assert.equal(askedSubject(last(idle), idle.state), "the issues of the last 1 cycles that produced no amendment");
   assert.equal(last(idle).kind, "AskDecision");
   const applied = run(idle, { kind: "DecisionGiven", text: "apply" }, { kind: "DecisionsApplied" });
   assert.deepEqual(last(applied), { kind: "ObserveFile", stage: "decision" });
@@ -492,7 +499,7 @@ test("(g) a corrective reply that turns an accepted issue into a second clarific
   const t = advance(t0.state, corrected([["A", "clarification_requested"]]));
   const asks = t.commands.filter((c) => c.kind === "AskDecision");
   assert.equal(asks.length, 1);
-  assert.match((asks[0] as { subject: string }).subject, /issue A, for which one clarification exchange did not produce a disposition/);
+  assert.match(askedSubject(asks[0], t.state), /issue A, for which one clarification exchange did not produce a disposition/);
 });
 
 test("(h) a pause asked for the first reply is not asked again after the corrective turn", () => {

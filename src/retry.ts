@@ -4,7 +4,8 @@
 import { Duration, Effect, Result } from "effect";
 import { AgentUnreachable, type RunError, type TransportFault } from "./errors.ts";
 import { parseTransportAnswer } from "./input.ts";
-import { askOffering, transportOptions } from "./offer.ts";
+import { askOffering, programContext, type QuestionDraft, transportOptions } from "./offer.ts";
+import type { QuestionOrigin } from "./question.ts";
 import * as prompts from "./prompts.ts";
 import type { Config } from "./schema.ts";
 import { type Decider, RunConfig, Store, Ui } from "./services.ts";
@@ -49,9 +50,9 @@ export const withTransportRetry = <A, E, R>(
         yield* say(prompts.transportRetryLine(agent, retried, delays.length, delay, error.message));
         yield* Effect.sleep(Duration.seconds(delay));
       } else {
-        const question = prompts.transportExhaustedQuestion(agent, what, n, error.message);
-        yield* ui.say(question);
-        const answer = yield* askOffering((p) => ui.ask(p), prompts.transportPrompt, { question, options: transportOptions() }, Effect.void, (a) => parseTransportAnswer(a) !== null);
+        const origin: QuestionOrigin = { kind: "transport", agent, what, attempts: n, fault: error.message };
+        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.transportExhaustedQuestion(agent, what, n, error.message), options: transportOptions(), decision: null };
+        const answer = yield* askOffering((p) => ui.ask(p), prompts.transportPrompt, draft, (a) => parseTransportAnswer(a) !== null);
         const choice = parseTransportAnswer(answer) ?? "stop";
         yield* store.converse(prompts.transportDecisionLine(choice, agent, what));
         if (choice === "stop") return yield* Effect.fail(new AgentUnreachable({ agent, attempts: n, lastFault: error.message }));

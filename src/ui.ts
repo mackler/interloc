@@ -3,12 +3,12 @@
 // a single line is sent with Enter, and for several lines the user types """ on a line by itself,
 // then the text, then """ again; the message "/quit" ends the run.
 
-import { Effect, Layer, type Scope, Semaphore } from "effect";
+import { Effect, Layer, Ref, type Scope, Semaphore } from "effect";
 import * as readline from "node:readline";
 import { UserStopped } from "./errors.ts";
 import { emptyFold, foldLine, parseAskLine, parseMessage } from "./input.ts";
 import { interviewHelp } from "./prompts.ts";
-import { analysisLines, claudeLine } from "./render.ts";
+import { analysisLines, claudeLine, questionLines } from "./render.ts";
 import { viewOf } from "./analysisView.ts";
 import { describeEvent } from "./uiEvents.ts";
 import { Ui as UiService, type UiShape } from "./services.ts";
@@ -33,6 +33,7 @@ export const terminalUi = (
     );
     rl.on("SIGINT", onInterrupt);
     const dialogue = yield* Semaphore.make(1);
+    const questions = yield* Ref.make(0);
     const lines: string[] = [];
     let waiting: ((line: string | null) => void) | null = null;
     let ended = false;
@@ -79,6 +80,9 @@ export const terminalUi = (
           case "AgentReconnecting":
           case "TransportRecovered":
             return Effect.sync(() => void output.write(describeEvent(event) + "\n"));
+          // S8: every question the user must answer, in the one shape, before the hint of its prompt.
+          case "QuestionPresented":
+            return Effect.sync(() => void output.write(questionLines(event.question).join("\n") + "\n"));
           case "DecisionAnalyzed":
             // Decision support: the terminal shows each option's arguments one after another.
             return Effect.sync(() => void output.write(analysisLines(event.decision, event.question, viewOf(event.analysis)).join("\n") + "\n"));
@@ -86,6 +90,7 @@ export const terminalUi = (
             return Effect.void;
         }
       },
+      nextQuestion: Ref.updateAndGet(questions, (n) => n + 1),
       ask: (prompt) =>
         Effect.gen(function* () {
           yield* showPrompt(prompt);
@@ -108,12 +113,3 @@ export const terminalUi = (
 /** The Ui service on the process streams. */
 export const terminalUiLayer = (input: NodeJS.ReadableStream = process.stdin, output: NodeJS.WritableStream = process.stdout): Layer.Layer<UiService> =>
   Layer.effect(UiService, terminalUi(input, output));
-
-/** Asks again until the answer is not empty. `ask` is a Ui's `ask` or `askMessage`. */
-export const askNonEmpty = <E, R>(ask: (prompt: string) => Effect.Effect<string, E, R>, prompt: string): Effect.Effect<string, E, R> =>
-  Effect.gen(function* () {
-    for (;;) {
-      const text = yield* ask(prompt);
-      if (text !== "") return text;
-    }
-  });

@@ -64,3 +64,64 @@ export const validateQuestions = (questions: readonly Readonly<{ where: string; 
   const failing = questions.map(({ where, question }) => ({ where, problems: questionProblems(question) })).filter((q) => q.problems.length > 0);
   return failing.length === 0 ? Result.succeed(undefined) : Result.fail(new QuestionInvalid({ questions: failing }));
 };
+
+// ---- the one presentation of a question (S5, issues #46 and #57) ------------------------------------------------------
+
+/** The pause of behaviour 7 that asks the question, with the ids and names it concerns (S5, S11). */
+export type PauseOrigin =
+  | Readonly<{ pause: "reraised"; id: string }>
+  | Readonly<{ pause: "secondClarification"; id: string }>
+  | Readonly<{ pause: "disputedSelfCorrection"; id: string }>
+  | Readonly<{ pause: "reversal"; id: string; reverses: string }>
+  | Readonly<{ pause: "repeatedUnderNewId"; id: string; repeats: string }>
+  | Readonly<{ pause: "unexplained"; fileLabel: string; heading: string; round: number }>
+  | Readonly<{ pause: "identical"; fileLabel: string }>
+  | Readonly<{ pause: "idle"; idle: number }>;
+
+/**
+ * What produced a question (S5): where it arose in the run, with what the record and the origin line need to name it.
+ * A question inside decision k carries k in `PresentedQuestion.decision`, whatever its origin (issue #57).
+ */
+export type QuestionOrigin =
+  /** An agreed question of the clarification, or a question asked there that is not in the list (a follow-up, an accepted requirements issue). */
+  | Readonly<{ kind: "clarification"; id: string }>
+  | Readonly<{ kind: "followUp"; id: string }>
+  /** A turn of the clarification that asks no particular question: the user replies to Claude Code's message. */
+  | Readonly<{ kind: "reply" }>
+  /** The choice after an empty agreed list: start planning, or talk first. */
+  | Readonly<{ kind: "startOrTalk" }>
+  /** The confirmation of the summary of a clarification. */
+  | Readonly<{ kind: "confirmSummary" }>
+  /** A question Claude Code returns with a plan it writes or revises, or with a response to a review (`heading` names where). */
+  | Readonly<{ kind: "planner"; heading: string }>
+  /** A question Claude Code asks while implementing the plan. */
+  | Readonly<{ kind: "relayed" }>
+  /** An implementation that stopped without a question the user was asked. */
+  | Readonly<{ kind: "execStop"; phase: number; status: string }>
+  /** A permission request of Claude Code while implementing the plan. */
+  | Readonly<{ kind: "permission"; tool: string; input: string }>
+  | (Readonly<{ kind: "pause"; heading: string }> & PauseOrigin)
+  | Readonly<{ kind: "limit"; heading: string; limit: number }>
+  | Readonly<{ kind: "unchanged"; heading: string; fileLabel: string; accepted: readonly string[] }>
+  | Readonly<{ kind: "transport"; agent: "claude" | "codex"; what: string; attempts: number; fault: string }>;
+
+/** The exact text that chooses an option, or any whole number the user types (the more cycles at the cycle limit, S8). */
+export type OptionAnswer = Readonly<{ token: string }> | Readonly<{ numeric: true }>;
+export type PresentedOption = Readonly<{ label: string; description: string; answer: OptionAnswer }>;
+/** Who wrote the context paragraph: an agent, or the program (a fixed paragraph, S7 and S10). */
+export type QuestionContextText = Readonly<{ text: string; by: "agent" | "program" }>;
+
+/**
+ * A question as the user is shown it (S5), the same shape whatever produced it: its number in the run, where it came
+ * from, the context paragraph, the terms and their explanations, the question and the options that answer it, and the
+ * decision it belongs to (issue #57), or null.
+ */
+export type PresentedQuestion = Readonly<{
+  number: number;
+  origin: QuestionOrigin;
+  context: QuestionContextText;
+  terms: readonly Term[];
+  question: string;
+  options: readonly PresentedOption[];
+  decision: number | null;
+}>;

@@ -5,13 +5,14 @@ import { Effect, Exit, Option } from "effect";
 import { describe, type RunError } from "./errors.ts";
 import { executionSteps } from "./planSteps.ts";
 import { questionPhase } from "./interview.ts";
-import { execInputPrompt, executePrompt, implementationBeganLine, implementationEndedLine, initialPlanPrompt, planningBeganLine, planNotEndedLine, workReviewBeganLine, revisePlanAfterExecutionPrompt, type WorkReviewEnd } from "./prompts.ts";
-import { applyDecisions, askDecision, planningCall, reviewLoop } from "./review.ts";
+import { execInputPrompt, execStopQuestion, executePrompt, implementationBeganLine, implementationEndedLine, initialPlanPrompt, planningBeganLine, planNotEndedLine, workReviewBeganLine, revisePlanAfterExecutionPrompt, type WorkReviewEnd } from "./prompts.ts";
+import { applyDecisions, askPlannerQuestion, planningCall, reviewLoop } from "./review.ts";
+import { askOffering, programContext } from "./offer.ts";
+import type { QuestionOrigin } from "./question.ts";
 import * as S from "./schema.ts";
 import { Decider, Planner, RunConfig, type Services, Store, Ui } from "./services.ts";
 import { countOfKind, foreseenPhases, type Phase, phaseName } from "./uiEvents.ts";
 import { planField, planSubject, planValidation, savePlan, workSubject } from "./subjects.ts";
-import { askNonEmpty } from "./ui.ts";
 
 /** The whole run. Succeeds with the number of execution phases when Claude Code reports 'finished' and the work review converges. */
 export const run = (task: string): Effect.Effect<number, RunError, Services> =>
@@ -56,8 +57,7 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
 
         let answered = false;
         for (const question of written.output.questions_for_user) {
-          yield* ui.say("");
-          if ((yield* askDecision(`question from Claude Code: ${question.question.replace(/\s+/g, " ")}`, k, 0, question.options)) !== "") answered = true;
+          if ((yield* askPlannerQuestion(question, label("planning", k), k, 0)) !== "") answered = true;
         }
         if (answered) yield* applyDecisions(subject);
 
@@ -88,9 +88,9 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
         if (stopped) {
           // A stop is handled as before the work review existed: its input is recorded first.
           yield* ui.say(`Remaining work: ${outcome.remainingWork || "not reported"}`);
-          const input =
-            outcome.userInput ??
-            (yield* ui.say(`Question or description: ${outcome.question}`).pipe(Effect.andThen(askNonEmpty((p) => ui.ask(p), execInputPrompt))));
+          const origin: QuestionOrigin = { kind: "execStop", phase: k, status: outcome.status };
+          const draft = { origin, context: programContext(origin), terms: [], question: execStopQuestion(outcome.question), options: [], decision: null };
+          const input = outcome.userInput ?? (yield* askOffering((p) => ui.ask(p), execInputPrompt, draft, (a) => a !== ""));
           const question = outcome.question.replace(/\s+/g, " ");
           yield* store.appendDecision({ subject: `stop in execution phase ${k} (${outcome.status}): ${question}`, id: null, decision: input, phase: k, round: 0 });
         }

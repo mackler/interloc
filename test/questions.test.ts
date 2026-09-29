@@ -1,9 +1,10 @@
+import * as prompts from "../src/prompts.ts";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { test } from "node:test";
 import type * as S from "../src/schema.ts";
-import { finished, issue, respond, runTask, tempRepo, testLayer } from "./helpers.ts";
+import { finished, issue, respond, runTask, tempRepo, testLayer, presentedQuestions, presentedSubjects } from "./helpers.ts";
 
 type QuestionEntry = typeof S.QuestionEntry.Type;
 type InterviewTurn = typeof S.InterviewTurn.Type;
@@ -69,7 +70,7 @@ test("an empty agreed list offers the conversation; Enter starts planning", asyn
     config: withQuestions,
   });
   await runTask(layer);
-  assert.match(probe.ui.asked[0], /no question is needed/);
+  assert.match(presentedSubjects(probe.ui)[0], /no question needs to be put to you/);
   assert.match(read(probe.dir, "requirements.md"), /No question was needed/);
   assert.equal(probe.reviewer.phases, 3); // question, plan and work review: no requirements review without a conversation
 });
@@ -159,7 +160,7 @@ test("a gap accepted but the confirmed summary unchanged: the pause, and Retry h
   });
   await runTask(layer);
   assert.equal(read(probe.dir, "requirements.md"), "Q1: A\nRetries: 3\n");
-  assert.ok(probe.ui.asked.some((p) => /r = retry; p = proceed/.test(p)), "the pause was not asked");
+  assert.ok(probe.ui.asked.some((p) => p.endsWith(prompts.unchangedPrompt)), "the pause was not asked");
   assert.equal(probe.planner.prompts.some((p) => /did not change during your response/.test(p)), false, "a corrective turn was taken");
 });
 

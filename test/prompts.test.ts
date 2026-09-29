@@ -130,12 +130,14 @@ test("an action not sent because the page is no longer connected, with the answe
 });
 
 // Issue #14: the user reads "cycle", never "round", at the limit; the agents' prompts and the records keep "round".
-test("the cycle limit's prompts, in the terminal and in the page, speak of cycles", () => {
-  const limit = prompts.limitPrompt(5, "proceed to implementation with the plan as it is");
-  assert.equal(limit, "5 cycles completed without convergence. Number = additional cycles; p = proceed to implementation with the plan as it is; 0 = stop > ");
-  assert.equal(prompts.limitNoProceedPrompt(2), "2 cycles completed without convergence. Number = additional cycles; 0 = stop > ");
-  assert.equal(prompts.pagePromptText("limit", limit), "5 cycles completed without convergence. Add cycles, proceed without convergence, or stop.");
-  assert.equal(prompts.pagePromptText("limitNoProceed", prompts.limitNoProceedPrompt(2)), "2 cycles completed without convergence. Add cycles or stop.");
+// S8: the counts are in the question (limitQuestion), the hint says only how to answer.
+test("the cycle limit's question and hints, in the terminal and in the page, speak of cycles", () => {
+  assert.equal(prompts.limitQuestion("Planning phase 1", 5), "Planning phase 1 has completed 5 cycles without convergence. How should the run continue?");
+  assert.match(prompts.limitPrompt, /more cycles/);
+  assert.match(prompts.limitNoProceedPrompt, /more cycles/);
+  assert.doesNotMatch(prompts.limitPrompt + prompts.limitNoProceedPrompt, /round/);
+  assert.equal(prompts.pagePromptText("limit", prompts.limitPrompt), "Proceed without convergence, add cycles, or stop the run.");
+  assert.equal(prompts.pagePromptText("limitNoProceed", prompts.limitNoProceedPrompt), "Add cycles, or stop the run.");
 });
 
 test("the status lines of the phases name Gather Requirements and Implementation", () => {
@@ -272,8 +274,8 @@ test("the offer's label reads Help me decide, and the terminal's offer line carr
   assert.ok(prompts.OFFER_LINE.includes(`/decide = ${prompts.HELP_ME_DECIDE}:`), prompts.OFFER_LINE);
 });
 
-// Issue #35 (Q5, Q6): the ids the question list and interview prompts assign are the ids questionHeading expands.
-test("the ids the prompts assign to agreed and follow-up questions are the ids the decision header writes out", () => {
+// Issue #35 (Q5, Q6): the ids the question list and interview prompts assign. S6: the user reads the run's number, not the id.
+test("the ids the prompts assign to agreed and follow-up questions", () => {
   const agreed = `${prompts.AGREED_QUESTION_PREFIX}1, ${prompts.AGREED_QUESTION_PREFIX}2, and so on`;
   assert.ok(prompts.questionListPrompt("t").includes(`id: ${agreed}`), "the question list prompt assigns other ids");
   const rules = [prompts.interviewOpenPrompt, prompts.interviewOpenEmptyPrompt("hello"), prompts.interviewGapsPrompt("f", ["G-R1-1"])];
@@ -281,10 +283,6 @@ test("the ids the prompts assign to agreed and follow-up questions are the ids t
     assert.ok(text.includes(`${prompts.FOLLOW_UP_PREFIX}1, ${prompts.FOLLOW_UP_PREFIX}2, …`), "the interview rules assign other follow-up ids");
     assert.match(text, /current_question: the question this message asks the user to answer now: its id and its text alone/);
   }
-  assert.equal(prompts.questionHeading(`${prompts.AGREED_QUESTION_PREFIX}4`, "Should you see it?"), "Question 4: Should you see it?");
-  assert.equal(prompts.questionHeading(`${prompts.FOLLOW_UP_PREFIX}2`, "And then?"), "Follow-up question 2: And then?");
-  // An issue id of a second interview, an empty id, and look-alikes: the text alone.
-  for (const id of ["G-R1-1", "", "Q-R1-1", "Q4a", "F", "q4"]) assert.equal(prompts.questionHeading(id, "Which?"), "Which?", id);
 });
 
 // Issue #35: the prompts of a decision follow the amended docs/decision-making.md ("Also,", both headings and the

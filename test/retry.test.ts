@@ -132,18 +132,19 @@ test("Help me decide at the exhaustion pause runs a decision and asks again", as
 });
 
 // The seams of the pause: the page's buttons, the terminal's parser and decision support's options, from one source.
-test("every button of the exhaustion pause sends the answer its label names, and exactly one option matches it", () => {
+// S8: the pause's options are its cards, each sending the answer it shows; the widget adds only the offer and the quit.
+test("every option of the exhaustion pause sends the answer its label names, and exactly one option matches it", () => {
   const intended = { [prompts.TRANSPORT_RETRY_AGAIN]: "retry", [prompts.TRANSPORT_STOP]: "stop" } as const;
   const widget = promptOf(prompts.withOffer(prompts.transportPrompt));
   assert.equal(widget.kind, "transport");
-  const buttons = widget.choices.filter((c) => c.sends !== "q" && c.sends !== DECIDE);
-  assert.deepEqual(buttons.map((c) => c.label), [prompts.TRANSPORT_RETRY_AGAIN, prompts.TRANSPORT_STOP]);
+  assert.deepEqual(widget.choices.filter((c) => c.sends !== "q" && c.sends !== DECIDE), []);
   assert.ok(widget.choices.some((c) => c.label === prompts.HELP_ME_DECIDE && c.sends === DECIDE), "the pause carries no offer");
   const options = transportOptions();
-  assert.deepEqual(options.map((o) => o.label), buttons.map((c) => c.label));
-  for (const button of buttons) {
-    assert.equal(parseTransportAnswer(button.sends), intended[button.label as keyof typeof intended]);
-    assert.deepEqual(options.filter((o) => o.matches(button.sends)).map((o) => o.label), [button.label]);
+  assert.deepEqual(options.map((o) => o.label), [prompts.TRANSPORT_RETRY_AGAIN, prompts.TRANSPORT_STOP]);
+  for (const option of options) {
+    const sends = "token" in option.answer ? option.answer.token : "";
+    assert.equal(parseTransportAnswer(sends), intended[option.label as keyof typeof intended]);
+    assert.deepEqual(options.filter((o) => o.matches(sends)).map((o) => o.label), [option.label]);
   }
   for (const answer of ["", " ", "x", "2", "p"]) assert.equal(parseTransportAnswer(answer), null, answer);
 });

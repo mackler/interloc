@@ -4,10 +4,10 @@
 import type { SubjectId } from "../../src/artifacts.ts";
 import type { Asked, ServerMessage, Stamped } from "../../src/protocol.ts";
 import { clarificationProgress, cycleHeading, reconnectingActivity, retryActivity, cycleLine, interviewHelp, pagePromptText, progressLine, purposeLabel, stepLabel, stepOfPhase, planWrittenHeading, protocolErrorNotice, SERVER_CLOSED_NOTICE, SUMMARY_PROPOSED_HEADING } from "../../src/prompts.ts";
-import { interviewSays, optionLines, relayedQuestionMarkdown, relayedQuestionSays, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
+import { interviewSays, questionMarkdown, renderResponse, renderReview, subjectHeading } from "../../src/render.ts";
 import { correctionCount } from "../../src/issueLog.ts";
 import { countOfKind, type LoopResult, type Phase, phaseName, type StepReport, type UiEvent } from "../../src/uiEvents.ts";
-import { type Choice, numberedChoices } from "../../src/userPrompts.ts";
+import type { Choice } from "../../src/userPrompts.ts";
 import type { RecordedPlan, RecordedStep, StepStatus } from "../../src/schema.ts";
 
 export type Author = "program" | "user" | "codex" | "claude";
@@ -112,10 +112,9 @@ export type RunView = Readonly<{
   retry: Readonly<{ agent: "claude" | "codex"; text: string }> | null;
   timeline: readonly TimelineEntry[];
   ended: number | null;
-  /** Internal to the fold: the terminal lines of the last interview turn or relayed question still to absorb, and the options of the last relayed question and interview message. */
+  /** Internal to the fold: the terminal lines of the last interview turn still to absorb, and the options of the last question presented (S5). */
   absorb: readonly string[];
   questionOptions: readonly Choice[];
-  interviewChoices: readonly Choice[];
   /** The band of the phase the next message belongs to (issue #15): set when a phase begins, kept until the next one. */
   phase: Band | null;
   /** The last time each panel displays, a message's or a band label's: what the next message's time is measured from. */
@@ -177,7 +176,6 @@ export const emptyRun = (id: number): RunView => ({
   ended: null,
   absorb: [],
   questionOptions: [],
-  interviewChoices: [],
   phase: null,
   lastShown: { left: null, right: null },
   analysis: null,
@@ -451,7 +449,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       // Issue #21: the turn's count is the active clarification step's.
       const count = { answered: event.answered, total: event.total };
       const timeline = inQuestionPhase(run.timeline, (steps) => steps.map((st) => (st.state === "active" && st.kind !== "formulate" ? { ...st, count: plus(st.base, count) } : st)));
-      return { ...withLeft({ ...run, timeline }, message(run, time, "claude", body, "markdown", event.heading)), absorb: interviewSays(turn), interviewChoices: numberedChoices(event.message) };
+      return { ...withLeft({ ...run, timeline }, message(run, time, "claude", body, "markdown", event.heading)), absorb: interviewSays(turn) };
     }
     case "InterviewOpened": {
       // Issue #21: the step before ends, and the clarification opens as a step with its total.
@@ -472,13 +470,6 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       // The page's own help (finding 8): no terminal """ convention, which the page does not implement.
       return withLeft({ ...run, timeline }, message(run, time, "program", interviewHelp(event.heading, "page"), "text"));
     }
-    case "QuestionAsked":
-      // Issue #7: a relayed question is Claude's Markdown message; the terminal's lines of it that follow are absorbed.
-      return {
-        ...withLeft(run, message(run, time, "claude", relayedQuestionMarkdown(event), "markdown")),
-        absorb: relayedQuestionSays(event),
-        questionOptions: event.options.map((o, i) => ({ label: o.label, sends: String(i + 1) })),
-      };
     case "AgentCallStarted": {
       const label = `${AGENT[event.agent]} — ${purposeLabel(event.purpose)}`;
       return { ...run, calls: [...run.calls, { agent: event.agent, purpose: event.purpose, label, startedAt: time }], activity: run.retry === null || run.retry.agent !== event.agent ? label : `${label} — ${run.retry.text}`, busy: true };
@@ -507,9 +498,12 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
     }
     case "ExecutionEnded":
       return run;
-    case "OptionsPresented":
-      // The options of the next pause or plan writer's question are its cards; their terminal lines are absorbed.
-      return { ...run, absorb: optionLines(event.options), questionOptions: event.options.map((o, i) => ({ label: o.description === "" ? o.label : `${o.label} — ${o.description}`, sends: String(i + 1) })) };
+    case "QuestionPresented":
+      // S5: every question in the one shape; its options with an exact answer are the next prompt's cards.
+      return {
+        ...withLeft(run, message(run, time, "program", questionMarkdown(event.question), "markdown")),
+        questionOptions: event.question.options.flatMap((o) => ("token" in o.answer ? [{ label: o.description === "" ? o.label : `${o.label} — ${o.description}`, sends: o.answer.token }] : [])),
+      };
     case "DecisionAnalyzed":
       return { ...run, analysis: { event, prompt: null } };
     case "AnswerRejected":
@@ -545,7 +539,7 @@ export const foldEvent = (run: RunView, { time, event }: Stamped): RunView => {
       case "Said":
         return event.text.trim() === "" ? r : withLeft(r, message(r, time, "program", event.text, "text"));
       case "Asked": {
-        const extra = event.extra === "questionOptions" ? r.questionOptions : event.extra === "numberedAnswers" ? r.interviewChoices : [];
+        const extra = r.questionOptions;
         // Presented options belong to this prompt alone (P1-R1-2); an analysis waiting for its prompt gets this one.
         const analysis = r.analysis !== null && r.analysis.prompt === null ? { ...r.analysis, prompt: event.prompt } : r.analysis;
         return { ...withLeft(r, message(r, time, "program", pagePromptText(event.kind, event.text), "text")), pending: { asked: event, options: extra, choices: event.choices }, questionOptions: [], analysis, dismissed: null };

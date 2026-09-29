@@ -3,6 +3,7 @@
 
 import { type SubjectId, subjectDir } from "./artifacts.ts";
 import { agentReconnectingLine, cycleHeading, phaseLabel, transportRecoveredLine, transportRetryLine } from "./prompts.ts";
+import type { PresentedQuestion } from "./question.ts";
 import type { DecisionAnalysis, DecisionResponse, ExecOutcome, PlannerResponse, PlanResponse, QuestionListResponse, RecordedPlan, Review, UserQuestion } from "./schema.ts";
 
 /** A phase of the run as the progress display names it. */
@@ -34,15 +35,17 @@ export type UiEvent =
   | Readonly<{ _tag: "TransportRetrying"; agent: Agent; attempt: number; of: number; delaySeconds: number; fault: string }>
   /** A call succeeded after a retry. */
   | Readonly<{ _tag: "TransportRecovered"; agent: Agent }>
-  | Readonly<{ _tag: "QuestionAsked"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
   /** `answered` of `total` questions so far (issue #21): the agreed ones and the follow-ups Claude reports asking. */
   | Readonly<{ _tag: "InterviewTurn"; heading: string; message: string; summary: string | null; answered: number; total: number }>
   /** The interview begins; each interface renders its own help (finding 8 of docs/gui-review.md). */
   | Readonly<{ _tag: "InterviewOpened"; heading: string; stage: InterviewStage; total: number }>
   /** Claude Code's prose during an execution call, attributed as data (issue #5); the terminal prefixes it with "[claude] ". */
   | Readonly<{ _tag: "ClaudeSaid"; text: string }>
-  /** The options of the next prompt (a pause, a plan writer's question): the page shows them as cards (decision support). */
-  | Readonly<{ _tag: "OptionsPresented"; question: string; options: readonly Readonly<{ label: string; description: string }>[] }>
+  /**
+   * A question the user is to answer, presented the same way whatever produced it (S5): the terminal prints it
+   * (`questionLines` in src/render.ts) and the page shows it with its options. The prompt that asks it follows.
+   */
+  | Readonly<{ _tag: "QuestionPresented"; question: PresentedQuestion }>
   /** A decision loop has ended: its analysis, shown before the question is asked again (decision support). */
   | Readonly<{ _tag: "DecisionAnalyzed"; decision: number; question: string; options: readonly Readonly<{ label: string; description: string }>[]; analysis: DecisionAnalysis }>
   /** The last answer was rejected (a blank reply where one is required) and the question is asked again (W3-R1-1); for the page. */
@@ -103,16 +106,14 @@ export const describeEvent = (event: UiEvent): string => {
       return transportRetryLine(event.agent, event.attempt, event.of, event.delaySeconds, event.fault);
     case "TransportRecovered":
       return transportRecoveredLine(event.agent);
-    case "QuestionAsked":
-      return `question: ${event.question} (${plural(event.options.length, "option")})`;
     case "InterviewTurn":
       return `${event.heading} (${event.answered} of ${event.total} answered): ${event.message}`;
     case "InterviewOpened":
       return `${event.heading} opened, ${plural(event.total, "question")}`;
     case "ClaudeSaid":
       return `Claude Code said: ${event.text}`;
-    case "OptionsPresented":
-      return `options: ${event.question} (${plural(event.options.length, "option")})`;
+    case "QuestionPresented":
+      return `question ${event.question.number}: ${event.question.question} (${plural(event.question.options.length, "option")})`;
     case "DecisionAnalyzed":
       return `decision ${event.decision} analyzed: ${event.question} (${plural(event.analysis.columns.length, "column")})`;
     case "AnswerRejected":

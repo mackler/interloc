@@ -6,7 +6,6 @@ import { test } from "node:test";
 import type { CanUseTool, HookCallback, HookJSONOutput, Options, PermissionResult, PreToolUseHookInput, SDKMessage } from "@anthropic-ai/claude-agent-sdk";
 import { Effect, Fiber, Layer } from "effect";
 import { makeClaudePlanner, toSdkAnswers } from "../src/claude.ts";
-import { relayedQuestionSays } from "../src/render.ts";
 import { FileSystemError, type RunError } from "../src/errors.ts";
 import { agentJsonSchema } from "../src/jsonSchema.ts";
 import * as prompts from "../src/prompts.ts";
@@ -428,7 +427,7 @@ test("two questions with identical text are answered separately; the later answe
 });
 
 // Plan step 1.7 (decision Q5): the adapter reports its activity; the terminal keeps its lines for the interview only.
-const activity = (ui: ScriptedUi) => ui.notified.filter((e) => e._tag === "AgentCallStarted" || e._tag === "ToolUsed" || e._tag === "AgentCallEnded" || e._tag === "QuestionAsked");
+const activity = (ui: ScriptedUi) => ui.notified.filter((e) => e._tag === "AgentCallStarted" || e._tag === "ToolUsed" || e._tag === "AgentCallEnded" || e._tag === "QuestionPresented");
 
 test("a planning call notifies its start, every tool use other than StructuredOutput, and its end", async () => {
   const fake = await planner([messages(init(), assistantTool("Read", { file_path: "/x" }), assistantTool("Grep", { pattern: "foo" }), assistantTool("StructuredOutput", {}), success({ questions_for_user: [] }))]);
@@ -489,11 +488,16 @@ test("a relayed question is notified with its options before the user is asked",
   })();
   const fake = await planner([script], ["2"]);
   await run(fake.planner.planning("write the plan", schema, "planning"));
-  assert.deepEqual(activity(fake.ui).filter((e) => e._tag === "QuestionAsked"), [{ _tag: "QuestionAsked", question: "A or B?", options: questions[0].options }]);
+  const presented = activity(fake.ui).filter((e) => e._tag === "QuestionPresented");
+  assert.equal(presented.length, 1);
+  const q = presented[0]._tag === "QuestionPresented" ? presented[0].question : null;
+  assert.equal(q?.question, "A or B?");
+  assert.deepEqual(q?.origin, { kind: "relayed" });
+  assert.deepEqual(q?.options, [{ label: "A", description: "a", answer: { token: "1" } }, { label: "B", description: "b", answer: { token: "2" } }]);
 });
 
-// Issue #7: the terminal's lines of a relayed question are the ones the page absorbs after the QuestionAsked event.
-test("a relayed question says exactly the lines of relayedQuestionSays, right after its QuestionAsked event", async () => {
+// S8: the terminal prints a relayed question from its QuestionPresented event, so the adapter says none of its lines.
+test("a relayed question says no line of its own: it is presented as an event", async () => {
   const questions = [{ question: "A or B?", options: [{ label: "A", description: "a" }, { label: "B", description: "b" }] }];
   const script: Script = (call) => (async function* () {
     yield init();
@@ -502,9 +506,7 @@ test("a relayed question says exactly the lines of relayedQuestionSays, right af
   })();
   const fake = await planner([script], ["2"]);
   await run(fake.planner.planning("write the plan", schema, "planning"));
-  const lines = fake.ui.said.filter((l) => !l.startsWith("Claude Code model: "));
-  assert.deepEqual(lines, ["\nQuestion from Claude Code: A or B?", "  1. A - a", "  2. B - b"]);
-  assert.deepEqual(relayedQuestionSays(questions[0]), lines);
+  assert.deepEqual(fake.ui.said.filter((l) => !l.startsWith("Claude Code model: ")), []);
 });
 
 test("an execution call notifies its start with the purpose execution", async () => {
@@ -573,7 +575,7 @@ test("a relayed question with options offers Help me decide, presents the questi
   await run(fake.planner.planning("write the plan", schema), decider);
   assert.deepEqual(requests, [{ question: "A or B?", options: questions[0].options }]);
   assert.ok(fake.ui.asked.every((a) => a.startsWith(prompts.OFFER_LINE)));
-  assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionAsked").length, 2, "the question is presented again after the analysis");
+  assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionPresented").length, 2, "the question is presented again after the analysis");
   assert.ok(fake.ui.notified.some((e) => e._tag === "DecisionAnalyzed"));
   assert.deepEqual(relayed[0], { behavior: "allow", updatedInput: { questions, answers: { "A or B?": "B" } } });
   assert.equal(JSON.parse(fs.readFileSync(path.join(fake.dir, "decision-1", "chosen.json"), "utf8")).option, "B");
@@ -623,7 +625,7 @@ test("a blank answer to a relayed question presents it again before the retry, w
     })();
     const fake = await planner([script], ["", "1"]);
     await run(fake.planner.planning("write the plan", schema));
-    assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionAsked").length, 2, `${options.length} option(s)`);
+    assert.equal(fake.ui.notified.filter((e) => e._tag === "QuestionPresented").length, 2, `${options.length} option(s)`);
   }
 });
 

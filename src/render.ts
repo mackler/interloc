@@ -3,7 +3,8 @@
 
 import type { SubjectId } from "./artifacts.ts";
 import type { AnalysisView, EntryView } from "./analysisView.ts";
-import { decisionViewHeading, OPPOSES_MARKER, optionHeading, recommendedOption } from "./prompts.ts";
+import { CONTEXT_BY_PROGRAM, decisionViewHeading, OPPOSES_MARKER, optionHeading, originLine, questionTitle, recommendedOption, TERMS_HEADING } from "./prompts.ts";
+import type { PresentedOption, PresentedQuestion, QuestionOrigin } from "./question.ts";
 import type { PlannerResponse, Review } from "./schema.ts";
 import type { DecisionEvent } from "./reviewState.ts";
 import type { TurnText } from "./schemaNormalize.ts";
@@ -54,14 +55,6 @@ export function renderQuestions(list: RenderableQuestions): string {
 export const interviewSays = (turn: TurnText): readonly string[] =>
   turn.kind === "summary_proposed" ? [`\n${turn.message}\n`, `Summary proposed by Claude Code:\n\n${turn.summary}\n`] : [`\n${turn.message}\n`];
 
-/** A question Claude Code relays to the user, with its options. */
-export type RelayedQuestion = Readonly<{ question: string; options: readonly Readonly<{ label: string; description: string }>[] }>;
-/** The terminal lines of a relayed question, in order; the page shows the question once and absorbs these lines (issue #7). */
-export const relayedQuestionSays = (q: RelayedQuestion): readonly string[] => [`\nQuestion from Claude Code: ${q.question}`, ...q.options.map((o, i) => `  ${i + 1}. ${o.label} - ${o.description}`)];
-/** A relayed question as the page shows it: Markdown, as Claude's message (issue #7). */
-export const relayedQuestionMarkdown = (q: RelayedQuestion): string =>
-  q.options.length === 0 ? q.question : `${q.question}\n\n${q.options.map((o, i) => `${i + 1}. **${o.label}**${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}`;
-
 /** Claude Code's prose as the terminal prints it (issue #5): the prefix is the terminal's only attribution. */
 export const claudeLine = (text: string): string => `[claude] ${text}`;
 
@@ -106,10 +99,6 @@ export const renderPlanRenumbered = (): string => "**Plan renumbered:** the stag
 /** The user's answer after decision k (decision Q4), in conversation.md. */
 export const renderChoice = (k: number, answer: string, option: string | null): string =>
   `**User choice** after decision ${k}: ${answer === "" ? "(none)" : answer}${option === null ? "" : ` (${option})`}\n\n`;
-/** The terminal lines of options presented with a question: one per option, numbered from 1. */
-export const optionLines = (options: readonly Readonly<{ label: string; description: string }>[]): readonly string[] =>
-  options.map((o, i) => `  ${i + 1}. ${o.label}${o.description === "" ? "" : ` - ${o.description}`}`);
-
 /**
  * A decision's analysis as the terminal prints it (decision support): the options one after another, each with the
  * heading "Advantages:", its labeled advantages ("Advantage 1:"), the heading "Disadvantages:" and its labeled
@@ -138,4 +127,50 @@ export const analysisLines = (k: number, question: string, view: AnalysisView): 
   ]);
   const recommendation = view.recommendation === null ? [] : [recommendedOption(view.recommendation.option), view.recommendation.reason];
   return ["", decisionViewHeading(k, question), "", ...columns, ...recommendation];
+};
+
+// ---- the one presentation of a question (S8) --------------------------------------------------------------------------
+
+/** How an option is chosen in the terminal: its exact answer, or a number the user types (the more cycles, S8). */
+export const optionLine = (o: PresentedOption): string => {
+  const description = o.description === "" ? "" : ` — ${o.description}`;
+  return "token" in o.answer ? `  ${o.answer.token}. ${o.label}${description}` : `  ${o.label} (type the number)${description}`;
+};
+const indented = (text: string, by: string): readonly string[] => text.split("\n").map((line) => (line.trim() === "" ? "" : `${by}${line}`));
+/**
+ * A question as the terminal prints it (S8), the same shape whatever produced it: the heading with its number and the
+ * line saying where it came from; the context paragraph, indented and set apart, marked when the program wrote it; the
+ * terms with their explanations (decision Q6); the question itself, not indented, so that it reads apart from the
+ * context; and the options, each with the answer that chooses it.
+ */
+export const questionLines = (q: PresentedQuestion): readonly string[] => [
+  "",
+  questionTitle(q.number),
+  ...indented(originLine(q.origin, q.decision), "  "),
+  "",
+  ...indented(q.context.by === "program" ? `${q.context.text} (${CONTEXT_BY_PROGRAM})` : q.context.text, "    "),
+  ...(q.terms.length === 0 ? [] : ["", `    ${TERMS_HEADING}`, ...q.terms.flatMap((t) => indented(`${t.term}: ${t.explanation}`, "      "))]),
+  "",
+  ...q.question.split("\n"),
+  ...(q.options.length === 0 ? [] : ["", ...q.options.map(optionLine)]),
+  "",
+];
+
+/** The id by which a record names the question (S6): an agreed question's, a follow-up's, an issue's; null for the others. */
+export const recordIdOf = (origin: QuestionOrigin): string | null =>
+  origin.kind === "clarification" || origin.kind === "followUp" ? origin.id : origin.kind === "pause" && "id" in origin ? origin.id : null;
+/** A question in conversation.md (S6): under its displayed number, with the record's id beside it, so that the two can be matched. */
+export const renderQuestionRecord = (q: PresentedQuestion): string => {
+  const id = recordIdOf(q.origin);
+  const terms = q.terms.length === 0 ? "" : `**${TERMS_HEADING}**\n\n${q.terms.map((t) => `- ${t.term}: ${t.explanation}`).join("\n")}\n\n`;
+  const options = q.options.length === 0 ? "" : `${q.options.map((o) => `- ${"token" in o.answer ? `${o.answer.token}. ` : ""}${o.label}${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}\n\n`;
+  const context = q.context.text.trim() === "" ? "" : `${q.context.text.split("\n").map((l) => `> ${l}`).join("\n")}${q.context.by === "program" ? ` (${CONTEXT_BY_PROGRAM})` : ""}\n\n`;
+  return `### ${questionTitle(q.number)}${id === null ? "" : ` (${id})`}\n\n_${originLine(q.origin, q.decision)}_\n\n${context}${terms}**${q.question}**\n\n${options}`;
+};
+/** A question as the page shows it in the conversation (S8): the same parts as the terminal's, in Markdown. */
+export const questionMarkdown = (q: PresentedQuestion): string => {
+  const context = q.context.text.trim() === "" ? "" : `${q.context.text}${q.context.by === "program" ? ` _(${CONTEXT_BY_PROGRAM})_` : ""}\n\n`;
+  const terms = q.terms.length === 0 ? "" : `${TERMS_HEADING}\n\n${q.terms.map((t) => `- **${t.term}**: ${t.explanation}`).join("\n")}\n\n`;
+  const options = q.options.length === 0 ? "" : `\n\n${q.options.map((o) => `- ${"token" in o.answer ? `${o.answer.token}. ` : ""}**${o.label}**${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}`;
+  return `**${questionTitle(q.number)}** · _${originLine(q.origin, q.decision)}_\n\n${context}${terms}**${q.question}**${options}`;
 };

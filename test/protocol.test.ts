@@ -32,6 +32,32 @@ const questionEntry = fc.record({ id: text, context: text, question: text, reaso
 // Defect A of docs/page-question-phase-defects.md: the question subject's response carries the amended list too.
 const response = fc.oneof(plannerResponse, fc.tuple(plannerResponse, fc.array(questionEntry, { maxLength: 2 })).map(([r, questions]) => ({ ...r, questions })));
 const outcome = fc.record({ status: fc.constantFrom("finished" as const, "needs_input" as const, "blocked" as const, "aborted" as const), summary: text, question: text, remainingWork: text, userInput: fc.option(text, { nil: null }) });
+// S5: a question as the user is shown it, with every kind of origin and both kinds of answer.
+const origin = fc.oneof(
+  fc.record({ kind: fc.constantFrom("clarification" as const, "followUp" as const), id: text }),
+  fc.record({ kind: fc.constantFrom("reply" as const, "startOrTalk" as const, "confirmSummary" as const, "relayed" as const) }),
+  fc.record({ kind: fc.constant("planner" as const), heading: text }),
+  fc.record({ kind: fc.constant("execStop" as const), phase: nat, status: text }),
+  fc.record({ kind: fc.constant("permission" as const), tool: text, input: text }),
+  fc.record({ kind: fc.constant("pause" as const), heading: text, pause: fc.constantFrom("reraised" as const, "secondClarification" as const, "disputedSelfCorrection" as const), id: text }),
+  fc.record({ kind: fc.constant("pause" as const), heading: text, pause: fc.constant("reversal" as const), id: text, reverses: text }),
+  fc.record({ kind: fc.constant("pause" as const), heading: text, pause: fc.constant("repeatedUnderNewId" as const), id: text, repeats: text }),
+  fc.record({ kind: fc.constant("pause" as const), heading: text, pause: fc.constant("unexplained" as const), fileLabel: text, round: nat }),
+  fc.record({ kind: fc.constant("pause" as const), heading: text, pause: fc.constant("identical" as const), fileLabel: text }),
+  fc.record({ kind: fc.constant("pause" as const), heading: text, pause: fc.constant("idle" as const), idle: nat }),
+  fc.record({ kind: fc.constant("limit" as const), heading: text, limit: nat }),
+  fc.record({ kind: fc.constant("unchanged" as const), heading: text, fileLabel: text, accepted: fc.array(text, { maxLength: 2 }) }),
+  fc.record({ kind: fc.constant("transport" as const), agent, what: text, attempts: nat, fault: text }),
+);
+const presentedQuestion = fc.record({
+  number: nat,
+  origin,
+  context: fc.record({ text, by: fc.constantFrom("agent" as const, "program" as const) }),
+  terms: fc.array(fc.record({ term: text, explanation: text }), { maxLength: 2 }),
+  question: text,
+  options: fc.array(fc.record({ label: text, description: text, answer: fc.oneof(fc.record({ token: text }), fc.constant({ numeric: true as const })) }), { maxLength: 3 }),
+  decision: fc.option(nat, { nil: null }),
+});
 const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   phase.map((p) => ({ _tag: "PhaseBegan" as const, phase: p })),
   fc.record({ _tag: fc.constant("PhaseEnded" as const), phase, result: text }),
@@ -44,7 +70,6 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("AgentCallStarted" as const), agent, purpose: text }),
   fc.record({ _tag: fc.constant("ToolUsed" as const), agent, tool: text, target: text }),
   fc.record({ _tag: fc.constant("AgentCallEnded" as const), agent, ok: fc.boolean() }),
-  fc.record({ _tag: fc.constant("QuestionAsked" as const), question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }) }),
   fc.record({ _tag: fc.constant("InterviewTurn" as const), heading: text, message: text, summary: fc.option(text, { nil: null }), answered: nat, total: nat }),
   fc.record({ _tag: fc.constant("InterviewOpened" as const), heading: text, stage: fc.constantFrom("clarification" as const, "followUp" as const, "conversation" as const), total: nat }),
   fc.record({ _tag: fc.constant("ClaudeSaid" as const), text }),
@@ -69,7 +94,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
     // Issue #53: the report that caused it, or null.
     step: fc.option(fc.record({ id: text, status: fc.constantFrom("started" as const, "done" as const) }), { nil: null }),
   }),
-  fc.record({ _tag: fc.constant("OptionsPresented" as const), question: text, options: fc.array(fc.record({ label: text, description: text }), { maxLength: 3 }) }),
+  fc.record({ _tag: fc.constant("QuestionPresented" as const), question: presentedQuestion }),
   fc.record({
     _tag: fc.constant("DecisionAnalyzed" as const),
     decision: nat,
@@ -78,7 +103,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
     analysis: fc.record({ decision: text, columns: fc.array(fc.oneof(fc.record({ kind: fc.constant("argued" as const), option: text, advantages: fc.constant([]), disadvantages: fc.constant([]) }), fc.record({ kind: fc.constant("unclear" as const), option: text, unclear: text })), { maxLength: 2 }), recommendation: fc.record({ option: text, reason: text }) }),
   }),
 );
-const promptTexts = [prompts.decisionPrompt("x"), prompts.limitPrompt(3, "go"), prompts.permissionPrompt, prompts.interviewMessagePrompt, "unknown > "];
+const promptTexts = [prompts.decisionPrompt, prompts.limitPrompt, prompts.permissionPrompt, prompts.interviewMessagePrompt, "unknown > "];
 const runEvent: fc.Arbitrary<RunEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("Started" as const), project: text, task: text }),
   fc.record({ _tag: fc.constant("Said" as const), text }),

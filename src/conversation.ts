@@ -8,11 +8,25 @@ import * as prompts from "./prompts.ts";
 import { interviewSays, recordHeading } from "./render.ts";
 import { planningCall } from "./review.ts";
 import * as S from "./schema.ts";
-import { clarificationCount, normalizeTurn } from "./schemaNormalize.ts";
+import { clarificationCount, normalizeTurn, type TurnVariant } from "./schemaNormalize.ts";
 import { type Services, Store, Ui } from "./services.ts";
-import { askOffering, numberedOptions } from "./offer.ts";
+import { agentContext, askOffering, numberedOptions, type QuestionDraft } from "./offer.ts";
+import type { QuestionOrigin } from "./question.ts";
 import { numberedOptionLabels } from "./userPrompts.ts";
 import type { InterviewStage } from "./uiEvents.ts";
+
+/**
+ * The question an interview turn asks (S7): the question it names now, with its context, terms and options, as an
+ * agreed question or a follow-up; a turn that names none asks for the user's reply to its message, which is then the
+ * context. Options the turn does not give are read from its message's numbered answers (W2-R1-2).
+ */
+export const turnDraft = (turn: TurnVariant, agreed: readonly string[]): QuestionDraft => {
+  const current = turn.current;
+  if (current.text.trim() === "") return { origin: { kind: "reply" }, context: { text: turn.message, by: "agent" }, terms: [], question: prompts.REPLY_QUESTION, options: numberedOptions(numberedOptionLabels(turn.message)), decision: null };
+  const origin: QuestionOrigin = agreed.includes(current.id) ? { kind: "clarification", id: current.id } : { kind: "followUp", id: current.id };
+  const options = current.options.length > 0 ? current.options : numberedOptionLabels(turn.message);
+  return { origin, context: agentContext(current.context, origin), terms: current.terms, question: current.text, options: numberedOptions(options), decision: null };
+};
 
 /**
  * A conversation between the user and Claude Code in the program's terminal. It ends when Claude Code
@@ -30,14 +44,17 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
     let prompt = opening;
     for (;;) {
       const turn = normalizeTurn((yield* planningCall(prompt, S.InterviewTurn, "interview")).output);
-      const [messageLine, ...summaryLines] = interviewSays(turn);
+      const [messageLine] = interviewSays(turn);
       yield* ui.notify({ _tag: "InterviewTurn", heading, message: turn.message, summary: turn.kind === "summary_proposed" ? turn.summary : null, ...clarificationCount(agreed, turn.asked, turn.answered) });
       yield* ui.say(messageLine);
       yield* store.converse(`**Claude Code:** ${turn.message}\n\n`);
 
       if (turn.kind === "summary_proposed") {
-        for (const line of summaryLines) yield* ui.say(line);
-        const reply = parseInterviewMessage(yield* ui.askMessage(prompts.confirmSummaryPrompt));
+        // S7: the summary is read beside the question that confirms it, after the program's paragraph.
+        const origin: QuestionOrigin = { kind: "confirmSummary" };
+        const context = { text: `${prompts.fallbackContext(origin)}\n\n${turn.summary.trim()}`, by: "program" as const };
+        const draft: QuestionDraft = { origin, context, terms: [], question: prompts.CONFIRM_SUMMARY_QUESTION, options: [], decision: null };
+        const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.confirmSummaryPrompt, draft));
         if (reply.kind !== "text") {
           yield* store.writeRequirements(turn.summary.trimEnd() + "\n");
           yield* store.converse(`**User:** confirmed the summary.\n\n### Confirmed summary\n\n${turn.summary}\n\n`);
@@ -48,14 +65,8 @@ export const interview = (opening: string, stage: InterviewStage, agreed: readon
         continue;
       }
 
-      // The turn's numbered answers are its options (decision support); the page keeps them from the InterviewTurn event.
-      // Their labels are the answers without the number, so that an answer by label chooses its option (W2-R1-2).
-      const options = numberedOptionLabels(turn.message);
-      // Issue #35 (Q5, Q6): the decision names the question the message asks now, not the whole message.
-      const asked = turn.current.text.trim() === "" ? turn.message : prompts.questionHeading(turn.current.id, turn.current.text);
-      const question = { question: asked, options: numberedOptions(options) };
       // A blank message is asked again inside the offer, so that it is never recorded as the choice (W1-R1-1).
-      const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.interviewMessagePrompt, question, Effect.void, (m) => m !== ""));
+      const reply = parseInterviewMessage(yield* askOffering((m) => ui.askMessage(m), prompts.interviewMessagePrompt, turnDraft(turn, agreed), (m) => m !== ""));
       if (reply.kind === "empty") continue;
       yield* store.converse(`**User:** ${reply.kind === "done" ? "/done" : reply.text}\n\n`);
       prompt = reply.kind === "done" ? prompts.interviewDonePrompt : prompts.interviewUserMessage(reply.text);

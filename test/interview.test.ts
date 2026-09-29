@@ -5,7 +5,7 @@ import { test } from "node:test";
 import type * as S from "../src/schema.ts";
 import * as prompts from "../src/prompts.ts";
 import { numberedOptionLabels } from "../src/userPrompts.ts";
-import { finished, runFails, runTask, tempRepo, testLayer } from "./helpers.ts";
+import { finished, runFails, runTask, tempRepo, testLayer, presentedQuestions, presentedSubjects } from "./helpers.ts";
 import { NUMBERED_MESSAGE } from "./interviewFixture.ts";
 
 // Step 4.6 (finding 8; Q4): the interview matches on turn variants, and the question list is normalised.
@@ -92,9 +92,11 @@ test("the question phase notifies its beginning and end and every interview turn
   assert.deepEqual(probe.ui.notified.find((e) => e._tag === "InterviewOpened"), { _tag: "InterviewOpened", heading: "Conversation before planning", stage: "conversation", total: 0 });
   assert.ok(probe.ui.notified.some((e) => e._tag === "PhaseEnded" && e.phase.kind === "questions"));
   assert.ok(tags.indexOf("PhaseEnded") < tags.lastIndexOf("PhaseBegan"), "the question phase ends before planning begins");
-  // The terminal lines of the turns are unchanged.
+  // The terminal line of a turn is unchanged; S7: the summary is shown in the context of the question that confirms it.
   assert.ok(probe.ui.said.includes("\nAnything to add?\n"));
-  assert.ok(probe.ui.said.includes("Summary proposed by Claude Code:\n\n# Requirements\n\nNone.\n"));
+  const confirm = presentedQuestions(probe.ui).find((q) => q.origin.kind === "confirmSummary");
+  assert.match(confirm?.context.text ?? "", /# Requirements\n\nNone\./);
+  assert.equal(confirm?.question, prompts.CONFIRM_SUMMARY_QUESTION);
 });
 
 // Finding 8 of docs/gui-review.md: the interview's opening help is a structured event, rendered per interface.
@@ -209,7 +211,8 @@ test("Help me decide on an interview turn names the current question, Question <
     config: { questionPhase: true },
   });
   await runTask(layer);
-  const expected = "Question 4: Should you also see that a response left the file unchanged?";
+  // S5: the number is the run's (in the question's heading), not part of the decision's question.
+  const expected = "Should you also see that a response left the file unchanged?";
   assert.equal(JSON.parse(read(probe.dir, "decision-1/question.json")).question, expected);
   const analyzed = probe.ui.notified.find((e) => e._tag === "DecisionAnalyzed");
   assert.equal(analyzed?._tag === "DecisionAnalyzed" ? analyzed.question : null, expected);

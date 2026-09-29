@@ -267,18 +267,18 @@ describe("PromptWidget", () => {
     expect(fixed[0].classList.contains("filled")).toBe(false);
     fixed[0].click();
     expect(sent).toEqual(["/decide"]);
-    const decision = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.decisionPrompt("issue A"))), onAnswer: () => undefined });
+    const decision = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.decisionPrompt)), onAnswer: () => undefined });
     expect([...decision.querySelectorAll<HTMLButtonElement>(".choices button")].map((b) => `${b.textContent?.trim()}:${b.classList.contains("filled") ? "filled" : b.classList.contains("tonal") ? "tonal" : "outlined"}`)).toEqual(["No decision:filled", `${prompts.HELP_ME_DECIDE}:tonal`, "Quit:outlined"]);
   });
 
   test("a prompt without options has no group of cards", () => {
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: () => undefined });
+    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: () => undefined });
     expect(optionsGroup(root)).toBe(null);
   });
 
   test("a choice sends its catalog text on one click; typed text is sent with Enter", () => {
     const sent: [number, string][] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: (p: number, t: string) => void sent.push([p, t]) });
+    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: (p: number, t: string) => void sent.push([p, t]) });
     const buttons = [...root.querySelectorAll(".choices button")].map((b) => b.textContent?.trim());
     expect(buttons).toEqual(["No decision", "Quit"]);
     (root.querySelectorAll(".choices button")[0] as HTMLButtonElement).click();
@@ -307,7 +307,7 @@ describe("PromptWidget", () => {
   };
   test("Enter while an input method is composing sends nothing, on the line field and the message field", () => {
     const sent: string[] = [];
-    const line = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const line = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const input = one(line, "input[name=answer]") as HTMLInputElement;
     type(input, "unfinished composition");
     key(input, { isComposing: true });
@@ -324,7 +324,7 @@ describe("PromptWidget", () => {
 
   test("a Send button sends the field's text and is disabled while the field is empty; the field keeps its label", () => {
     const sent: string[] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const send = one(root, "button[name=send]") as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     type(one(root, "input[name=answer]") as HTMLInputElement, "keep it");
@@ -342,7 +342,7 @@ describe("PromptWidget", () => {
   // socket, and nothing typed is cleared.
   test("offline, the choices and Send stay enabled, and sending keeps the field's text; online it clears it", () => {
     const sent: string[] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), offline: true, onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), offline: true, onAnswer: (_p: number, t: string) => void sent.push(t) });
     const input = one(root, "input[name=answer]") as HTMLInputElement;
     type(input, "typed offline");
     const send = one(root, "button[name=send]") as HTMLButtonElement;
@@ -359,7 +359,7 @@ describe("PromptWidget", () => {
     flushSync();
     expect(input.value).toBe("typed offline");
     expect(sent).toEqual(["typed offline", "typed offline", ""]);
-    const online = show(PromptWidget, { widget: widget(prompts.decisionPrompt("issue A")), offline: false, onAnswer: () => undefined });
+    const online = show(PromptWidget, { widget: widget(prompts.decisionPrompt), offline: false, onAnswer: () => undefined });
     const field = one(online, "input[name=answer]") as HTMLInputElement;
     type(field, "sent online");
     field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -558,7 +558,7 @@ describe("App and the draft", () => {
   const started = { _tag: "Started", project: "/p", task: "t" };
   const TIME = "2026-09-27T14:00:00.000Z";
   const stamp = (events: readonly unknown[]) => events.map((event) => ({ time: TIME, event }));
-  const asked = (prompt: number) => ({ _tag: "Asked", prompt, ...promptOf(prompts.decisionPrompt(`issue ${prompt}`)) });
+  const asked = (prompt: number) => ({ _tag: "Asked", prompt, ...promptOf(prompts.decisionPrompt) });
   const openPage = async () => {
     vi.stubGlobal("WebSocket", FakeWebSocket);
     const { default: App } = await import("./components/App.svelte");
