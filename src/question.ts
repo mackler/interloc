@@ -2,7 +2,7 @@
 // src/prompts.ts. Pure; also imported by the browser (the occurrence of a term, which the page marks as validated here).
 import { Result } from "effect";
 import { QuestionInvalid } from "./errors.ts";
-import type { QuestionProblem } from "./prompts.ts";
+import { type QuestionProblem, TERMS_HEADING } from "./prompts.ts";
 import type { Disposition, Issue, LogEntry, QuestionOption, Term } from "./schema.ts";
 
 export type { QuestionOption, Term };
@@ -170,3 +170,27 @@ export type PresentedQuestion = Readonly<{
   details: string;
   decision: number | null;
 }>;
+
+// ---- a question relayed from AskUserQuestion (S13, G-R1-2) -------------------------------------------------------------
+
+/**
+ * The parts of a relayed question's text in the shape RELAYED_SHAPE of src/prompts.ts states: the context (one or more
+ * paragraphs), the terms block when present, and the question, the last paragraph. Null when the text does not have
+ * that shape or its parts break a mechanically checkable rule; the context is then written by a context call (S14).
+ */
+export const parseRelayedQuestion = (text: string, options: readonly QuestionOption[]): Question | null => {
+  const blocks = text.trim().split(/\n[ \t]*\n/).map((b) => b.trim()).filter((b) => b !== "");
+  if (blocks.length < 2) return null;
+  const question = blocks[blocks.length - 1];
+  const before = blocks.slice(0, -1);
+  const at = before.findIndex((b) => b.split("\n")[0].trim() === TERMS_HEADING);
+  const contextBlocks = at < 0 ? before : before.slice(0, at);
+  const termBlocks = at < 0 ? [] : before.slice(at);
+  const lines = termBlocks.join("\n").split("\n").slice(1).map((l) => l.trim()).filter((l) => l !== "");
+  const terms = lines.map((line) => {
+    const colon = line.indexOf(": ");
+    return colon < 0 ? { term: line, explanation: "" } : { term: line.slice(0, colon).trim(), explanation: line.slice(colon + 2).trim() };
+  });
+  const parsed: Question = { context: contextBlocks.join("\n\n"), terms, question, options };
+  return contextBlocks.length === 0 || questionProblems(parsed).length > 0 ? null : parsed;
+};

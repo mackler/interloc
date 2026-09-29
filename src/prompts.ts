@@ -32,6 +32,8 @@ function laterRound(file: string, logFile: string, idPrefix: string, round: numb
 Read both files again and review plan-review/${file} again under the same rules as before. New issues receive ids of the form ${idPrefix}-R${round}-1, ${idPrefix}-R${round}-2, and so on.`;
 }
 
+/** The heading of the explanations of terms: in the terminal (decision Q6) and in a relayed question's text (S13). */
+export const TERMS_HEADING = "Terms:";
 /** One rule for a question put to the user: its id, the writer's imperative, and the reviewer's criterion (S1). */
 export type QuestionRule = Readonly<{ id: string; rule: string; criterion: string }>;
 /**
@@ -371,9 +373,22 @@ Return the complete output again, corrected. Do not modify any file.`;
  * so a step resumed after another was started is reported started again.
  */
 export const resumeStepSentence = `When you resume a step after you have started another, report it with the status '${REPORT_STEP_STATUSES[0]}' again.`;
+/** A relayed question's text as its shape composes it (S13, G-R1-2): the context, the terms block when there are terms, the question. */
+export function relayedQuestionText(parts: Readonly<{ context: string; terms: readonly Readonly<{ term: string; explanation: string }>[]; question: string }>): string {
+  const terms = parts.terms.length === 0 ? [] : [`${TERMS_HEADING}\n${parts.terms.map((t) => `${t.term}: ${t.explanation}`).join("\n")}`];
+  return [parts.context, ...terms, parts.question].join("\n\n");
+}
+/**
+ * The shape of a question Claude Code asks with AskUserQuestion (S13, decision G-R1-2): its context and terms travel in
+ * the question's text, which parseRelayedQuestion in src/question.ts reads; the example is the composer's own output.
+ */
+export const RELAYED_SHAPE = `Write the text of each question you ask with the AskUserQuestion tool in this shape, the parts separated by blank lines: first the context paragraph; then, when the question uses words a reader may not know, a block that begins with the line "${TERMS_HEADING}" and has one line per term, the term in the exact words it has in the text, a colon and its explanation; then the question itself, its interrogative sentence last. For example:
+${relayedQuestionText({ context: "<context>", terms: [{ term: "<term>", explanation: "<explanation>" }], question: "<question>" })}`;
 export const executePrompt = `The plan in plan-review/plan.json has been reviewed. Implement its remaining steps: the steps whose status is 'pending' or 'unfinished'. You may work them in any order, with one step open at a time: report a step done before you start another. Steps with status 'done' are implemented; a step with status 'unfinished' was begun and not completed.
 Report your progress with the tool ${REPORT_STEP_TOOL}: when you begin a step, call it with the step's id and the status '${REPORT_STEP_STATUSES[0]}'; when the step is complete and verified, call it with the step's id and the status '${REPORT_STEP_STATUSES[1]}'. ${resumeStepSentence} The program records the status in plan-review/plan.json; do not edit plan-review/plan.json or plan-review/plan.md, and do not change the plan.
 If you need information or a decision from the user, or if a remaining step proves to be wrong, do not continue on an assumption: ask with the AskUserQuestion tool. After you have asked, make no tool call other than the final structured output; end your turn with status 'needs_input'.
+${RELAYED_SHAPE}
+${questionWritingRules()}
 If you cannot continue for another reason, for example a command that fails and that you cannot correct or a denied permission, stop and return status 'blocked' with the description in the question field.
 When every step is completed and verified, return status 'finished'.
 In every case put a summary of the work done in summary and a description of the steps not yet completed in remaining_work.`;
@@ -1205,8 +1220,6 @@ export function questionTitle(n: number): string {
 }
 /** The note beside a context paragraph that the program wrote itself (S7, S10). */
 export const CONTEXT_BY_PROGRAM = "written by Interloq";
-/** The heading of the explanations of terms in the terminal (decision Q6). */
-export const TERMS_HEADING = "Terms:";
 const agentWords = (agent: "claude" | "codex"): string => (agent === "claude" ? "Claude Code, the coding agent," : "Codex, the reviewing agent,");
 /**
  * Where a question came from, in ordinary words (S5): the subdued line under its heading. A question inside decision k

@@ -82,3 +82,26 @@ test("questionsValidation passes a reply whose questions keep the rules, and fai
   assert.equal(bad.failure.error._tag, "QuestionInvalid");
   assert.equal(bad.failure.repair, prompts.questionRepairPrompt([{ where: "questions_for_user 1", problems: [{ kind: "blankContext", subject: "" }] }]));
 });
+
+// S13 (G-R1-2): a question Claude Code relays through AskUserQuestion carries its context and terms in its text, in the
+// shape executePrompt states; the parser reads what the prompt describes, both from RELAYED_SHAPE of src/prompts.ts.
+test("the relayed shape: executePrompt states it with the rules, and parseRelayedQuestion reads what it states", async () => {
+  const { parseRelayedQuestion } = await import("../src/question.ts");
+  assert.ok(prompts.executePrompt.includes(prompts.RELAYED_SHAPE));
+  assert.ok(prompts.executePrompt.includes(prompts.questionWritingRules()));
+  const parts = { context: good.context, terms: good.terms, question: good.question };
+  const text = prompts.relayedQuestionText(parts);
+  assert.ok(prompts.RELAYED_SHAPE.includes(prompts.relayedQuestionText({ context: "<context>", terms: [{ term: "<term>", explanation: "<explanation>" }], question: "<question>" })), "the prompt's example is the composer's");
+  assert.deepEqual(parseRelayedQuestion(text, good.options), { ...parts, options: good.options });
+  // Without terms the block may be left out; several paragraphs of context stay together.
+  assert.deepEqual(parseRelayedQuestion(`First part.\n\nSecond part.\n\n${good.question}`, [])?.context, "First part.\n\nSecond part.");
+  assert.equal(parseRelayedQuestion(`${good.context}\n\n${good.question}`, good.options)?.terms.length, 0);
+});
+
+test("a relayed text that does not follow the shape or breaks a rule is not read as one", async () => {
+  const { parseRelayedQuestion } = await import("../src/question.ts");
+  assert.equal(parseRelayedQuestion(good.question, good.options), null, "no context");
+  assert.equal(parseRelayedQuestion(`${good.context}\n\nShould zod be declared as a dependency? It is used by the SDK.`, good.options), null, "the question is not last");
+  assert.equal(parseRelayedQuestion(prompts.relayedQuestionText({ context: good.context, terms: [{ term: "Zod", explanation: "a library" }], question: good.question }), good.options), null, "a term that does not occur");
+  assert.equal(parseRelayedQuestion(`${good.context}\n\n${prompts.TERMS_HEADING}\nzod\n\n${good.question}`, good.options), null, "a term without its explanation");
+});
