@@ -57,6 +57,15 @@ RUN printf 'umask 002\n' >> /home/node/.bashrc \
 # command run through it.
 ENV BASH_ENV=/home/node/.bashenv
 
+# The developer's time zone, so that the clock in the container matches his own. TZ is set rather
+# than /etc/localtime bind-mounted, because the two are not equivalent: glibc reads the file, but
+# Node resolves /etc/localtime to a zone *name* and then uses ICU's own data, so a mounted file left
+# `date` on CEST while node reported UTC. A name is what both agree on. Mounting the host's file also
+# landed it on /usr/share/zoneinfo/Etc/UTC, the target the image's symlink resolves to, so `TZ=UTC`
+# then reported Central European time. Interloq's records are unaffected either way: they are written
+# with toISOString(), which is UTC whatever TZ says, and the page formats in the browser's zone.
+ENV TZ=Europe/Prague
+
 ENV CLAUDE_CONFIG_DIR=/home/node/.claude
 ENV DISABLE_AUTOUPDATER=1
 WORKDIR /workspace
