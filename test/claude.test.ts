@@ -697,6 +697,15 @@ test("the execution prompt names report_step and its statuses as the tool define
   assert.doesNotMatch(prompts.executePrompt, /marker/);
 });
 
+// Issue #53 (Q1, G-R1-1): any order, one step open at a time, a resumed step reported started again; nothing is refused.
+test("the execution prompt allows any order with one step open at a time, and asks for a resumed step to be reported again", () => {
+  assert.doesNotMatch(prompts.executePrompt, /in order/);
+  assert.match(prompts.executePrompt, /in any order/);
+  assert.match(prompts.executePrompt, /one step open at a time/);
+  assert.match(prompts.resumeStepSentence, new RegExp(`'${prompts.REPORT_STEP_STATUSES[0]}' again`));
+  assert.ok(prompts.executePrompt.includes(prompts.resumeStepSentence));
+});
+
 // Issue #26: a failed planning call is TransportFault when src/transport.ts says so, ClaudeCallFailed otherwise, and
 // neither reaches the decoding, so neither spends a repair turn.
 const throwing = (error: unknown, before: SDKMessage[] = []): Script => () => (async function* () {

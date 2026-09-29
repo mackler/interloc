@@ -242,8 +242,13 @@ ${PLAN_ID_RULE}
 Return the complete output again, corrected. Do not modify any file.`;
 }
 
-export const executePrompt = `The plan in plan-review/plan.json has been reviewed. Implement its remaining steps in order: the steps whose status is 'pending' or 'unfinished'. Steps with status 'done' are implemented; a step with status 'unfinished' was begun and not completed.
-Report your progress with the tool ${REPORT_STEP_TOOL}: when you begin a step, call it with the step's id and the status '${REPORT_STEP_STATUSES[0]}'; when the step is complete and verified, call it with the step's id and the status '${REPORT_STEP_STATUSES[1]}'. The program records the status in plan-review/plan.json; do not edit plan-review/plan.json or plan-review/plan.md, and do not change the plan.
+/**
+ * What Claude Code is told about a step it resumes (issue #53, G-R1-1): the page marks a step current only on a report,
+ * so a step resumed after another was started is reported started again.
+ */
+export const resumeStepSentence = `When you resume a step after you have started another, report it with the status '${REPORT_STEP_STATUSES[0]}' again.`;
+export const executePrompt = `The plan in plan-review/plan.json has been reviewed. Implement its remaining steps: the steps whose status is 'pending' or 'unfinished'. You may work them in any order, with one step open at a time: report a step done before you start another. Steps with status 'done' are implemented; a step with status 'unfinished' was begun and not completed.
+Report your progress with the tool ${REPORT_STEP_TOOL}: when you begin a step, call it with the step's id and the status '${REPORT_STEP_STATUSES[0]}'; when the step is complete and verified, call it with the step's id and the status '${REPORT_STEP_STATUSES[1]}'. ${resumeStepSentence} The program records the status in plan-review/plan.json; do not edit plan-review/plan.json or plan-review/plan.md, and do not change the plan.
 If you need information or a decision from the user, or if a remaining step proves to be wrong, do not continue on an assumption: ask with the AskUserQuestion tool. After you have asked, make no tool call other than the final structured output; end your turn with status 'needs_input'.
 If you cannot continue for another reason, for example a command that fails and that you cannot correct or a denied permission, stop and return status 'blocked' with the description in the question field.
 When every step is completed and verified, return status 'finished'.
