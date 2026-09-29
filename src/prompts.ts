@@ -1130,6 +1130,14 @@ export function confirmEndText(ending: "endRun" | "stopTask" | "limitStop"): str
       return 'Stop the run at the cycle limit? It halts ("HALTED: stopped by the user at the cycle limit") with exit code 1, and its records in plan-review/ remain.';
   }
 }
+/** The page's confirmation dialog (S25): its headline and the label of the button that confirms. */
+export function confirmEndHeadline(ending: "endRun" | "stopTask" | "limitStop"): string {
+  return ending === "endRun" ? "End the run?" : ending === "stopTask" ? "Stop the task?" : "Stop the run at the cycle limit?";
+}
+export function confirmEndAction(ending: "endRun" | "stopTask" | "limitStop"): string {
+  return ending === "endRun" ? END_RUN_LABEL : ending === "stopTask" ? "Stop task" : "Stop the run";
+}
+export const CANCEL_END = "Cancel";
 /** The terminal's confirmation: the text and how to answer it. */
 export function confirmEndPrompt(ending: "endRun" | "stopTask" | "limitStop"): string {
   return `${confirmEndText(ending)} y = yes; anything else = back to the question > `;

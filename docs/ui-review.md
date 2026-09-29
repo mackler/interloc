@@ -84,3 +84,17 @@ Send and the fixed choices stay in a phone's window. `e2e/layout.spec.ts` (L9) c
 1280 × 800, that each of three paragraph options fits its card, that nothing overflows sideways, that the field,
 Send and End interview are in the window, and that a card chosen with the keyboard sends its number and leaves its
 full line in the transcript. The terminal is unchanged: it never rendered these choices.
+
+## The confirmation before a run ends (issue #25, 29 Sep 2026)
+
+End the run, Stop task and Stop at the cycle limit ended the run on one click or one typed answer, although a run
+cannot be resumed. Every submission that ends the run now opens an M3 `Dialog` first, whether it is a click on the
+button, `q` or `/quit` typed with Enter or Send, or at the cycle limit any answer that stops it (`0`, an empty answer,
+anything that is neither `p` nor a count). The page and the terminal decide by one predicate, `endingOf` in
+`src/input.ts` [consistency and standards]. The dialog says what ends, that the records in `plan-review/` remain, and
+the exit code: 130 for End the run and Stop task, which are interruptions, and 1 for Stop at the cycle limit, which is
+a halt [visibility of system status; error prevention]. Only its confirming button sends the answer or the stop.
+Cancel closes it, keeps the typed text in the field and returns focus to the control [user control and freedom]. The
+run-ending buttons (End the run in the question pane, Stop task in the top bar) and the confirming button use M3's
+error color role, the role of a destructive action. End the run stands apart at the end of the row of choices. Ctrl+C in
+the server's terminal is unchanged and asks nothing.

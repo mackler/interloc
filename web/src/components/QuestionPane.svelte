@@ -12,6 +12,8 @@
   import { Button, Card, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
   import { answerHint, END_RUN_LABEL, HELP_ME_DECIDE, NUMERIC_OPTION_NOTE, originLine, PROGRAM_CONTEXT_NOTE, PROPOSED_ANSWERS_LABEL, questionTitle, SHOW_CONVERSATION, TERMS_HEADING } from "../../../src/prompts.ts";
   import type { Widget } from "../state.ts";
+  import { type Ending, endingOf } from "../../../src/input.ts";
+  import ConfirmEndDialog from "./ConfirmEndDialog.svelte";
   import { render } from "../markdown.ts";
 
   // The typed text is the page's draft of this prompt (../draft.ts, finding 5): App keeps it per (incarnation, run,
@@ -21,11 +23,31 @@
   // typed text is lost; help users recognise and recover: the page's banner and notice say why nothing is sent].
   type Props = { widget: Widget | null; text?: string; offline?: boolean; onAnswer: (prompt: number, text: string) => void; onShowConversation?: () => void };
   let { widget, text = $bindable(""), offline = false, onAnswer, onShowConversation }: Props = $props();
-  const send = (value: string) => {
+  const deliver = (value: string) => {
     if (widget === null) return;
     if (!offline) text = "";
     onAnswer(widget.asked.prompt, value);
   };
+  // S25: a submission that ends the run, clicked or typed, is confirmed first by the one predicate the terminal uses.
+  let confirming = $state<{ value: string; ending: Ending } | null>(null);
+  let returnFocus: HTMLElement | null = null;
+  const send = (value: string) => {
+    if (widget === null) return;
+    const ending = endingOf(widget.asked.kind, widget.asked.mode, value);
+    if (ending === null) return deliver(value);
+    returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    confirming = { value, ending };
+  };
+  const confirm = () => {
+    const value = confirming?.value;
+    confirming = null;
+    if (value !== undefined) deliver(value);
+  };
+  const cancel = () => {
+    confirming = null;
+    returnFocus?.focus();
+  };
+  const endsRunLabel = (label: string, sends: string) => widget !== null && endingOf(widget.asked.kind, widget.asked.mode, sends) !== null && (isQuit(label) || sends !== "");
   const isQuit = (label: string) => label === END_RUN_LABEL;
   // "Help me decide" is an offer beside the answer, never the answer itself: tonal wherever it stands (decision support)
   // [consistency and standards: the filled button stays the program's primary action].
@@ -92,7 +114,12 @@
       {#if question !== null}<p class="asks m3-font-body-small">{widget.hint}</p>{/if}
       <div class="choices">
         {#each widget.choices as choice, i (i)}
-          <Button variant={variantOf(choice.label, i)} type="button" onclick={() => send(choice.sends)}>{choice.label}</Button>
+          {#if endsRunLabel(choice.label, choice.sends)}
+            <!-- A button that ends the run: the error role, set apart from the ordinary choices (S25). -->
+            <span class="ends-run"><Button variant="outlined" type="button" onclick={() => send(choice.sends)}>{choice.label}</Button></span>
+          {:else}
+            <Button variant={variantOf(choice.label, i)} type="button" onclick={() => send(choice.sends)}>{choice.label}</Button>
+          {/if}
         {/each}
       </div>
       {#if widget.asked.free !== "none"}
@@ -110,6 +137,7 @@
       {/if}
     </div>
   </section>
+  <ConfirmEndDialog ending={confirming?.ending ?? null} onConfirm={confirm} onCancel={cancel} />
 {/if}
 
 <style>
@@ -137,6 +165,8 @@
   .numeric { padding: 0.75rem 1rem; border: 1px dashed var(--m3c-outline-variant); border-radius: var(--m3-shape-medium); }
   .asks { margin: 0; color: var(--m3c-on-surface-variant); }
   .choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+  /* The run-ending button stands apart at the end of the row, in the error role (S25). */
+  .ends-run { margin-inline-start: auto; --m3c-primary: var(--m3c-error); --m3c-outline: var(--m3c-error); }
   /* The field has the full width in every window (finding 7); the hint and Send share the row below it. */
   .send-row { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; }
   .hint { margin: 0; color: var(--m3c-on-surface-variant); }

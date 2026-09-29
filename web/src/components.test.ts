@@ -510,6 +510,9 @@ describe("TopBar", () => {
     const stop = one(root, "button[name=stop]") as HTMLButtonElement;
     expect(stop.textContent?.trim()).toBe("Stop task");
     stop.click();
+    flushSync();
+    // S25: Stop task is confirmed first.
+    one(root, "dialog button[name=confirm-end]").click();
     expect(stopped).toEqual([3]);
     expect(root.textContent).toMatch(/connected/);
     const idle = show(TopBar, { run: null, connection: "reconnecting", onStop: () => undefined });
@@ -681,6 +684,8 @@ describe("App and the draft", () => {
     type(field(root), "answer C");
     enter(field(root));
     (one(root, "button[name=stop]") as HTMLButtonElement).click();
+    flushSync();
+    one(root, "dialog button[name=confirm-end]").click();
     flushSync();
     type(field(root), "draft B");
     failThreeTimes();
@@ -1218,4 +1223,94 @@ describe("QuestionPane's regions", () => {
     one(root, "button[name=conversation]").click();
     expect(shown).toBe(1);
   });
+});
+
+// S25 (issue #25): every submission that ends the run, clicked or typed, and Stop task are confirmed in an M3 dialog;
+// only confirming sends it; Cancel keeps the typed text and returns focus. The run-ending buttons use the error role.
+describe("the confirmation before a run ends, in the page", () => {
+  const openDialog = (root: ParentNode) => root.querySelector<HTMLDialogElement>("dialog[open]");
+  const pane = (text: string) => {
+    const sent: string[] = [];
+    const root = show(QuestionPane, { widget: widget(text), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    return { root, sent };
+  };
+  const enter = (el: HTMLElement) => el.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+
+  test("a click on End the run opens the dialog; confirming sends q", () => {
+    const { root, sent } = pane(prompts.decisionPrompt);
+    const end = [...root.querySelectorAll<HTMLButtonElement>(".choices button")].find((b) => b.textContent?.trim() === prompts.END_RUN_LABEL)!;
+    expect(end.closest(".ends-run")).not.toBe(null);
+    end.click();
+    flushSync();
+    expect(sent).toEqual([]);
+    expect(openDialog(root)?.textContent).toContain(prompts.confirmEndText("endRun"));
+    one(root, "dialog button[name=confirm-end]").click();
+    flushSync();
+    expect(sent).toEqual(["q"]);
+  });
+
+  test("typed q with Enter opens the dialog; Cancel sends nothing and keeps the text in the field", () => {
+    const { root, sent } = pane(prompts.decisionPrompt);
+    const input = one(root, "input[name=answer]") as HTMLInputElement;
+    type(input, "q");
+    enter(input);
+    flushSync();
+    expect(openDialog(root)).not.toBe(null);
+    one(root, "dialog button[name=cancel-end]").click();
+    flushSync();
+    expect(sent).toEqual([]);
+    expect(input.value).toBe("q");
+    expect(openDialog(root)).toBe(null);
+  });
+
+  test("typed /quit in a message opens the dialog", () => {
+    const { root, sent } = pane(prompts.interviewMessagePrompt);
+    const field = one(root, "textarea[name=answer]") as HTMLTextAreaElement;
+    type(field, "/quit");
+    enter(field);
+    flushSync();
+    expect(openDialog(root)?.textContent).toContain(prompts.confirmEndText("endRun"));
+    expect(sent).toEqual([]);
+  });
+
+  test("at the cycle limit, 0, an empty submission and an invalid number open the dialog of the halt; a count does not", () => {
+    for (const text of ["0", "", "x"]) {
+      const { root, sent } = pane(prompts.limitPrompt);
+      const input = one(root, "input[name=answer]") as HTMLInputElement;
+      type(input, text);
+      enter(input);
+      flushSync();
+      expect(openDialog(root)?.textContent, text).toContain(prompts.confirmEndText("limitStop"));
+      one(root, "dialog button[name=confirm-end]").click();
+      flushSync();
+      expect(sent).toEqual([text]);
+    }
+    const { root, sent } = pane(prompts.limitPrompt);
+    const input = one(root, "input[name=answer]") as HTMLInputElement;
+    type(input, "3");
+    enter(input);
+    flushSync();
+    expect(openDialog(root)).toBe(null);
+    expect(sent).toEqual(["3"]);
+  });
+
+  test("Stop task opens the dialog; only confirming stops the run", () => {
+    const stopped: number[] = [];
+    const run = { ...emptyRun(3), project: "/p", task: "t" };
+    const root = show(TopBar, { run, connection: "open", onStop: (r: number) => void stopped.push(r) });
+    one(root, "button[name=stop]").click();
+    flushSync();
+    expect(stopped).toEqual([]);
+    expect(openDialog(root)?.textContent).toContain(prompts.confirmEndText("stopTask"));
+    one(root, "dialog button[name=confirm-end]").click();
+    flushSync();
+    expect(stopped).toEqual([3]);
+  });
+});
+
+// S25, the seam: the page and the terminal confirm by the one predicate, endingOf of src/input.ts.
+test("the question pane and the terminal's confirmation both take endingOf from src/input.ts", async () => {
+  const pane = (await import("./components/QuestionPane.svelte?raw")).default;
+  const terminal = (await import("../../src/confirmEnd.ts?raw")).default;
+  for (const source of [pane, terminal]) expect(source).toMatch(/import \{[^}]*\bendingOf\b[^}]*\} from "(\.\.\/\.\.\/\.\.\/src|\.)\/input\.ts"/);
 });
