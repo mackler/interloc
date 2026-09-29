@@ -451,3 +451,24 @@ test("a decision names its phase by the run's count: Planning in a run of one it
   await Effect.runPromise(run("task").pipe(Effect.provide(two.layer)));
   assert.ok(analysisPrompt(two.probe.planner.prompts).includes(expected(2, 2)), analysisPrompt(two.probe.planner.prompts).slice(-600));
 });
+
+// S20 (issue #57): a question Claude Code raises inside decision k (an option it cannot argue from) is presented as
+// belonging to decision k, with the reason it is asked, and still offers Help me decide (behavior 13 unchanged).
+test("a question raised inside a decision says that it belongs to that decision and why, and keeps the offer", async () => {
+  const unclear = { context: "Claude Code, the planning agent, is working out the arguments for the options of Decision 1 now, for your choice.", question: "Option 2 does not say what the agent is told about the order of the steps. Which is meant?", terms: [], options: [{ label: "Any order", description: "the agent is told it may work the steps in any order" }, { label: "In order", description: "the agent is told to work the steps in their order" }] };
+  const withQuestion = { ...decisionResponse([["D1-R1-1", "accepted"]], analysis("second")), questions_for_user: [unclear] };
+  const { layer, probe } = await setUp({
+    answers: ["1"],
+    steps: [{ output: analysis() }, { output: withQuestion }, { output: { analysis: analysis("third") } }],
+    reviews: [{ issues: [issue("D1-R1-1")] }, { issues: [] }],
+  });
+  await Effect.runPromise(loop(layer));
+  const inside = probe.ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : [])).find((q) => q.question === unclear.question);
+  assert.ok(inside !== undefined);
+  assert.equal(inside.decision, 1);
+  assert.deepEqual(inside.origin, { kind: "planner", heading: "Decision 1" });
+  assert.match(prompts.originLine(inside.origin, inside.decision), /belongs to Decision 1, the analysis you asked for/);
+  assert.match(prompts.originLine(inside.origin, inside.decision), /cannot work out the arguments for and against an option whose meaning is undetermined/);
+  assert.ok(probe.ui.asked[0].startsWith(prompts.OFFER_LINE), "the question inside the decision lost the offer");
+  assert.match(fs.readFileSync(path.join(probe.dir, "conversation.md"), "utf8"), /belongs to Decision 1/);
+});
