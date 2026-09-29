@@ -5,13 +5,14 @@ import * as prompts from "../../src/prompts.ts";
 import { promptOf } from "../../src/userPrompts.ts";
 import { viewOf } from "../../src/analysisView.ts";
 import DirectoryDialog from "./components/DirectoryDialog.svelte";
-import PromptWidget from "./components/PromptWidget.svelte";
+import QuestionPane from "./components/QuestionPane.svelte";
 import StartForm from "./components/StartForm.svelte";
 import TimelineRail from "./components/TimelineRail.svelte";
 import CircularIndeterminate from "./components/CircularIndeterminate.svelte";
 import ActivityLine from "./components/ActivityLine.svelte";
 import type { ServerMessage } from "../../src/protocol.ts";
 import type { UiEvent } from "../../src/uiEvents.ts";
+import type { PresentedQuestion } from "../../src/question.ts";
 import TopBar from "./components/TopBar.svelte";
 import MessageView from "./components/Message.svelte";
 import ChatPanel from "./components/ChatPanel.svelte";
@@ -220,12 +221,12 @@ const isCard = (el: Element) =>
 const paragraph = (n: number, topic: string) =>
   `${n}. ${topic}: ${"a sentence long enough to wrap over several lines of any window, with its reason and its consequences, ".repeat(3)}and its end ${n}.`;
 
-describe("PromptWidget", () => {
+describe("QuestionPane", () => {
   test("paragraph-length options are outlined cards with their full text, native buttons that send only the number (issue #12)", () => {
     const sent: string[] = [];
     const options = [1, 2, 3].map((n) => ({ label: paragraph(n, `Answer ${n}`), sends: String(n) }));
     expect(options.every((o) => o.label.length > 300)).toBe(true);
-    const root = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt, options), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(QuestionPane, { widget: widget(prompts.interviewMessagePrompt, options), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const cards = cardsOf(root);
     expect(cards.map((c) => c.textContent?.trim())).toEqual(options.map((o) => o.label));
     for (const card of cards) {
@@ -246,7 +247,7 @@ describe("PromptWidget", () => {
   test("a relayed question's options are cards too, with Quit and the text field below (issue #12, Q4)", () => {
     const sent: string[] = [];
     const options = [{ label: "A", sends: "1" }, { label: "B", sends: "2" }, { label: paragraph(3, "C"), sends: "3" }];
-    const root = show(PromptWidget, { widget: widget(prompts.optionOrTextPrompt, options), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(QuestionPane, { widget: widget(prompts.optionOrTextPrompt, options), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const cards = cardsOf(root);
     expect(cards.map((c) => c.textContent?.trim())).toEqual(options.map((o) => o.label));
     expect(cards.map((c) => isCard(c))).toEqual([true, true, true]);
@@ -260,25 +261,25 @@ describe("PromptWidget", () => {
   // Decision support, plan step 3.6: one "Help me decide" per question, a tonal button that sends /decide.
   test("Help me decide is a tonal button that sends /decide, never the filled primary action", () => {
     const sent: string[] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.optionOrTextPrompt), [{ label: "A", sends: "1" }, { label: "B", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(QuestionPane, { widget: widget(prompts.withOffer(prompts.optionOrTextPrompt), [{ label: "A", sends: "1" }, { label: "B", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const fixed = [...root.querySelectorAll<HTMLButtonElement>(".choices button")];
     expect(fixed.map((b) => b.textContent?.trim())).toEqual([prompts.HELP_ME_DECIDE, prompts.END_RUN_LABEL]);
     expect(fixed[0].classList.contains("tonal")).toBe(true);
     expect(fixed[0].classList.contains("filled")).toBe(false);
     fixed[0].click();
     expect(sent).toEqual(["/decide"]);
-    const decision = show(PromptWidget, { widget: widget(prompts.withOffer(prompts.decisionPrompt)), onAnswer: () => undefined });
+    const decision = show(QuestionPane, { widget: widget(prompts.withOffer(prompts.decisionPrompt)), onAnswer: () => undefined });
     expect([...decision.querySelectorAll<HTMLButtonElement>(".choices button")].map((b) => `${b.textContent?.trim()}:${b.classList.contains("filled") ? "filled" : b.classList.contains("tonal") ? "tonal" : "outlined"}`)).toEqual([`${prompts.CONTINUE_WITHOUT_DECIDING}:filled`, `${prompts.HELP_ME_DECIDE}:tonal`, `${prompts.END_RUN_LABEL}:outlined`]);
   });
 
   test("a prompt without options has no group of cards", () => {
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: () => undefined });
+    const root = show(QuestionPane, { widget: widget(prompts.decisionPrompt), onAnswer: () => undefined });
     expect(optionsGroup(root)).toBe(null);
   });
 
   test("a choice sends its catalog text on one click; typed text is sent with Enter", () => {
     const sent: [number, string][] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: (p: number, t: string) => void sent.push([p, t]) });
+    const root = show(QuestionPane, { widget: widget(prompts.decisionPrompt), onAnswer: (p: number, t: string) => void sent.push([p, t]) });
     const buttons = [...root.querySelectorAll(".choices button")].map((b) => b.textContent?.trim());
     expect(buttons).toEqual([prompts.CONTINUE_WITHOUT_DECIDING, prompts.END_RUN_LABEL]);
     (root.querySelectorAll(".choices button")[0] as HTMLButtonElement).click();
@@ -291,12 +292,12 @@ describe("PromptWidget", () => {
 
   test("an interview's numbered answer sends its number; a permission prompt has no text field", () => {
     const sent: string[] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt, [{ label: "1. PostgreSQL", sends: "1" }, { label: "2. SQLite", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(QuestionPane, { widget: widget(prompts.interviewMessagePrompt, [{ label: "1. PostgreSQL", sends: "1" }, { label: "2. SQLite", sends: "2" }]), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const two = [...cardsOf(root)].find((b) => b.textContent?.trim() === "2. SQLite") as HTMLButtonElement;
     two.click();
     expect(sent).toEqual(["2"]);
     expect(root.querySelector("textarea[name=answer]")).not.toBe(null);
-    const permission = show(PromptWidget, { widget: widget(prompts.permissionPrompt), onAnswer: () => undefined });
+    const permission = show(QuestionPane, { widget: widget(prompts.permissionPrompt), onAnswer: () => undefined });
     expect(permission.querySelector("[name=answer]")).toBe(null);
   });
 
@@ -307,11 +308,11 @@ describe("PromptWidget", () => {
   };
   test("Enter while an input method is composing sends nothing, on the line field and the message field", () => {
     const sent: string[] = [];
-    const line = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const line = show(QuestionPane, { widget: widget(prompts.decisionPrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const input = one(line, "input[name=answer]") as HTMLInputElement;
     type(input, "unfinished composition");
     key(input, { isComposing: true });
-    const message = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const message = show(QuestionPane, { widget: widget(prompts.interviewMessagePrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const area = one(message, "textarea[name=answer]") as HTMLTextAreaElement;
     type(area, "unfinished too");
     key(area, { isComposing: true });
@@ -324,7 +325,7 @@ describe("PromptWidget", () => {
 
   test("a Send button sends the field's text and is disabled while the field is empty; the field keeps its label", () => {
     const sent: string[] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(QuestionPane, { widget: widget(prompts.decisionPrompt), onAnswer: (_p: number, t: string) => void sent.push(t) });
     const send = one(root, "button[name=send]") as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     type(one(root, "input[name=answer]") as HTMLInputElement, "keep it");
@@ -334,7 +335,7 @@ describe("PromptWidget", () => {
     expect(sent).toEqual(["keep it"]);
     expect(root.querySelector("label")?.textContent).toBe("Your answer");
     expect(root.querySelector(".hint")?.textContent).toBe(prompts.answerHint("line"));
-    const message = show(PromptWidget, { widget: widget(prompts.interviewMessagePrompt), onAnswer: () => undefined });
+    const message = show(QuestionPane, { widget: widget(prompts.interviewMessagePrompt), onAnswer: () => undefined });
     expect(message.querySelector("label")?.textContent).toBe("Your message");
   });
 
@@ -342,7 +343,7 @@ describe("PromptWidget", () => {
   // socket, and nothing typed is cleared.
   test("offline, the choices and Send stay enabled, and sending keeps the field's text; online it clears it", () => {
     const sent: string[] = [];
-    const root = show(PromptWidget, { widget: widget(prompts.decisionPrompt), offline: true, onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const root = show(QuestionPane, { widget: widget(prompts.decisionPrompt), offline: true, onAnswer: (_p: number, t: string) => void sent.push(t) });
     const input = one(root, "input[name=answer]") as HTMLInputElement;
     type(input, "typed offline");
     const send = one(root, "button[name=send]") as HTMLButtonElement;
@@ -359,7 +360,7 @@ describe("PromptWidget", () => {
     flushSync();
     expect(input.value).toBe("typed offline");
     expect(sent).toEqual(["typed offline", "typed offline", ""]);
-    const online = show(PromptWidget, { widget: widget(prompts.decisionPrompt), offline: false, onAnswer: () => undefined });
+    const online = show(QuestionPane, { widget: widget(prompts.decisionPrompt), offline: false, onAnswer: () => undefined });
     const field = one(online, "input[name=answer]") as HTMLInputElement;
     type(field, "sent online");
     field.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
@@ -368,7 +369,7 @@ describe("PromptWidget", () => {
   });
 
   test("without a pending prompt nothing can be sent", () => {
-    const root = show(PromptWidget, { widget: null, onAnswer: () => undefined });
+    const root = show(QuestionPane, { widget: null, onAnswer: () => undefined });
     expect(root.querySelector("button")).toBe(null);
   });
 });
@@ -602,6 +603,25 @@ describe("App and the draft", () => {
     ws.receive({ type: "event", run: 1, seq: 3, time: TIME, event: asked(2) });
     expect(field(root).value).toBe("");
     expect(root.textContent).toContain(prompts.draftWithdrawnNotice("draft for question one"));
+  });
+
+  // S27 (Q10): a pending prompt's pane takes the left column; the conversation is one click away and back.
+  test("a pending prompt hides the conversation behind its pane; Show the conversation and Back to the question toggle", async () => {
+    const { root, ws } = await openPage();
+    ws.receive({ type: "replay", runs: [{ id: 1, events: stamp([started, { _tag: "Said", text: "hello" }, asked(1)]) }] });
+    const chat = () => root.querySelector(".left .chat") as HTMLElement;
+    expect(chat().classList.contains("hidden")).toBe(true);
+    expect(root.querySelector(".pane")).not.toBe(null);
+    one(root, ".pane button[name=conversation]").click();
+    flushSync();
+    expect(chat().classList.contains("hidden")).toBe(false);
+    expect(root.querySelector(".pane")).toBe(null);
+    one(root, "button[name=question]").click();
+    flushSync();
+    expect(chat().classList.contains("hidden")).toBe(true);
+    // The answered prompt gives the column back to the conversation.
+    ws.receive({ type: "event", run: 1, seq: 3, time: TIME, event: { _tag: "Answered", prompt: 1, text: "" } });
+    expect(chat().classList.contains("hidden")).toBe(false);
   });
 
   test("after a reconnection whose replay answered the prompt, the draft is withdrawn with a notice", async () => {
@@ -1134,5 +1154,68 @@ describe("TimelineRail: where the indicator is", () => {
     expect(where(rail(events))).toBe(prompts.planStepLabel(2, "step S2"));
     expect(where(rail([...events, done]))).toBe("Implementation");
     expect(where(rail([...events, done, resumed]))).toBe(prompts.planStepLabel(1, "step S1"));
+  });
+});
+
+// S27 (Q10): the question takes the left panel while its prompt is pending: the heading and origin, a top region that
+// scrolls on its own (context, details, terms), the question fixed below it, and a bottom region that scrolls on its own
+// (the options with their answers, the field, the buttons).
+describe("QuestionPane's regions", () => {
+  const question: PresentedQuestion = {
+    number: 4,
+    origin: { kind: "relayed" },
+    context: { text: "The service keeps its data in a database.", by: "agent" },
+    terms: [{ term: "service", explanation: "The program this task builds." }],
+    question: "Which database should the service use?",
+    options: [
+      { label: "SQLite", description: "a file", answer: { token: "1" } },
+      { label: "More cycles", description: "go on", answer: { numeric: true } },
+    ],
+    details: "**The facts** of the case.",
+    decision: null,
+  };
+  const withQuestion = (q: PresentedQuestion = question, text = prompts.optionOrTextPrompt): Widget => ({ ...widget(text), question: q, presentedAt: null });
+
+  test("the heading, the origin line, the context, details and terms on top, the question fixed, the options below", () => {
+    const root = show(QuestionPane, { widget: withQuestion(), onAnswer: () => undefined });
+    expect(one(root, "h2").textContent?.trim()).toBe(prompts.questionTitle(4));
+    expect(one(root, ".origin").textContent?.trim()).toBe(prompts.originLine(question.origin, null));
+    const top = one(root, ".top");
+    expect(one(top, ".context").textContent).toContain(question.context.text);
+    expect(one(top, ".details").innerHTML).toContain("<strong>The facts</strong>");
+    expect(one(top, ".terms").textContent).toContain("service");
+    expect(one(top, ".terms").textContent).toContain("The program this task builds.");
+    const asked = one(root, ".question-text");
+    expect(asked.textContent?.trim()).toBe(question.question);
+    expect(asked.closest(".top, .bottom")).toBe(null);
+    const bottom = one(root, ".bottom");
+    const cards = [...bottom.querySelectorAll<HTMLButtonElement>(".options button")];
+    expect(cards[0].textContent).toContain("1.");
+    expect(cards[0].textContent).toContain("SQLite");
+    expect(one(bottom, ".numeric").textContent).toContain(prompts.NUMERIC_OPTION_NOTE);
+    expect(bottom.querySelector("input[name=answer]")).not.toBe(null);
+  });
+
+  test("a card sends its answer; a numeric option is no button", () => {
+    const sent: string[] = [];
+    const root = show(QuestionPane, { widget: withQuestion(), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const cards = [...root.querySelectorAll<HTMLButtonElement>(".options button")];
+    expect(cards.length).toBe(1);
+    cards[0].click();
+    expect(sent).toEqual(["1"]);
+  });
+
+  test("a context the program wrote carries the note; the summary to confirm is inside the pane", () => {
+    const summary: PresentedQuestion = { ...question, origin: { kind: "confirmSummary" }, context: { text: "Interloq asks.", by: "program" }, options: [], terms: [], details: "# Requirements\n\nUse SQLite.", question: prompts.CONFIRM_SUMMARY_QUESTION };
+    const root = show(QuestionPane, { widget: withQuestion(summary, prompts.confirmSummaryPrompt), onAnswer: () => undefined });
+    expect(one(root, ".context").textContent).toContain(prompts.PROGRAM_CONTEXT_NOTE);
+    expect(one(root, ".top .details").textContent).toContain("Use SQLite.");
+  });
+
+  test("Show the conversation calls its handler", () => {
+    let shown = 0;
+    const root = show(QuestionPane, { widget: withQuestion(), onAnswer: () => undefined, onShowConversation: () => void shown++ });
+    one(root, "button[name=conversation]").click();
+    expect(shown).toBe(1);
   });
 });

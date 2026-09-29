@@ -9,7 +9,7 @@
   // Interloq", selects it].
   import { Button, ConnectedButtons } from "m3-svelte";
   import { untrack } from "svelte";
-  import { CONNECTION_FAILED_NOTICE, notSentNotice, SHOW_ANALYSIS, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
+  import { CONNECTION_FAILED_NOTICE, notSentNotice, SHOW_ANALYSIS, SHOW_QUESTION, UNSENT_HEADING, unseenBadge } from "../../../src/prompts.ts";
   import { type AnalysisKey, analysisShown, EXPANDED_MIN_WIDTH, initialLayout, type Layout, observe, type Pane, select } from "../layout.ts";
   import type { ClientMessage } from "../../../src/protocol.ts";
   import { type Draft, draftFor, pendingKey, reconcile, restoreUnsent } from "../draft.ts";
@@ -19,7 +19,7 @@
   import ChatPanel from "./ChatPanel.svelte";
   import DecisionView from "./DecisionView.svelte";
   import DirectoryDialog from "./DirectoryDialog.svelte";
-  import PromptWidget from "./PromptWidget.svelte";
+  import QuestionPane from "./QuestionPane.svelte";
   import StartForm from "./StartForm.svelte";
   import TimelineRail from "./TimelineRail.svelte";
   import TopBar from "./TopBar.svelte";
@@ -76,6 +76,10 @@
   const TITLES: Record<Pane, string> = { left: "You and Interloq", right: "Claude and Codex" };
 
   const run = $derived(view.run);
+  // S27: the pending prompt whose conversation the user chose to see instead of its question (by its full key).
+  let conversationForPrompt = $state<string | null>(null);
+  const promptKey = $derived(JSON.stringify(pendingKey(view)));
+  const asking = $derived(view.run?.pending != null && conversationForPrompt !== promptKey);
   const showForm = $derived(run === null || (run.ended !== null && formWanted));
   const latestNotice = $derived(view.notices.length > noticesSeen ? view.notices[view.notices.length - 1] : null);
   const refused = $derived(showForm ? latestNotice : null);
@@ -158,11 +162,18 @@
         </div>
       {/if}
       <div class="left" class:hidden={!deciding && !shown("left")}>
-        <div class="chat" class:hidden={deciding}>
-          <ChatPanel title={TITLES.left} messages={run.left} empty="The run has started." visible={shown("left") && !deciding} />
+        <!-- S27 (Q10): a pending prompt's question takes the column; the conversation is one click away and back. -->
+        <div class="chat" class:hidden={deciding || asking}>
+          <ChatPanel title={TITLES.left} messages={run.left} empty="The run has started." visible={shown("left") && !deciding && !asking} />
         </div>
-        <PromptWidget
-          widget={run.pending}
+        {#if run.pending !== null && !asking}
+          <div class="back-to-question">
+            <Button variant="tonal" type="button" name="question" onclick={() => (conversationForPrompt = null)}>{SHOW_QUESTION}</Button>
+          </div>
+        {/if}
+        <QuestionPane
+          widget={asking ? run.pending : null}
+          onShowConversation={() => (conversationForPrompt = promptKey)}
           {offline}
           bind:text={() => draftFor(draft, pendingKey(view)), (text) => { const key = pendingKey(view); draft = key === null ? null : { key, text }; }}
           onAnswer={(prompt, text) => send({ type: "answer", incarnation: view.incarnation ?? "", run: run.id, prompt, text })} />
@@ -203,6 +214,7 @@
   .run.compact { display: flex; flex-direction: column; gap: 0.5rem; overflow-y: auto; }
   .run.compact > :global(*) { flex-shrink: 0; }
   .hidden { display: none; }
+  .back-to-question { padding: 0.5rem 0.75rem 0; }
   /* The shown column fills the window; its panel scrolls inside it and keeps at least 12.5rem, below which the page scrolls. */
   .run.compact .left, .run.compact .right { flex: 1 0 0; }
   .run.compact .left :global(.panel), .run.compact .right :global(.panel) { min-height: 12.5rem; }

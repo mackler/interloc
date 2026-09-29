@@ -1277,6 +1277,12 @@ export const ENLARGE_WINDOW_NOTICE = "The analysis needs a window at least 390 p
 /** Shown when the columns do not fit side by side (decision Q5). */
 export const SCROLL_SIDEWAYS_HINT = "Scroll sideways to see every option.";
 export const SHOW_CONVERSATION = "Show the conversation";
+/** The page's question pane (S27): back from the conversation to the pending question. */
+export const SHOW_QUESTION = "Back to the question";
+/** The note beside a context paragraph the program wrote, in the page's question pane (S27). */
+export const PROGRAM_CONTEXT_NOTE = "Written by Interloq";
+/** An option answered by typing a number (More cycles at the cycle limit, S8), as the page's pane says it (S27). */
+export const NUMERIC_OPTION_NOTE = "Type the number of cycles in the field below.";
 export const SHOW_ANALYSIS = "Show the analysis";
 
 // Issue #26: the transport faults and their retries, as the user reads them.
