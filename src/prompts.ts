@@ -692,10 +692,29 @@ export const AGENT_WORKING_LABEL = "An agent is working";
 export const RETRY_WAITING_LABEL = "Waiting to retry the connection";
 /** The measured time of the current agent call beside the busy indicator (issue #42, Q7): m:ss, or h:mm:ss from one hour on. */
 export function runningFor(ms: number): string {
+  return `running for ${durationText(ms)}`;
+}
+/** A measured duration (issues #42, #50): m:ss, or h:mm:ss from one hour on. */
+export function durationText(ms: number): string {
   const total = Math.floor(ms / 1000);
   const [h, m, s] = [Math.floor(total / 3600), Math.floor((total % 3600) / 60), total % 60];
   const two = (n: number) => String(n).padStart(2, "0");
-  return `running for ${h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`}`;
+  return h > 0 ? `${h}:${two(m)}:${two(s)}` : `${m}:${two(s)}`;
+}
+/** A finished or stopped phase's duration beside its name in the progress rail (issue #50, Q2). */
+export function phaseTook(ms: number): string {
+  return `took ${durationText(ms)}`;
+}
+/** The active phase's time since it began, beside its name in the progress rail (issue #50, Q2). */
+export function phaseElapsed(ms: number): string {
+  return `${durationText(ms)} so far`;
+}
+/**
+ * The accessible name of a running step's indicator (issue #50): the step's state as its mark said it, and that an
+ * agent is working on it.
+ */
+export function stepWorkingLabel(step: "phaseStep" | "planStep"): string {
+  return `${step === "phaseStep" ? TIMELINE_STATE_LABEL.active : PLAN_STEP_STATE_LABEL.current}: ${AGENT_WORKING_LABEL}`;
 }
 /** The accessible name of the plan's list under its Implementation entry. */
 export const PLAN_LIST_LABEL = "The steps of the plan";

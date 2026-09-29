@@ -377,3 +377,24 @@ test("runningFor gives m:ss, and h:mm:ss from one hour on; elapsedMs is clamped 
   assert.equal(elapsedMs("2026-09-28T12:00:10.000Z", Date.parse("2026-09-28T12:00:00.000Z")), 0);
   assert.equal(elapsedMs("not a time", 0), 0);
 });
+
+// Issue #50 (Q2): the durations of the rail share one format; the running step's indicator names its state and the work.
+test("durationText, runningFor, phaseTook and phaseElapsed share one format", () => {
+  assert.equal(prompts.durationText(0), "0:00");
+  assert.equal(prompts.durationText(59_999), "0:59");
+  assert.equal(prompts.durationText(61_000), "1:01");
+  assert.equal(prompts.durationText(3_723_000), "1:02:03");
+  for (const ms of [0, 61_000, 3_723_000]) {
+    assert.equal(prompts.runningFor(ms), `running for ${prompts.durationText(ms)}`);
+    assert.equal(prompts.phaseTook(ms), `took ${prompts.durationText(ms)}`);
+    assert.equal(prompts.phaseElapsed(ms), `${prompts.durationText(ms)} so far`);
+  }
+});
+
+test("stepWorkingLabel names the step's state as its mark says it and that an agent is working", () => {
+  const phaseStep = prompts.stepWorkingLabel("phaseStep");
+  const planStep = prompts.stepWorkingLabel("planStep");
+  assert.ok(phaseStep.includes(prompts.TIMELINE_STATE_LABEL.active), phaseStep);
+  assert.ok(planStep.includes(prompts.PLAN_STEP_STATE_LABEL.current), planStep);
+  for (const label of [phaseStep, planStep]) assert.ok(label.toLowerCase().includes(prompts.AGENT_WORKING_LABEL.toLowerCase()), label);
+});
