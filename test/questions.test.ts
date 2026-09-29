@@ -277,3 +277,28 @@ test("an interview question outside questions.json is validated, an agreed one a
   const repair = prompts.questionRepairPrompt([{ where: "F1", problems: [{ kind: "blankContext", subject: "" }] }]);
   assert.equal(probe.planner.prompts.filter((p) => p === repair).length, 1, "the follow-up got one repair turn, the agreed question none");
 });
+
+// S35 (W1-R1-3): only a turn that asks nothing skips the validation of its question.
+test("turnValidation: a turn with a blank id that asks a question is validated; one that asks nothing is not", async () => {
+  const { turnValidation, asksNothing } = await import("../src/conversation.ts");
+  const { Result } = await import("effect");
+  const base = turn("m", []);
+  const asking = { ...base, current_question: { id: "", context: "", text: "Choose one.", terms: [{ term: "one", explanation: "" }], options: [] } };
+  const failed = turnValidation([])(asking);
+  assert.ok(Result.isFailure(failed));
+  assert.equal(failed.failure.repair, prompts.questionRepairPrompt([{ where: "the current question", problems: [{ kind: "blankContext", subject: "" }, { kind: "notLast", subject: "" }, { kind: "blankExplanation", subject: "one" }] }]));
+  assert.ok(Result.isSuccess(turnValidation([])(base)));
+  assert.ok(Result.isSuccess(turnValidation(["Q1"])({ ...base, current_question: { id: "Q1", context: "", text: "", terms: [], options: [] } })));
+  // The seam: turnDraft presents as a reply exactly the turns asksNothing names.
+  const { turnDraft } = await import("../src/conversation.ts");
+  const { normalizeTurn } = await import("../src/schemaNormalize.ts");
+  for (const t of [base, asking, { ...base, current_question: { ...base.current_question, options: [{ label: "A", description: "a" }] } }]) {
+    assert.equal(turnDraft(normalizeTurn(t), { questions: [], terms: [] }).origin.kind === "reply", asksNothing(t.current_question), JSON.stringify(t.current_question));
+  }
+});
+
+test("a turn with a blank id asking an invalid question gets the repair turn; a second one halts with QuestionInvalid", async () => {
+  const bad = { ...turn("m", []), current_question: { id: "", context: "", text: "Choose one.", terms: [{ term: "one", explanation: "" }], options: [] } };
+  const halted = testLayer(tempRepo(), { steps: [{ output: { questions: [] } }, { output: bad }, { output: bad }], reviews: [{ issues: [] }], answers: ["talk"], config: withQuestions });
+  await runFails(halted.layer, "QuestionInvalid", /the current question/);
+});

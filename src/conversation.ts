@@ -24,9 +24,18 @@ export const turnValidation =
   (recorded: readonly string[]): Validation<S.InterviewTurn> =>
   (turn) => {
     const current = turn.current_question;
-    if (current.id.trim() === "" || recorded.includes(current.id)) return Result.succeed({ value: turn, notes: [] });
-    return questionsValidation((t: S.InterviewTurn) => [{ where: current.id, question: { context: t.current_question.context, question: t.current_question.text, terms: t.current_question.terms, options: t.current_question.options } }])(turn);
+    // S35 (W1-R1-3): only a turn that asks nothing, or asks an agreed question by its id, is not checked.
+    if (asksNothing(current) || (current.id.trim() !== "" && recorded.includes(current.id))) return Result.succeed({ value: turn, notes: [] });
+    const where = current.id.trim() === "" ? "the current question" : current.id;
+    return questionsValidation((t: S.InterviewTurn) => [{ where, question: { context: t.current_question.context, question: t.current_question.text, terms: t.current_question.terms, options: t.current_question.options } }])(turn);
   };
+
+/**
+ * Whether a turn asks no particular question (S35): every field of its current question blank or empty. turnDraft
+ * presents exactly such a turn as a reply to Claude Code's message, and turnValidation checks every other one.
+ */
+export const asksNothing = (current: S.InterviewTurn["current_question"]): boolean =>
+  current.id.trim() === "" && current.context.trim() === "" && current.text.trim() === "" && current.terms.length === 0 && current.options.length === 0;
 
 /** The reviewed records an interview presents its agreed questions from (S18): questions.json and terms.json. */
 export type AgreedRecords = Readonly<{ questions: QuestionsFile["questions"]; terms: readonly TermsEntry[] }>;
@@ -47,7 +56,7 @@ export const turnDraft = (turn: TurnVariant, records: AgreedRecords): QuestionDr
     const terms = records.terms.find((t) => t.id === agreed.id)?.terms ?? [];
     return { origin, context: agentContext(agreed.context, origin), terms, question: agreed.question, options, details: prompts.agreedDetails(agreed.reason), decision: null };
   }
-  if (current.text.trim() === "") return { origin: { kind: "reply" }, context: { text: turn.message, by: "agent" }, terms: [], question: prompts.REPLY_QUESTION, options: [], decision: null };
+  if (asksNothing(current)) return { origin: { kind: "reply" }, context: { text: turn.message, by: "agent" }, terms: [], question: prompts.REPLY_QUESTION, options: [], decision: null };
   const origin: QuestionOrigin = { kind: "followUp", id: current.id };
   return { origin, context: agentContext(current.context, origin), terms: current.terms, question: current.text, options: numberedOptions(current.options), decision: null };
 };
