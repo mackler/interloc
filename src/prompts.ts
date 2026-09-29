@@ -1,6 +1,6 @@
 // Prompt texts. All paths are relative to the project directory.
 
-import { pathOf } from "./artifacts.ts";
+import { pathOf, recordPath } from "./artifacts.ts";
 import { FILE_CHANGE_FIELD, type LogEntry, type Review } from "./schema.ts";
 import type { InterviewStage } from "./uiEvents.ts";
 import type { PauseOrigin, QuestionOrigin } from "./question.ts";
@@ -114,7 +114,7 @@ ${QUESTION_RULES.map((r) => `- ${r.criterion}`).join("\n")}`;
  * The mechanically checkable part of the rules (S2): each kind of problem that `validateQuestion` in src/question.ts finds,
  * with the id of the rule of QUESTION_RULES it breaks. The repair prompt cites that rule's text.
  */
-export const QUESTION_PROBLEM_KINDS = ["blankContext", "notLast", "blankTerm", "blankExplanation", "termAbsent", "duplicateTerm", "bareNumber"] as const;
+export const QUESTION_PROBLEM_KINDS = ["blankContext", "notLast", "blankTerm", "blankExplanation", "termAbsent", "duplicateTerm", "bareNumber", "unknownQuestion"] as const;
 export type QuestionProblemKind = (typeof QUESTION_PROBLEM_KINDS)[number];
 export const QUESTION_PROBLEM_RULE: Readonly<Record<QuestionProblemKind, string>> = {
   blankContext: "context",
@@ -124,6 +124,7 @@ export const QUESTION_PROBLEM_RULE: Readonly<Record<QuestionProblemKind, string>
   termAbsent: "terms",
   duplicateTerm: "terms",
   bareNumber: "kindBeforeNumber",
+  unknownQuestion: "terms",
 };
 /** One problem of a question: its kind and what it concerns (a term, the bare reference), or "". */
 export type QuestionProblem = Readonly<{ kind: QuestionProblemKind; subject: string }>;
@@ -146,6 +147,8 @@ export function questionProblemText(problem: QuestionProblem): string {
       return `the term ${JSON.stringify(problem.subject)} is listed more than once`;
     case "bareNumber":
       return `${JSON.stringify(problem.subject)} is a number without the kind of thing it numbers before it`;
+    case "unknownQuestion":
+      return `the explanations name ${JSON.stringify(problem.subject)}, which is not the id of a question of plan-review/questions.json`;
   }
 }
 const questionProblemLines = (questions: QuestionProblems): readonly string[] => questions.map((q) => `${q.where}: ${q.problems.map(questionProblemText).join("; ")}.`);
@@ -224,6 +227,40 @@ export function questionRespondPrompt(round: number): string {
 ${respondRules("you amend the question list for it")}
 Return in 'questions' the complete question list after your amendments, including the entries that did not change. Do not modify any file.`;
 }
+
+// ---- the explanations of the terms (S17, issue #36) --------------------------------------------------------------------
+
+/** The rule of the terms, as QUESTION_RULES states it: what the terms subject writes and reviews. */
+const termsRule = (): string => QUESTION_RULES.find((r) => r.id === "terms")?.rule ?? "";
+/**
+ * The call that writes the explanations of the agreed questions' terms (S17, decision Q8): a fresh session, after the
+ * question review has converged, against the final wording. The entry of each question lists its terms.
+ */
+export function termsPrompt(task: string): string {
+  return `plan-review/questions.json contains the task and the question list that Claude Code and Codex have agreed. The questions will be put to the user, who may never have seen this codebase. Explain the terms of each question. Do not change the questions. You may read the project to understand it; do not modify any file, and do not use the AskUserQuestion tool.
+${termsRule()}
+A term may occur in a question's context, its text, its reason, its proposed answers or its default; list it once for its question, and again for every other question in which it occurs, since each question is read on its own. The explanations are shown on the words themselves, so name each term exactly as it is written there.
+${questionWritingRules()}
+Return in 'entries' one entry per question of the list, with its id and its terms; an empty terms list where a question needs none.
+Task: ${task}`;
+}
+/** Codex's review of the explanations (S17): the criteria of every question, as they apply to the terms. */
+export function termsReviewPrompt(round: number): string {
+  if (round > 1) return laterRound(pathOf({ kind: "terms" }), pathOf({ kind: "log", subject: "terms" }), "T", round);
+  return `Review the explanations of terms in plan-review/terms.json against the agreed question list in plan-review/questions.json and against the codebase. Do not modify any file. The list itself is agreed; review the explanations.
+Each entry of terms.json names a question by its id and lists its terms, each with the exact words in which it occurs in the question, its context, its reason, its proposed answers or its default, and its explanation. The user reads each explanation on the words themselves while he answers the question; he may never have seen this codebase.
+${questionReviewCriteria()}
+Raise an issue about the explanations only: a term the reader may not know that is not listed for a question in which it occurs; an explanation that is wrong, a cross-reference, uses another unexplained term, or does not make its term intelligible to a reader who has never seen this codebase.
+Put the question id, with the term, in the location field.
+${logRules(pathOf({ kind: "log", subject: "terms" }), "T", round)}`;
+}
+export function termsRespondPrompt(round: number): string {
+  return `${recordPath({ kind: "review", subject: "terms", round })} contains a review of the explanations of terms in plan-review/terms.json.
+${respondRules("you amend the explanations for it")}
+Return in 'entries' the complete explanations after your amendments, including the entries that did not change; the program writes them. Do not modify any file.`;
+}
+export const termsApplyDecisionsPrompt = `plan-review/user-decisions.md has new entries. Read the file.
+Return in 'entries' the complete explanations of plan-review/terms.json, amended where a decision requires it; the program writes them. Do not modify any file.`;
 
 export const questionApplyDecisionsPrompt = `plan-review/user-decisions.md has new entries. Read the file.
 Return in 'questions' the complete question list of plan-review/questions.json, amended where a decision requires it. Do not modify any file.`;
@@ -501,6 +538,10 @@ export const IMPLEMENTATION_STOPPED_LINE = "\nClaude Code has stopped implementa
 export const PROCEED_TO_CLARIFICATION = "proceed to the clarification with the question list as it is";
 export const PROCEED_TO_PLANNING = "proceed to planning with the requirements as they are";
 export const PROCEED_TO_IMPLEMENTATION = "proceed to implementation with the plan as it is";
+/** The "p" choice at the cycle limit of the terms review (S17). */
+export const PROCEED_TO_CLARIFICATION_WITH_TERMS = "proceed to the clarification with the explanations as they are";
+/** The start of the terms' writing (S17), as the terminal says it. */
+export const termsLine = "\nGather Requirements: Claude Code explains the terms of the agreed questions ...";
 /** The "p" choice at the cycle limit of a decision loop (D10 of the decision-support plan). */
 export const PROCEED_TO_CHOICE = "proceed to your choice with the analysis as it is";
 /** The review loop's lines: a cycle's review and response. */
@@ -857,8 +898,8 @@ export const PLAN_LIST_LABEL = "The steps of the plan";
  * The steps of Gather Requirements in the progress rail (issue #21, Q5 and Q7; issue #33: "Identify choices"). Issue #51:
  * a follow-up clarification is part of the Clarification step; the records keep their own vocabulary.
  */
-export function stepLabel(kind: "formulate" | "clarification"): string {
-  return kind === "formulate" ? "Identify choices" : "Clarification";
+export function stepLabel(kind: "formulate" | "terms" | "clarification"): string {
+  return kind === "formulate" ? "Identify choices" : kind === "terms" ? "Explain terms" : "Clarification";
 }
 /** A clarification's count (issue #21, Q6): the total grows with the follow-ups Claude asks. */
 export function clarificationProgress(answered: number, total: number): string {

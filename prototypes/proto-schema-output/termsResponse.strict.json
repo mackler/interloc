@@ -1,0 +1,176 @@
+{
+  "type": "object",
+  "properties": {
+    "dispositions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "action": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "partially_accepted",
+              "rejected",
+              "no_change_needed",
+              "clarification_requested"
+            ]
+          },
+          "rationale": {
+            "type": "string"
+          },
+          "duplicate_of": {
+            "type": "string"
+          },
+          "reverses": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "action",
+          "rationale",
+          "duplicate_of",
+          "reverses"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "self_corrections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "new_action": {
+            "type": "string",
+            "enum": [
+              "accepted",
+              "rejected",
+              "plan_error"
+            ]
+          },
+          "explanation": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "new_action",
+          "explanation"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "reviewer_feedback": {
+      "type": "string"
+    },
+    "questions_for_user": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "context": {
+            "type": "string"
+          },
+          "question": {
+            "type": "string"
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "explanation": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "term",
+                "explanation"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "options": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string"
+                },
+                "description": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "label",
+                "description"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "context",
+          "question",
+          "terms",
+          "options"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "terms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "term": {
+                  "type": "string"
+                },
+                "explanation": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "term",
+                "explanation"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "id",
+          "terms"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "dispositions",
+    "self_corrections",
+    "reviewer_feedback",
+    "questions_for_user",
+    "entries"
+  ],
+  "additionalProperties": false
+}

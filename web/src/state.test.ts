@@ -316,6 +316,22 @@ describe("the steps of Gather Requirements", () => {
     expect(s.run?.timeline[0].groups).toEqual([]);
   });
 
+  // S17: the explanations of the terms are a step of their own, between identifying the choices and the clarification,
+  // which holds the terms review's cycles; the clarification then ends it.
+  test("the terms review opens its own step after the first, with its cycles; the clarification ends it", () => {
+    const terms = [started, notified({ _tag: "PhaseBegan", phase: q }), round("questions", 1), finished("questions"), notified({ _tag: "RoundBegan", subject: "terms", round: 1, limit: 5 })];
+    expect(steps(fold(live(terms)))).toEqual([
+      [prompts.stepLabel("formulate"), "done", null, "Question review:1"],
+      [prompts.stepLabel("terms"), "active", null, "Terms review:1"],
+    ]);
+    const clarified = fold(live([...terms, notified({ _tag: "LoopFinished", subject: "terms", result: "converged" }), opened("clarification", 2), turn(1, 2)]));
+    expect(steps(clarified)?.map((st) => [st[0], st[1], st[2]])).toEqual([
+      [prompts.stepLabel("formulate"), "done", null],
+      [prompts.stepLabel("terms"), "done", null],
+      ["Clarification", "active", "1/2"],
+    ]);
+  });
+
   test("InterviewOpened ends the first step and opens Clarification with its total; each turn updates the count", () => {
     const s = fold(live(through));
     expect(steps(s)).toEqual([[prompts.stepLabel("formulate"), "done", null, "Question review:1"], ["Clarification", "active", "3/7", ""]]);

@@ -17,7 +17,7 @@ import type { RunError } from "../src/errors.ts";
 import { AgentUnreachable, describe, TransportFault, UserStopped } from "../src/errors.ts";
 import { parseAskLine, parseMessage } from "../src/input.ts";
 import type { Wiring } from "../src/program.ts";
-import type { SubjectId } from "../src/artifacts.ts";
+import { pathOf, type SubjectId } from "../src/artifacts.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
 import type { Plan as SPlan, RecordedPlan, StepStatus } from "../src/schema.ts";
@@ -183,6 +183,9 @@ export class ScriptedPlanner implements PlannerShape {
     this.execs = [...execs];
     this.execScripts = [...execScripts];
   }
+  /** The prompts and the scripted replies of the calls about the terms (S17), apart from the others. */
+  readonly termsPrompts: string[] = [];
+  terms: PlanningStep[] = [];
   /** The prompts of the context calls (S9), apart from `prompts` so that the scripts of the other calls keep their order. */
   readonly contextPrompts: string[] = [];
   /** The scripted replies of the context calls, in order; without one, a context call returns SCRIPTED_CONTEXT. */
@@ -196,6 +199,15 @@ export class ScriptedPlanner implements PlannerShape {
   });
   /** Returns the scripted output as it is: the caller decodes it, as with the real agent. */
   planning(prompt: string, schema: Schema.Top, purpose?: PlanningPurpose, capability: PlanningCapability = "records"): Effect.Effect<{ output: unknown; resultText: string; costUsd: number | null }, TransportFault> {
+    // S17: the explanations of the terms (their writing, their responses, their repairs) have their own script, and
+    // without one no question needs a term.
+    if (schema === S.TermsWrite || schema === S.TermsResponse) {
+      return Effect.suspend(() => {
+        this.termsPrompts.push(prompt);
+        const step = this.terms.shift();
+        return Effect.succeed({ output: step === undefined ? { entries: [] } : step.output, resultText: "", costUsd: 0.01 });
+      });
+    }
     if (purpose === "context") {
       return Effect.suspend(() => {
         this.contextPrompts.push(prompt);
@@ -305,10 +317,13 @@ export class ScriptedReviewer implements ReviewerShape {
     };
   });
   /** One scripted turn: its effects on the files, then its reply text, or the fault it fails with. */
+  /** The reviews of the terms (S17), apart from `reviews`; without one, a terms review raises no issue. */
+  termsReviews: ReviewStep[] = [];
   private turn(prompt: string, phase: number): { text: string; fault: string | null } {
     this.prompts.push(prompt);
     this.callPhases.push(phase);
-    const step = this.reviews.shift();
+    const terms = prompt.includes(`plan-review/${pathOf({ kind: "terms" })}`);
+    const step = terms ? (this.termsReviews.shift() ?? { issues: [] }) : this.reviews.shift();
     if (!step) throw new Error("no scripted review");
     step.onCall?.();
     if (step.plan !== undefined) fs.writeFileSync(this.state.planFile, step.plan);
@@ -332,7 +347,7 @@ export const respond = (dispositions: [string, PlannerResponse["dispositions"][n
 export const finished: ExecOutcome = { status: "finished", summary: "done", question: "", remainingWork: "", userInput: null };
 
 /** `store` wraps the live store of the test layer (a test that changes the project between the agents' calls). */
-export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; /** The replies of the context calls (S9), in order. */ contexts?: PlanningStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; execScripts?: readonly ExecScript[]; config?: Partial<Config>; platform?: Layer.Layer<Platform>; store?: (store: StoreShape) => StoreShape };
+export type TestOptions = { answers?: readonly ScriptedAnswer[]; steps?: PlanningStep[]; /** The replies of the context calls (S9), in order. */ contexts?: PlanningStep[]; /** The replies of the calls about the terms and their reviews (S17). */ terms?: PlanningStep[]; termsReviews?: ReviewStep[]; reviews?: ReviewStep[]; execs?: ExecOutcome[]; execScripts?: readonly ExecScript[]; config?: Partial<Config>; platform?: Layer.Layer<Platform>; store?: (store: StoreShape) => StoreShape };
 
 /**
  * The live platform with a file system whose writes and renames can fail: `shouldFail(method, count)` is asked
@@ -380,7 +395,9 @@ export function testLayer(repo: string, options: TestOptions = {}): { layer: Lay
   const ui = new ScriptedUi(options.answers ?? []);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? [], options.execScripts ?? []);
   planner.contexts = [...(options.contexts ?? [])];
+  planner.terms = [...(options.terms ?? [])];
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
+  reviewer.termsReviews = [...(options.termsReviews ?? [])];
   const wrap = options.store ?? ((s: StoreShape) => s);
   const store = Layer.effect(Store, makeStore(repo, config.ignorePaths).pipe(Effect.map(wrap))).pipe(Layer.provide(options.platform ?? platformLayer));
   const layer = withDecider(Layer.mergeAll(store, Layer.succeed(Ui, ui), Layer.succeed(Planner, planner), Layer.succeed(Reviewer, reviewer), Layer.succeed(RunConfig, config)));
@@ -422,7 +439,9 @@ export function testWiring(repo: string, options: TestOptions = {}): { wiring: W
   const ui = new ScriptedUi(options.answers ?? []);
   const planner = new ScriptedPlanner(paths, options.steps ?? [], options.execs ?? [], options.execScripts ?? []);
   planner.contexts = [...(options.contexts ?? [])];
+  planner.terms = [...(options.terms ?? [])];
   const reviewer = new ScriptedReviewer(paths, options.reviews ?? []);
+  reviewer.termsReviews = [...(options.termsReviews ?? [])];
   const usageLines: string[] = [];
   const wiring: Wiring = {
     ui: Effect.succeed(ui),

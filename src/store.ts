@@ -10,7 +10,7 @@ import { FileSystemError, GitError } from "./errors.ts";
 import { type LogEntry, PlanFile, type RecordedPlan, type UsageRecord } from "./schema.ts";
 import { renderPlanMarkdown } from "./plan.ts";
 import type { Platform } from "./platform.ts";
-import { AnalysisFile, Baseline, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
+import { AnalysisFile, Baseline, TermsFile, type CheckpointPoint, questionsFile, readLog, readQuestions, readUsage, VERSION } from "./records.ts";
 import { renderDecision, renderFeedback, subjectHeading } from "./render.ts";
 import { type ProjectPath, type RecordPath, Store, type StoreError, type StoreShape } from "./services.ts";
 import { decodeStatusV2, excluded, excludedIndexPaths, type OwnWrite, type RecordsSnapshot, type Snapshot, type WorkingTreeEntry } from "./snapshot.ts";
@@ -375,6 +375,13 @@ export const makeStore = (projectDir: string, ignorePaths: readonly string[]): E
       },
       saveAnalysisWrite: (decision, output) => saveRecord({ kind: "analysisWrite", decision }, output),
       saveAnalysis: (decision, analysis) => saveRecord({ kind: "analysis", decision }, { version: VERSION, analysis }),
+      saveTerms: (entries) => saveRecord({ kind: "terms" }, { version: VERSION, entries }),
+      loadTerms: () => {
+        const file = at({ kind: "terms" });
+        return exists(file).pipe(
+          Effect.flatMap((present) => (present ? readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(decodeText(file, TermsFile, text))), Effect.map((f) => f.entries)) : Effect.succeed([]))),
+        );
+      },
       loadAnalysis: (decision) => {
         const file = at({ kind: "analysis", decision });
         return readText(file).pipe(Effect.flatMap((text) => Effect.fromResult(decodeText(file, AnalysisFile, text))), Effect.map((f) => f.analysis));

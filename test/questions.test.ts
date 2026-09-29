@@ -52,7 +52,7 @@ test("question list is amended in review, the interview runs, the summary is con
   assert.deepEqual(questions.questions.map((x: QuestionEntry) => x.id), ["Q1", "Q2"]);
   assert.match(read(probe.dir, "requirements.md"), /Q2: B because of X/);
   assert.equal((await probe.loadLog("questions"))[0].action, "accepted");
-  assert.equal(probe.reviewer.phases, 4); // question review, requirements review, plan review, work review
+  assert.equal(probe.reviewer.phases, 5); // question review, terms review (S17), requirements review, plan review, work review
   assert.ok(probe.planner.prompts.some((p) => p.includes("User: B, because of X")));
   assert.match(probe.planner.prompts.at(-1) ?? "", /requirements\.md contains the user's confirmed answers/);
   const conversation = read(probe.dir, "conversation.md");

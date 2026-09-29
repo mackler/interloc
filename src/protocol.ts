@@ -46,7 +46,7 @@ const Str = Schema.String;
 const tagged = <const T extends string, F extends Schema.Struct.Fields>(tag: T, fields: F) => Schema.Struct({ _tag: Schema.Literal(tag), ...fields });
 const typed = <const T extends string, F extends Schema.Struct.Fields>(type: T, fields: F) => Schema.Struct({ type: Schema.Literal(type), ...fields });
 
-const SubjectIdSchema = Schema.Union([Schema.Literal("questions"), Schema.Literal("requirements"), Schema.Struct({ plan: Int }), Schema.Struct({ work: Int }), Schema.Struct({ decision: Int })]);
+const SubjectIdSchema = Schema.Union([Schema.Literal("questions"), Schema.Literal("terms"), Schema.Literal("requirements"), Schema.Struct({ plan: Int }), Schema.Struct({ work: Int }), Schema.Struct({ decision: Int })]);
 const PhaseSchema = Schema.Union([Schema.Struct({ kind: Schema.Literal("questions") }), Schema.Struct({ kind: Schema.Literals(["planning", "execution", "work"]), n: Int })]);
 const AgentSchema = Schema.Literals(["claude", "codex"]);
 const round = { subject: SubjectIdSchema, round: Int };
@@ -93,7 +93,7 @@ export const UiEventSchema = Schema.Union([
   tagged("ReviewReceived", { ...round, review: S.Review, counted: Int }),
   // The question subject's response is the planner's plus `questions` (defect A of docs/page-question-phase-defects.md).
   // A decision's response carries its amended analysis (W2-R1-1), the plan's the whole plan (issue #6).
-  tagged("ResponseReceived", { ...round, response: Schema.Union([S.QuestionListResponse, S.DecisionResponse, S.PlanResponse, S.PlannerResponse]), resultText: Str }),
+  tagged("ResponseReceived", { ...round, response: Schema.Union([S.QuestionListResponse, S.TermsResponse, S.DecisionResponse, S.PlanResponse, S.PlannerResponse]), resultText: Str }),
   tagged("LoopFinished", { subject: SubjectIdSchema, result: Schema.Literals(["converged", "proceed", "revise"]) }),
   tagged("PlanWritten", { phase: Int, questions: Schema.Array(S.UserQuestion), resultText: Str }),
   tagged("ExecutionEnded", { phase: Int, outcome: S.ExecOutcome }),

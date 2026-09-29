@@ -165,6 +165,16 @@ export const QuestionListResponse = Schema.Struct({
   questions: Schema.Array(QuestionEntry),
 });
 
+/**
+ * The explanations of the terms of the agreed questions (S17, issue #36, decision Q8): one entry per question id, with
+ * the terms of the question, its context, its reason, its proposed answers and its default. The reply of the call that
+ * writes them and of the application of the user's decisions; plan-review/terms.json holds them.
+ */
+export const TermsEntry = Schema.Struct({ id: Schema.String, terms: Schema.Array(Term) });
+export const TermsWrite = Schema.Struct({ entries: Schema.Array(TermsEntry) });
+/** A response to a review of the explanations: the dispositions and the complete amended explanations. */
+export const TermsResponse = Schema.Struct({ ...plannerResponseFields, entries: Schema.Array(TermsEntry) });
+
 /** A response to a review of a decision analysis: the dispositions and the complete amended analysis. */
 export const DecisionResponse = Schema.Struct({ ...plannerResponseFields, analysis: DecisionAnalysis });
 /** The output of applying the user's decisions to an analysis. */
@@ -309,6 +319,9 @@ export type UserQuestion = typeof UserQuestion.Type;
 export type Term = typeof Term.Type;
 export type QuestionOption = typeof QuestionOption.Type;
 export type QuestionContext = typeof QuestionContext.Type;
+export type TermsEntry = typeof TermsEntry.Type;
+export type TermsWrite = typeof TermsWrite.Type;
+export type TermsResponse = typeof TermsResponse.Type;
 export type PlannerResponse = typeof PlannerResponse.Type;
 export type PlanWriteResult = typeof PlanWriteResult.Type;
 export type PlanStep = typeof PlanStep.Type;

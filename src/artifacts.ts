@@ -5,12 +5,12 @@
  * A reviewed subject: the question list, the requirements, the plan of one planning phase, the work of one execution
  * phase (the work review), or the analysis of decision k (decision support, numbered across the run).
  */
-export type SubjectId = "questions" | "requirements" | Readonly<{ plan: number }> | Readonly<{ work: number }> | Readonly<{ decision: number }>;
+export type SubjectId = "questions" | "terms" | "requirements" | Readonly<{ plan: number }> | Readonly<{ work: number }> | Readonly<{ decision: number }>;
 /** A subject whose phase follows from its identity; a decision's phase is where it took place, which its identity does not say. */
 export type PhasedSubject = Exclude<SubjectId, Readonly<{ decision: number }>>;
 
 export type Artifact =
-  | Readonly<{ kind: "conversation" | "decisions" | "feedback" | "usage" | "questions" | "requirements" | "plan" | "planFile" | "checkpoint" | "config" }>
+  | Readonly<{ kind: "conversation" | "decisions" | "feedback" | "usage" | "questions" | "terms" | "requirements" | "plan" | "planFile" | "checkpoint" | "config" }>
   | Readonly<{ kind: "log"; subject: SubjectId }>
   | Readonly<{ kind: "review" | "response" | "round"; subject: SubjectId; round: number }>
   /** The raw reply of corrective turn `attempt` of a round (issue #30), beside the round's response. */
@@ -32,7 +32,9 @@ export const phaseOf = (subject: PhasedSubject): number => (typeof subject !== "
 export const subjectDir = (subject: SubjectId): string =>
   subject === "questions"
     ? "question-review"
-    : subject === "requirements"
+    : subject === "terms"
+      ? "terms-review"
+      : subject === "requirements"
       ? "requirements-review"
       : "plan" in subject
         ? `planning-${subject.plan}`
@@ -45,6 +47,7 @@ const DECISION_DIR = /^decision-([1-9][0-9]*)$/;
 /** The subject of a subdirectory name, or null for a name that is not one. */
 export const subjectOf = (dirName: string): SubjectId | null => {
   if (dirName === "question-review") return "questions";
+  if (dirName === "terms-review") return "terms";
   if (dirName === "requirements-review") return "requirements";
   const planning = PLANNING_DIR.exec(dirName);
   if (planning !== null) return { plan: Number(planning[1]) };
@@ -55,19 +58,21 @@ export const subjectOf = (dirName: string): SubjectId | null => {
 };
 /** The file a subject's review reads. */
 export const reviewedFile = (subject: SubjectId): Artifact =>
-  subject === "questions" || subject === "requirements"
+  subject === "questions" || subject === "terms" || subject === "requirements"
     ? { kind: subject }
     : "plan" in subject
       ? { kind: "planFile" }
       : "work" in subject
         ? { kind: "changes", phase: subject.work }
         : { kind: "analysis", decision: subject.decision };
-const FIXED: Record<Extract<Artifact, { kind: string }>["kind"] & ("conversation" | "decisions" | "feedback" | "usage" | "questions" | "requirements" | "plan" | "planFile" | "checkpoint" | "config"), string> = {
+const FIXED: Record<Extract<Artifact, { kind: string }>["kind"] & ("conversation" | "decisions" | "feedback" | "usage" | "questions" | "terms" | "requirements" | "plan" | "planFile" | "checkpoint" | "config"), string> = {
   conversation: "conversation.md",
   decisions: "user-decisions.md",
   feedback: "reviewer-feedback.md",
   usage: "usage.jsonl",
   questions: "questions.json",
+  /** The explanations of the agreed questions' terms, the terms subject's reviewed file (S17, issue #36). */
+  terms: "terms.json",
   requirements: "requirements.md",
   /** Rendered from plan.json for the developer to read (issue #6, F2). */
   plan: "plan.md",
@@ -83,7 +88,9 @@ export const pathOf = (artifact: Artifact): string => {
     case "log":
       return artifact.subject === "questions"
         ? "questions-log.json"
-        : artifact.subject === "requirements"
+        : artifact.subject === "terms"
+          ? "terms-log.json"
+          : artifact.subject === "requirements"
           ? "requirements-log.json"
           : "plan" in artifact.subject
             ? "issue-log.json"
@@ -120,8 +127,8 @@ export const pathOf = (artifact: Artifact): string => {
 };
 /** The path as messages and prompts name it: `plan-review/<path>`. */
 export const recordPath = (artifact: Artifact): string => `${RECORDS_DIR}/${pathOf(artifact)}`;
-/** The five issue logs (one subject of each). */
-export const LOG_SUBJECTS: readonly SubjectId[] = [{ plan: 1 }, "questions", "requirements", { work: 1 }, { decision: 1 }];
+/** The six issue logs (one subject of each). */
+export const LOG_SUBJECTS: readonly SubjectId[] = [{ plan: 1 }, "questions", "terms", "requirements", { work: 1 }, { decision: 1 }];
 
 /**
  * Whether a path under plan-review/ is a record that a read-only call must leave unchanged (finding 1 of

@@ -50,7 +50,7 @@ export type StepState = TimelineState | "skipped";
  * `base` holds the counts of the interviews before the current one, and `count` is `base` plus the current interview's.
  */
 export type StepCount = Readonly<{ answered: number; total: number }>;
-export type TimelineStep = Readonly<{ kind: "formulate" | "clarification"; label: string; state: StepState; count: StepCount | null; base: StepCount; groups: readonly RoundGroup[] }>;
+export type TimelineStep = Readonly<{ kind: "formulate" | "terms" | "clarification"; label: string; state: StepState; count: StepCount | null; base: StepCount; groups: readonly RoundGroup[] }>;
 /**
  * The plan as an Implementation entry shows it (issue #54): its stages, each with a rendering `key` that is unique within
  * the entry (`current-<n>` for a stage of the current plan, `record-<n>` for one that holds only steps a revision removed).
@@ -383,6 +383,14 @@ const openGroups = (timeline: readonly TimelineEntry[], subject: SubjectId, f: (
 };
 const NO_COUNT: StepCount = { answered: 0, total: 0 };
 const newStep = (kind: TimelineStep["kind"], count: TimelineStep["count"], state: StepState = "active"): TimelineStep => ({ kind, label: stepLabel(kind), state, count, base: NO_COUNT, groups: [] });
+/** The steps with the terms step active (S17): the active step before it done, the terms step placed before the clarification. */
+const termsStep = (steps: readonly TimelineStep[]): readonly TimelineStep[] => {
+  if (steps.some((st) => st.kind === "terms")) return steps;
+  const ended = steps.map((st) => (st.state === "active" ? { ...st, state: "done" as const } : st));
+  const at = ended.findIndex((st) => st.kind === "clarification");
+  const step = newStep("terms", null);
+  return at < 0 ? [...ended, step] : [...ended.slice(0, at), step, ...ended.slice(at)];
+};
 const plus = (a: StepCount, b: StepCount): StepCount => ({ answered: a.answered + b.answered, total: a.total + b.total });
 /**
  * An entry when the run ends with `code`: the active one done or stopped; after a halt, what is ahead not reached (issue #6);
@@ -418,7 +426,9 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return reshow({ ...run, activity: "", busy: false, calls: [], retry: null, timeline: run.timeline.map((e) => (e.state === "active" && samePhase(e.phase, event.phase) ? recorded(endSteps({ ...e, state: "done", ended: time, currentStep: null }, "done"), run.plan) : e)) });
     case "RoundBegan":
       // A decision loop is a loop inside a phase that the progress panel does not show (D12 of the decision-support plan).
-      return isDecision(event.subject) ? run : { ...run, timeline: roundBegan(run.timeline, event.subject, event.round) };
+      // S17: the terms review's first round opens its own step of Gather Requirements, before the clarification.
+      if (isDecision(event.subject)) return run;
+      return { ...run, timeline: roundBegan(event.subject === "terms" ? inQuestionPhase(run.timeline, termsStep) : run.timeline, event.subject, event.round) };
     case "LoopFinished":
       return { ...run, timeline: openGroups(run.timeline, event.subject, (g) => ({ ...g, result: event.result, done: true })) };
     case "ReviewReceived": {
@@ -448,7 +458,7 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       // Issue #5: the interview's turns are Claude's words, so they are Claude's messages.
       // Issue #21: the turn's count is the active clarification step's.
       const count = { answered: event.answered, total: event.total };
-      const timeline = inQuestionPhase(run.timeline, (steps) => steps.map((st) => (st.state === "active" && st.kind !== "formulate" ? { ...st, count: plus(st.base, count) } : st)));
+      const timeline = inQuestionPhase(run.timeline, (steps) => steps.map((st) => (st.state === "active" && st.kind === "clarification" ? { ...st, count: plus(st.base, count) } : st)));
       return { ...withLeft({ ...run, timeline }, message(run, time, "claude", body, "markdown", event.heading)), absorb: interviewSays(turn) };
     }
     case "InterviewOpened": {

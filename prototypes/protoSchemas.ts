@@ -77,6 +77,9 @@ export const protoSchemas: Record<string, Schema.Top> = {
   planResponse: Schema.Struct({ ...plannerFields, plan: Plan }),
   // S9: the reply of the call that writes the context paragraph and the terms of a question the program composes.
   questionContext: Schema.Struct({ context: Str, terms: Schema.Array(Term) }),
+  // S17: the explanations of the agreed questions' terms, and a response to their review.
+  termsWrite: Schema.Struct({ entries: Schema.Array(Schema.Struct({ id: Str, terms: Schema.Array(Term) })) }),
+  termsResponse: Schema.Struct({ ...plannerFields, entries: Schema.Array(Schema.Struct({ id: Str, terms: Schema.Array(Term) })) }),
 };
 
 export type Json = Record<string, any>;

@@ -57,6 +57,8 @@ export const DecisionQuestionFile = Schema.Struct({ version: V2, decision: S.Pos
 export type DecisionQuestionFile = typeof DecisionQuestionFile.Type;
 /** decision-<k>/analysis.json: the reviewed file of decision k, the validated analysis. */
 export const AnalysisFile = Schema.Struct({ version: V2, analysis: S.DecisionAnalysis });
+/** plan-review/terms.json (S17): the explanations of the agreed questions' terms. */
+export const TermsFile = Schema.Struct({ version: V2, entries: Schema.Array(S.TermsEntry) });
 /** decision-<k>/chosen.json (decision Q4): the user's answer after the analysis, and the option it chose (null for free text). */
 export const ChoiceFile = Schema.Struct({ version: V2, decision: S.PositiveInt, answer: Schema.String, option: Schema.NullOr(Schema.String) });
 export type ChoiceFile = typeof ChoiceFile.Type;

@@ -87,3 +87,17 @@ test("the decision subject: directory, log, its own files, reviewed file and the
   assert.ok(LOG_SUBJECTS.some((s) => typeof s === "object" && "decision" in s), "LOG_SUBJECTS lacks the decision log");
   for (const a of [{ kind: "decisionQuestion", decision: 1 }, { kind: "analysis", decision: 1 }, { kind: "analysisWrite", decision: 1 }, { kind: "chosen", decision: 1 }] as const) assert.equal(guardedRecord(pathOf(a)), true, pathOf(a));
 });
+
+// S17 (issue #36, Q8): the explanations of the agreed questions' terms are a fifth subject, with its own directory, log,
+// reviewed file, id prefix and checkpoint subject.
+test("the terms subject: directory, phase, log, reviewed file, and the inverse of the directory name", () => {
+  assert.equal(subjectDir("terms"), "terms-review");
+  assert.equal(subjectOf("terms-review"), "terms");
+  assert.equal(phaseOf("terms"), 0);
+  assert.equal(pathOf({ kind: "log", subject: "terms" }), "terms-log.json");
+  assert.equal(pathOf({ kind: "review", subject: "terms", round: 2 }), "terms-review/review-2.json");
+  assert.deepEqual(reviewedFile("terms"), { kind: "terms" });
+  assert.equal(pathOf({ kind: "terms" }), "terms.json");
+  assert.ok(LOG_SUBJECTS.includes("terms"), "LOG_SUBJECTS lacks the terms log");
+  assert.equal(guardedRecord(pathOf({ kind: "terms" })), true);
+});

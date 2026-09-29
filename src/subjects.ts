@@ -8,7 +8,10 @@ import * as prompts from "./prompts.ts";
 import { subjectHeading } from "./render.ts";
 import { bothValidations, questionsValidation, type Subject, userQuestionsValidation, type Validation } from "./review.ts";
 import * as S from "./schema.ts";
-import type { DecisionAnalysis, DecisionApplied, DecisionResponse, Plan, PlannerResponse, PlanResponse, PlanWrite, PlanWriteResult, QuestionList, QuestionListResponse, RecordedPlan } from "./schema.ts";
+import type { DecisionAnalysis, DecisionApplied, DecisionResponse, Plan, PlannerResponse, PlanResponse, PlanWrite, PlanWriteResult, QuestionList, QuestionListResponse, QuestionsFile, RecordedPlan, TermsEntry, TermsResponse, TermsWrite } from "./schema.ts";
+import { QuestionInvalid } from "./errors.ts";
+import type { QuestionProblem } from "./prompts.ts";
+import { questionProblems } from "./question.ts";
 import { validatePlan } from "./plan.ts";
 import { normalizeQuestionList } from "./schemaNormalize.ts";
 import { Store, Ui } from "./services.ts";
@@ -45,6 +48,54 @@ export function questionSubject(task: string): Subject<QuestionListResponse, Que
     applyDecisions: { prompt: prompts.questionApplyDecisionsPrompt, schema: S.QuestionList, after: (output) => writeQuestions(task, output), validate: questionListValidation() },
     amend: null,
     proceed: prompts.PROCEED_TO_CLARIFICATION,
+    leaveOnAcceptance: false,
+    leaveOnDecision: false,
+    onUnchanged: "corrective",
+    prepare: null,
+  };
+}
+
+/** The kinds of problem that concern the terms of a question (S17), the ones the explanations can have. */
+const TERM_PROBLEMS: readonly QuestionProblem["kind"][] = ["blankTerm", "blankExplanation", "termAbsent", "duplicateTerm"];
+/**
+ * The validation of the explanations (S17): every entry names a question of the agreed list, and its terms are non-blank,
+ * unique and occur, in their exact words, in that question's context, text, reason, proposed answers or default; an
+ * explanation need not occur. Inside behaviour 10's validation budget, like the list's own validation.
+ */
+export const termsValidation =
+  <T extends Readonly<{ entries: readonly TermsEntry[] }>>(questions: QuestionsFile["questions"]): Validation<T> =>
+  (output) => {
+    const failing = output.entries.flatMap((entry): { where: string; problems: readonly QuestionProblem[] }[] => {
+      const q = questions.find((x) => x.id === entry.id);
+      if (q === undefined) return [{ where: entry.id, problems: [{ kind: "unknownQuestion", subject: entry.id }] }];
+      const problems = questionProblems({ context: q.context, question: q.question, terms: entry.terms, options: q.proposed_answers, details: `${q.reason}\n${q.default_answer ?? ""}` }, "context").filter((p) => TERM_PROBLEMS.includes(p.kind));
+      return problems.length === 0 ? [] : [{ where: entry.id, problems }];
+    });
+    if (failing.length === 0) return Result.succeed({ value: output, notes: [] });
+    return Result.fail({ error: new QuestionInvalid({ questions: failing }), repair: prompts.questionRepairPrompt(failing) });
+  };
+/** Writes the explanations to terms.json. */
+export const saveTerms = (entries: readonly TermsEntry[]): Effect.Effect<void, RunError, Store> =>
+  Effect.gen(function* () {
+    yield* (yield* Store).saveTerms(entries);
+  });
+/**
+ * The explanations of the agreed questions' terms (S17, issue #36): Codex reviews them in cycles; Claude Code returns the
+ * complete amended explanations with every response, which the program validates and writes to terms.json.
+ */
+export function termsSubject(questions: QuestionsFile["questions"]): Subject<TermsResponse, TermsWrite> {
+  const id = "terms" as const;
+  const validate = termsValidation<TermsResponse>(questions);
+  return {
+    id,
+    phase: phaseOf(id),
+    heading: subjectHeading(id),
+    fileLabel: "terms.json",
+    reviewPrompt: prompts.termsReviewPrompt,
+    respond: { prompt: prompts.termsRespondPrompt, schema: S.TermsResponse, after: (output) => saveTerms(output.entries), capability: "records", validate: bothValidations(validate, userQuestionsValidation<TermsResponse>()) },
+    applyDecisions: { prompt: prompts.termsApplyDecisionsPrompt, schema: S.TermsWrite, after: (output) => saveTerms(output.entries), validate: termsValidation<TermsWrite>(questions) },
+    amend: null,
+    proceed: prompts.PROCEED_TO_CLARIFICATION_WITH_TERMS,
     leaveOnAcceptance: false,
     leaveOnDecision: false,
     onUnchanged: "corrective",

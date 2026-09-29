@@ -7,7 +7,7 @@ import type { AgentUnreachable, CodexCallFailed, FileSystemError, GitError, RunE
 import type { SubjectId } from "./artifacts.ts";
 import type { CheckpointPoint, RoundRecord } from "./records.ts";
 import type { DecisionEvent } from "./reviewState.ts";
-import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, RecordedPlan, Review, UserQuestion } from "./schema.ts";
+import type { Config, DecisionAnalysis, ExecOutcome, LogEntry, PlannerResponse, PlanWriteResult, QuestionsFile, RecordedPlan, Review, TermsWrite, UserQuestion } from "./schema.ts";
 import type { LoopResult, Phase, UiEvent } from "./uiEvents.ts";
 import type { ContextRequest } from "./prompts.ts";
 import type { ContextWritten } from "./question.ts";
@@ -151,6 +151,10 @@ export interface StoreShape {
   saveAnalysisWrite(decision: number, output: unknown): Effect.Effect<void, StoreError>;
   /** The validated analysis of decision k, its reviewed file (`decision-<k>/analysis.json`). */
   saveAnalysis(decision: number, analysis: DecisionAnalysis): Effect.Effect<void, StoreError>;
+  /** plan-review/terms.json (S17): the explanations of the agreed questions' terms, the terms subject's reviewed file. */
+  saveTerms(entries: TermsWrite["entries"]): Effect.Effect<void, StoreError>;
+  /** The explanations of terms.json; none when the file does not exist (an empty agreed list, or no question phase). */
+  loadTerms(): Effect.Effect<TermsWrite["entries"], StoreError>;
   loadAnalysis(decision: number): Effect.Effect<DecisionAnalysis, StoreError>;
   /** The user's choice after decision k (`decision-<k>/chosen.json`, decision Q4). */
   saveChoice(decision: number, choice: Choice): Effect.Effect<void, StoreError>;

@@ -110,7 +110,7 @@ test("readCheckpoint requires baseline.json and the four logs for started, and r
     assert.ok(exit._tag === "Failure", "the checkpoint was accepted");
     return String(exit.cause);
   };
-  for (const log of ["issue-log.json", "questions-log.json", "requirements-log.json", "work-review-log.json", "decision-log.json"]) put(log, { version: 2, entries: [] });
+  for (const log of ["issue-log.json", "questions-log.json", "terms-log.json", "requirements-log.json", "work-review-log.json", "decision-log.json"]) put(log, { version: 2, entries: [] });
   put("checkpoint.json", { version: 2, subject: "init", phase: 0, round: 0, stage: "started", time: "t" });
   assert.match(await failure(), /baseline\.json/);
   put("baseline.json", { version: 2, tree: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", time: "t" });
