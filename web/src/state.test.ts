@@ -75,8 +75,10 @@ describe("ordering and the panels", () => {
     expect(bodies(replayed(events))).toEqual(expected);
   });
 
-  test("a plan write is one program message with its result text and questions, live and after a replay", () => {
-    const events: RunEvent[] = [started, notified({ _tag: "PlanWritten", phase: 1, questions: [{ context: "c", question: "Which?", terms: [], options: [] }], resultText: "I wrote the plan." })];
+  // Issue #46 (S19): a question of the plan writer reaches the user once, as its presented question; the plan-written
+  // message does not also list it.
+  test("a plan write is one program message with its result text and no list of questions, live and after a replay", () => {
+    const events: RunEvent[] = [started, notified({ _tag: "PlanWritten", phase: 1, resultText: "I wrote the plan." })];
     for (const s of [fold(live(events)), replayed(events)]) {
       const m = s.run?.left.at(-1);
       expect(m?.format).toBe("markdown");
@@ -84,7 +86,7 @@ describe("ordering and the panels", () => {
       // Issue #6: the run holds one planning phase, so it carries no number.
       expect(m?.body.startsWith(`**${prompts.planWrittenHeading("Planning")}**`)).toBe(true);
       expect(m?.body).toMatch(/I wrote the plan\./);
-      expect(m?.body).toMatch(/- Which\?/);
+      expect(m?.body).not.toMatch(/Questions for you/);
     }
   });
 
@@ -114,7 +116,7 @@ describe("who speaks in the left panel", () => {
   test("an interview turn and its proposed summary are Claude's; a plan write stays Interloq's", () => {
     const turn = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 });
     const summary = notified({ _tag: "InterviewTurn", heading: "Interview", message: "Done.", summary: "# R", answered: 0, total: 1 });
-    const plan = notified({ _tag: "PlanWritten", phase: 1, questions: [], resultText: "" });
+    const plan = notified({ _tag: "PlanWritten", phase: 1, resultText: "" });
     for (const s of [fold(live([started, turn, summary, plan])), replayed([started, turn, summary, plan])]) {
       expect(s.run?.left.map((m) => m.author)).toEqual(["claude", "claude", "program"]);
     }
@@ -166,7 +168,7 @@ describe("Markdown in the left panel", () => {
       said("a_b"),
       notified({ _tag: "InterviewOpened", heading: "Interview", stage: "clarification", total: 1 }),
       notified({ _tag: "InterviewTurn", heading: "Interview", message: "Hi", summary: null, answered: 0, total: 1 }),
-      notified({ _tag: "PlanWritten", phase: 1, questions: [], resultText: "" }),
+      notified({ _tag: "PlanWritten", phase: 1, resultText: "" }),
       asked(1, prompts.decisionPrompt),
     ];
     expect(formats(fold(live(events)))).toEqual(["program:text", "program:text", "claude:markdown", "program:markdown", "program:text"]);

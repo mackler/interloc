@@ -423,7 +423,7 @@ test("the run notifies the phases, the plan write and the execution outcome in o
     probe.ui.notified.filter((e) => phaseLevel.has(e._tag)),
     [
       { _tag: "PhaseBegan", phase: { kind: "planning", n: 1 } },
-      { _tag: "PlanWritten", phase: 1, questions: [], resultText: "plan written" },
+      { _tag: "PlanWritten", phase: 1, resultText: "plan written" },
       { _tag: "LoopFinished", subject: { plan: 1 }, result: "converged" },
       { _tag: "PhaseEnded", phase: { kind: "planning", n: 1 }, result: "converged" },
       { _tag: "PhaseBegan", phase: { kind: "execution", n: 1 } },

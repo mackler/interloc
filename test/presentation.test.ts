@@ -74,6 +74,9 @@ test("S7: every ask is preceded by the presentation of its question, and every k
     assert.ok(order.slice(since + 1, i).some((s) => s.startsWith("presented")), `ask ${i} came without a presented question: ${order.join(", ")}`);
   });
   const questions = presentedQuestions(probe.ui);
+  // S19: the plan writer's question reaches the user once, as its presented question; nothing else announces it.
+  assert.equal(questions.filter((q) => q.origin.kind === "planner").length, 1);
+  assert.ok(!probe.ui.said.some((line) => line.includes(plannerQuestion.question)), "the terminal announced the question in its own way");
   const shape = (q: PresentedQuestion) => Object.keys(q).sort();
   for (const q of questions) {
     assert.deepEqual(shape(q), shape(questions[0]));

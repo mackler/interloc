@@ -53,7 +53,7 @@ export const run = (task: string): Effect.Effect<number, RunError, Services> =>
         const written = yield* planningCall(previous === null ? initialPlanPrompt(task, withRequirements) : revisePlanAfterExecutionPrompt(k - 1, previous), S.PlanWrite, "planning", "records", bothValidations(planField<S.PlanWrite>(planValidation(before)), userQuestionsValidation<S.PlanWrite>()));
         yield* store.savePlanWrite(k, written.output);
         yield* savePlan(k, written.output.plan, before);
-        yield* ui.notify({ _tag: "PlanWritten", phase: k, questions: written.output.questions_for_user, resultText: written.resultText });
+        yield* ui.notify({ _tag: "PlanWritten", phase: k, resultText: written.resultText });
 
         let answered = false;
         for (const question of written.output.questions_for_user) {

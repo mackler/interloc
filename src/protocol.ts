@@ -95,7 +95,7 @@ export const UiEventSchema = Schema.Union([
   // A decision's response carries its amended analysis (W2-R1-1), the plan's the whole plan (issue #6).
   tagged("ResponseReceived", { ...round, response: Schema.Union([S.QuestionListResponse, S.TermsResponse, S.DecisionResponse, S.PlanResponse, S.PlannerResponse]), resultText: Str }),
   tagged("LoopFinished", { subject: SubjectIdSchema, result: Schema.Literals(["converged", "proceed", "revise"]) }),
-  tagged("PlanWritten", { phase: Int, questions: Schema.Array(S.UserQuestion), resultText: Str }),
+  tagged("PlanWritten", { phase: Int, resultText: Str }),
   tagged("ExecutionEnded", { phase: Int, outcome: S.ExecOutcome }),
   tagged("AgentCallStarted", { agent: AgentSchema, purpose: Str }),
   tagged("ToolUsed", { agent: AgentSchema, tool: Str, target: Str }),

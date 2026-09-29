@@ -448,8 +448,8 @@ const notifiedEvent = (run: RunView, event: UiEvent, time: string): RunView => {
       return withRight({ ...run, timeline: openGroups(run.timeline, event.subject, corrected) }, message(run, time, "claude", withoutAuthorHeading(renderResponse(event.response)), "markdown", cycleHeading(subjectHeading(event.subject), event.round)));
     }
     case "PlanWritten": {
-      const questions = event.questions.length === 0 ? "" : `\n\nQuestions for you:\n\n${event.questions.map((q) => `- ${q.question}`).join("\n")}`;
-      const body = `**${planWrittenHeading(phaseName({ kind: "planning", n: event.phase }, countIn(run, { kind: "planning", n: event.phase })))}**${event.resultText === "" ? "" : `\n\n${event.resultText}`}${questions}`;
+      // Issue #46 (S19): the plan writer's questions are presented one by one after this message, never listed in it.
+      const body = `**${planWrittenHeading(phaseName({ kind: "planning", n: event.phase }, countIn(run, { kind: "planning", n: event.phase })))}**${event.resultText === "" ? "" : `\n\n${event.resultText}`}`;
       return withLeft(run, message(run, time, "program", body, "markdown"));
     }
     case "InterviewTurn": {

@@ -66,7 +66,7 @@ const uiEvent: fc.Arbitrary<UiEvent> = fc.oneof(
   fc.record({ _tag: fc.constant("ReviewReceived" as const), subject, round: nat, review, counted: nat }),
   fc.record({ _tag: fc.constant("ResponseReceived" as const), subject, round: nat, response, resultText: text }),
   fc.record({ _tag: fc.constant("LoopFinished" as const), subject, result: fc.constantFrom("converged" as const, "proceed" as const, "revise" as const) }),
-  fc.record({ _tag: fc.constant("PlanWritten" as const), phase: nat, questions: fc.array(userQuestion, { maxLength: 2 }), resultText: text }),
+  fc.record({ _tag: fc.constant("PlanWritten" as const), phase: nat, resultText: text }),
   fc.record({ _tag: fc.constant("ExecutionEnded" as const), phase: nat, outcome }),
   fc.record({ _tag: fc.constant("AgentCallStarted" as const), agent, purpose: text }),
   fc.record({ _tag: fc.constant("ToolUsed" as const), agent, tool: text, target: text }),

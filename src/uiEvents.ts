@@ -22,7 +22,8 @@ export type UiEvent =
   /** The question subject answers with its amended list besides (defect A of docs/page-question-phase-defects.md), a decision with its amended analysis (W2-R1-1), the plan with the whole plan (issue #6). */
   | Readonly<{ _tag: "ResponseReceived"; subject: SubjectId; round: number; response: PlannerResponse | QuestionListResponse | TermsResponse | DecisionResponse | PlanResponse; resultText: string }>
   | Readonly<{ _tag: "LoopFinished"; subject: SubjectId; result: LoopResult }>
-  | Readonly<{ _tag: "PlanWritten"; phase: number; questions: readonly UserQuestion[]; resultText: string }>
+  /** A plan was written; its questions for the user are presented one by one after it (S19), not listed here. */
+  | Readonly<{ _tag: "PlanWritten"; phase: number; resultText: string }>
   | Readonly<{ _tag: "ExecutionEnded"; phase: number; outcome: ExecOutcome }>
   | Readonly<{ _tag: "AgentCallStarted"; agent: Agent; purpose: string }>
   | Readonly<{ _tag: "ToolUsed"; agent: Agent; tool: string; target: string }>
@@ -92,7 +93,7 @@ export const describeEvent = (event: UiEvent): string => {
     case "LoopFinished":
       return `${subjectDir(event.subject)} finished: ${event.result}`;
     case "PlanWritten":
-      return `plan written in phase ${event.phase}, ${plural(event.questions.length, "question")}`;
+      return `plan written in phase ${event.phase}`;
     case "ExecutionEnded":
       return `execution ${event.phase} ended: ${event.outcome.status}`;
     case "AgentCallStarted":
