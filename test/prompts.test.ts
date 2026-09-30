@@ -466,3 +466,18 @@ test("an escaped field carries ESCAPED_VALUE_NOTE once, in the lines the termina
   assert.ok(block.includes("line 1\\r\nline 2"), block);
   assert.equal(block.split(prompts.ESCAPED_VALUE_NOTE).length - 1, 1);
 });
+
+// S49 (W4-R1-1): the permission question names the action and points at the input shown with it; its length does not
+// depend on the input, so that a long command cannot push the answers out of view.
+test("permissionQuestion names neither the command, nor the file, nor the address, and its length does not depend on the input", () => {
+  const long = "echo step;\n".repeat(300);
+  const inputs = [{ command: "ls" }, { command: long }, { file_path: "/tmp/config" }, { file_path: `/tmp/${"d/".repeat(500)}f` }, { url: "https://example.org/x" }];
+  for (const input of inputs) {
+    const q = prompts.permissionQuestion("Bash", input);
+    for (const value of Object.values(input)) assert.ok(!q.includes(value), q);
+    assert.ok(q.endsWith("?"));
+  }
+  assert.equal(prompts.permissionQuestion("Bash", { command: "ls" }).length, prompts.permissionQuestion("Bash", { command: long }).length);
+  assert.equal(prompts.permissionQuestion("Edit", { file_path: "/a" }).length, prompts.permissionQuestion("Edit", { file_path: `/${"b".repeat(3000)}` }).length);
+  assert.ok(prompts.permissionQuestion("Bash", { command: "ls" }).includes(prompts.TOOL_INPUT_HEADING));
+});

@@ -532,3 +532,38 @@ for (const [width, height] of [[390, 844], [640, 400], [1280, 800]] as const) {
     await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
   });
 }
+
+// S49 (W4-R1-1): a permission request whose command runs to 40 lines keeps its question and first option in view together,
+// in the question pane and beside a decision's analysis; the command is read by scrolling the details.
+const PERMISSION_URL = "http://127.0.0.1:8119/";
+for (const [width, height] of [[390, 844], [640, 400]] as const) {
+  test(`(L21) a permission request with a 40-line command at ${width} × ${height}: the question and the first option in view`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await startTask(page, `Prepare the build at ${width}`, PERMISSION_URL);
+    const question = pane(page).locator(".question-text");
+    await expect(question).toContainText("Should it be allowed?");
+    await expect(question).not.toContainText("echo");
+    const firstOption = () => page.getByRole("group", { name: "Proposed answers" }).getByRole("button").first();
+    const together = async (what: string, asked: Locator) => {
+      await firstOption().scrollIntoViewIfNeeded();
+      for (const [name, part] of [["the question", asked], ["the first option", firstOption()]] as const) {
+        const b = await box(part);
+        expect(b.y, `${what}: ${name}'s top`).toBeGreaterThanOrEqual(-1);
+        expect(b.y + b.height, `${what}: ${name} is below the window`).toBeLessThanOrEqual(height + 1);
+      }
+    };
+    await together("in the question pane", question);
+    // The whole command is in the details, reached by scrolling the region above the question.
+    const top = pane(page).locator(".top");
+    await expect(top).toContainText("line 40 of a long command");
+    await top.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+    await expect(top.getByText(/line 40 of a long command/)).toBeInViewport();
+    await together("after scrolling the details", question);
+    await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
+    const analysis = page.getByRole("region", { name: /^Decision 1: / });
+    await expect(analysis).toBeVisible();
+    await together("beside the analysis", analysis.locator(".question-text"));
+    await firstOption().click();
+    await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
+  });
+}

@@ -266,6 +266,17 @@ SCENARIOS.longQuestion = {
   execs: [finished],
 };
 
+// S49 (W4-R1-1): a permission request with a 40-line command, which stays in the details while the question names the
+// action; Help me decide on it shows the analysis beside the question.
+export const LONG_COMMAND = Array.from({ length: 40 }, (_, i) => `echo "line ${i + 1} of a long command that prepares the build directory"`).join("\n");
+const PERMISSION_ANALYSIS = { ...DECIDE_ANALYSIS, decision: "Should the command run?", columns: [{ ...DECIDE_ANALYSIS.columns[0], option: "Allow this" }, { ...DECIDE_ANALYSIS.columns[1], option: "Do not allow this" }] };
+SCENARIOS.permissionLong = {
+  steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }, { output: PERMISSION_ANALYSIS }],
+  reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+  execs: [finished],
+  execScripts: [{ permission: { tool: "Bash", input: { command: LONG_COMMAND, description: "Prepare the build directory" } } }],
+};
+
 const scenario = SCENARIOS[process.env.SCENARIO ?? "converge"] ?? SCENARIOS.converge;
 const port = Number(process.env.PORT ?? "8101");
 const repo = tempRepo();

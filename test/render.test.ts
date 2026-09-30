@@ -250,3 +250,15 @@ test("an analysis's terminal header carries the question's number, context and t
   const order = [at("Claude Code, the coding agent, asks."), at(prompts.TERMS_HEADING), at("Claude Code: the coding agent"), lines.indexOf("Which?")];
   assert.ok(order.every((i, n) => i > 1 && (n === 0 || i > order[n - 1])), JSON.stringify(lines));
 });
+
+// S49: the permission question says the input is "shown above": the terminal prints the details before the question.
+test("questionLines prints a permission's input before its question", async () => {
+  const { questionLines } = await import("../src/render.ts");
+  const { permissionDraft, presentedQuestion } = await import("../src/offer.ts");
+  const q = presentedQuestion(permissionDraft("Bash", { command: "rm -rf build" }), 1);
+  const lines = questionLines(q);
+  const input = lines.findIndex((l) => l.includes("rm -rf build"));
+  const asked = lines.indexOf(q.question);
+  assert.ok(input > 0 && asked > input, JSON.stringify(lines));
+  assert.ok(lines.some((l) => l.includes(prompts.TOOL_INPUT_HEADING)));
+});

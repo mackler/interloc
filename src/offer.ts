@@ -61,6 +61,23 @@ export const permissionOptions: readonly OfferedOption[] = [
   { label: prompts.PERMISSION_ALLOW, description: prompts.PERMISSION_ALLOW_DESCRIPTION, answer: { token: "y" }, matches: (answer) => answer.trim().toLowerCase() === "y" },
   { label: prompts.PERMISSION_DENY, description: prompts.PERMISSION_DENY_DESCRIPTION, answer: { token: "n" }, matches: (answer) => answer.trim().toLowerCase() !== "y" },
 ];
+/**
+ * A permission request as the user is asked it (S34, S49): the tool's input under plain labels in the details, a field
+ * without a label explained as a term, the question naming the action, and the facts a context call is given.
+ */
+export const permissionDraft = (tool: string, input: unknown): QuestionDraft => {
+  const origin: QuestionOrigin = { kind: "permission", tool, input: prompts.toolInputLines(input) };
+  return {
+    origin,
+    context: programContext(origin),
+    terms: prompts.toolInputTerms(input),
+    question: prompts.permissionQuestion(tool, input),
+    options: permissionOptions,
+    details: `${prompts.TOOL_INPUT_HEADING}\n\n${prompts.toolInputLines(input)}`,
+    explain: prompts.permissionFacts(tool, input),
+    decision: null,
+  };
+};
 /** The pause of issue #30: Retry, Proceed and Stop, each chosen by the answers parseUnchangedAnswer reads as it. */
 export const unchangedOptions = (interview: boolean): readonly OfferedOption[] => {
   const d = prompts.unchangedOptionDescriptions(interview);

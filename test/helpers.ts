@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import type { PresentedQuestion } from "../src/question.ts";
 import { confirmingRead } from "../src/confirmEnd.ts";
 import { programWritten } from "../src/questionContext.ts";
-import { recordSubject } from "../src/prompts.ts";
+import { permissionPrompt, recordSubject } from "../src/prompts.ts";
+import { askOffering, permissionDraft } from "../src/offer.ts";
 import type { UiEvent } from "../src/uiEvents.ts";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
@@ -22,7 +23,7 @@ import { pathOf, type SubjectId } from "../src/artifacts.ts";
 import { run } from "../src/run.ts";
 import * as S from "../src/schema.ts";
 import type { Plan as SPlan, RecordedPlan, StepStatus } from "../src/schema.ts";
-import { type DeciderShape, Planner, type PlannerShape, type PlanningCapability, type PlanningPurpose, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, type StepReply, type StepReporter, Store, type StoreShape, Ui, type UiShape } from "../src/services.ts";
+import { type Decider, type DeciderShape, Planner, type PlannerShape, type PlanningCapability, type PlanningPurpose, Reviewer, type ReviewerShape, type ReviewSession, RunConfig, type Services, type StepReply, type StepReporter, Store, type StoreShape, Ui, type UiShape } from "../src/services.ts";
 import { type Platform, platformLayer } from "../src/platform.ts";
 import { makeStore, storeLayer } from "../src/store.ts";
 import { type DeciderDeps, deciderLayer } from "../src/decision.ts";
@@ -163,7 +164,8 @@ export type PlanningStep = { fault?: string; output?: unknown; /** The text of t
 
 /** What one scripted execution does besides its outcome (issue #6): report_step calls, and hooks around them. */
 /** `unreachable` fails the call with AgentUnreachable after its reports, as the adapter does when the user stops at the exhaustion pause (issue #26). */
-export type ExecScript = { reports?: readonly (readonly [string, "started" | "done"])[]; onCall?: () => void; after?: () => void; hang?: boolean; unreachable?: boolean };
+/** `permission`: a permission request the call makes before its reports, asked as the adapter asks it (S49); the answer is recorded in `permissionAnswers`. */
+export type ExecScript = { reports?: readonly (readonly [string, "started" | "done"])[]; onCall?: () => void; after?: () => void; hang?: boolean; unreachable?: boolean; permission?: Readonly<{ tool: string; input: Record<string, unknown> }> };
 
 /** The reply of a context call that a test does not script (S9): a paragraph that keeps the rules, and no term. */
 export const SCRIPTED_CONTEXT = { context: "Interloq, the orchestrator, asks this question on behalf of the run.", terms: [] };
@@ -277,12 +279,20 @@ export class ScriptedPlanner implements PlannerShape {
    */
   /** The Ui an execution call reports its start and end to, as the adapter does; set by testWiring's agents layer. */
   callUi: UiShape | null = null;
-  executing(_prompt: string, reporter: StepReporter): Effect.Effect<ExecOutcome, RunError> {
+  /** The run's Store, for a scripted permission request (S49). */
+  callStore: StoreShape | null = null;
+  readonly permissionAnswers: string[] = [];
+  executing(_prompt: string, reporter: StepReporter): Effect.Effect<ExecOutcome, RunError, Decider> {
     const script = this.execScripts.shift() ?? {};
     const self = this;
     const ui = this.callUi;
     const body = Effect.gen(function* () {
       script.onCall?.();
+      if (script.permission !== undefined && ui !== null && self.callStore !== null) {
+        const draft = permissionDraft(script.permission.tool, script.permission.input);
+        const answer = yield* askOffering((p) => ui.ask(p), permissionPrompt, draft).pipe(Effect.provideService(Ui, ui), Effect.provideService(Store, self.callStore));
+        self.permissionAnswers.push(answer);
+      }
       for (const [id, status] of script.reports ?? []) self.stepReplies.push(yield* reporter(id, status));
       script.after?.();
       if (script.hang) return yield* Effect.never;
@@ -465,6 +475,7 @@ export function testWiring(repo: string, options: TestOptions = {}): { wiring: W
         Planner,
         Effect.gen(function* () {
           planner.callUi = yield* Ui;
+          planner.callStore = yield* Store;
           return planner;
         }),
       ),

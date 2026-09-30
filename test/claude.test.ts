@@ -601,7 +601,8 @@ test("an execution permission request offers Help me decide over Allow and Deny"
   await run(fake.planner.executing("implement the plan", noReporter), decider);
   assert.deepEqual(results, ["allow"]);
   const request = requests[0] as { question: string; options: { label: string }[] };
-  assert.equal(request.question, "Claude Code wants to run the command rm -rf build. Should it be allowed?");
+  assert.equal(request.question, prompts.permissionQuestion("Bash", { command: "rm -rf build" }));
+  assert.ok(!request.question.includes("rm -rf build"));
   // S12: the context call is given the tool and its input in prose, not the input's JSON.
   assert.equal(explained.length, 1);
   assert.match(explained[0].facts, /its tool Bash with this input:\ncommand \(The command\): rm -rf build\n/);

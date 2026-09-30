@@ -1304,12 +1304,22 @@ export function toolInputProse(input: unknown): string {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return value(input);
   return Object.entries(input as Record<string, unknown>).map(([k, v]) => `${k}: ${value(v)}`).join("\n");
 }
-/** The question of a permission request (S12): what the tool would do, named in words where the input says it. */
+/**
+ * The question of a permission request (S12, S49): the tool and the kind of action, pointing at the input shown above it
+ * under TOOL_INPUT_HEADING (the terminal prints the details before the question; the page shows them in the region above
+ * it). The input itself is never in the question, so that a long command cannot push the answers out of view.
+ */
 export function permissionQuestion(tool: string, input: unknown): string {
-  const fields = input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
-  const command = typeof fields.command === "string" ? fields.command : null;
-  const target = typeof fields.file_path === "string" ? fields.file_path : typeof fields.url === "string" ? fields.url : null;
-  const what = command !== null ? `run the command ${command}` : target !== null ? `use its tool ${tool} on ${target}` : `use its tool ${tool}`;
+  const fields = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  const shown = `shown above under "${TOOL_INPUT_HEADING}"`;
+  const what =
+    typeof fields.command === "string"
+      ? `run the command ${shown}`
+      : typeof fields.file_path === "string" || typeof fields.notebook_path === "string"
+        ? `use its tool ${tool} on the file ${shown}`
+        : typeof fields.url === "string"
+          ? `use its tool ${tool} on the web address ${shown}`
+          : `use its tool ${tool} as ${shown}`;
   return `Claude Code wants to ${what}. Should it be allowed?`;
 }
 /** The facts of a permission request a context call is given (S12). */
