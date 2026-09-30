@@ -134,6 +134,17 @@ its delimiters chosen so that no character of it is read as Markdown or HTML and
 empty text and a value of spaces alone, which code cannot show, read "(empty text)" and "(n spaces)". What the user is
 asked to allow is exactly what Claude Code would do [visibility of system status; error prevention].
 
+Since S48 (P5-R1-1, P5-R1-2), a value of whitespace alone is named as its runs in order ("(1 tab, then 2 spaces)"), so
+that two values with the same characters in another order never look alike. A character that a code span or the browser
+would change or hide (a carriage return, a control or zero-width character, a special space at an edge) is written as a
+visible escape of plain ASCII characters, with a note saying what the escapes stand for. The value shown is then the
+value allowed, character for character [visibility of system status; error prevention].
+
+The question of a permission request names the tool and the kind of action and points at the input shown above it; it
+never contains the input itself (S49, W4-R1-1). A long command therefore stays in the details, where it scrolls, and
+cannot push the question's answers out of view (L21 at 390 × 844 and 640 × 400, in the pane and beside an analysis)
+[visibility of system status; recognition rather than recall].
+
 **Explanations of terms.** m3-svelte has no rich tooltip, so the one of a term is built by hand (`TermTooltip`), as
 the plan step's is. It asserts only the explanation the agents wrote and Codex reviewed: plain text, nothing more.
 Every case-sensitive, whole-word occurrence of a term is marked (decision Q5) in the context, the details, the
