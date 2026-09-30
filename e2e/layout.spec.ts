@@ -457,8 +457,11 @@ test("(L18) a long step text at 1280 × 800: hovered, the tooltip stays open whi
   await startTask(page, "Build the rail", "http://127.0.0.1:8115/");
   const button = page.locator("[data-plan-step] button", { hasText: "The long step" });
   await expect(button).toBeVisible();
+  // The pointer may rest where the confirmation of an earlier run's stop was clicked (S25), over another step.
+  await page.mouse.move(0, 0);
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
   await button.hover();
-  const tip = page.getByRole("tooltip");
+  const tip = page.getByRole("tooltip", { name: /^Line 1 of the step's text/ });
   await expect(tip).toBeVisible();
   const b = await box(tip);
   await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 5 });
