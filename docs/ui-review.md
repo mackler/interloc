@@ -150,6 +150,10 @@ and every hidden character written as its escape (S55, W6-R1-1, P7-R1-1): "**mod
 where it is shown. The table of plain labels is looked up by its own entries only, so a name such as "constructor" is
 shown as an unknown setting.
 
+An empty list and an empty object in a tool's input read "(empty list)" and "(empty object)", and an input with no
+settings reads "(no settings)", as plain text rather than code, so that none of them looks like an empty value or like
+the others (S60, W8-R1-2 of work review 8) [error prevention].
+
 Two names still looked alike after that: a key with a line break and the literal key `a\nb`, and a name of spaces or
 tabs alone and a key spelled like its phrase ("(1 space)"). Since S57 (W6-R1-1 of work review 7, P8-R1-1), a name with a
 backslash is shown with escapes too, its backslashes doubled, and a name of whitespace alone has each character written
@@ -187,6 +191,17 @@ when the pointer or focus leaves, stays inside the viewport, and scrolls when lo
 flexibility and efficiency of use]. The marking is applied to the sanitized DOM and inserts a term's text as text, so
 no markup of an agent passes into the page unsanitized. The terminal prints the terms as a "Terms:" block above the
 question (decision Q6).
+
+A term split by inline Markdown, such as "cache key" in "The cache **key** identifies the saved result", is marked and
+explained as one occurrence (S59, W8-R1-1 of work review 8). The validation and the page read the same text, the one
+the reader sees, and match only within one inline run, so a term never matches across two paragraphs, two list items
+or a nested quotation. The context beside an analysis is rendered as Markdown, as it is in the question pane and the
+transcript, so its emphasis and its terms read the same everywhere [consistency and standards; help and documentation].
+
+The answered question in the transcript keeps the exact text of its plain fields (S62, W9-R1-1 of work review 9): the
+question, the options and the terms are plain text in the pane, and they are encoded so that no character of them is
+read as Markdown or HTML there either. "<cache>" is not removed, a bare web address does not become a link, and a blank
+line does not split the question [consistency and standards; visibility of system status].
 
 Since 30 Sep 2026 (W2-R1-3, W2-R1-5, P3-R1-2, P3-R1-3):
 - A term inside a link is marked too, but without a focus stop of its own, so that no interactive element is nested in
