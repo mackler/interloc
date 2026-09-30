@@ -183,13 +183,34 @@ export const renderQuestionRecord = (q: PresentedQuestion): string => {
   const details = q.details.trim() === "" ? "" : `${q.details.trim()}\n\n`;
   return `### ${questionTitle(q.number)}${id === null ? "" : ` (${id})`}\n\n_${originLine(q.origin, q.decision)}_\n\n${context}${details}${terms}**${q.question}**\n\n${options}`;
 };
-/** A question as the page shows it in the conversation (S8): the same parts as the terminal's, in Markdown. */
+/**
+ * A plain field as inline Markdown on one line whose rendered text is exactly the field (S62, W9-R1-1, P10-R1-1,
+ * P10-R1-2): every ASCII punctuation character backslash-escaped, so that no emphasis, code, link, HTML, entity, block
+ * marker or GFM autolink can come from it, and every line break written as the character reference &#10;, which keeps
+ * the break in the text but not in the Markdown, so that no line of the field can start a block. Whitespace at the edges
+ * is written as character references too, since Markdown drops it at the end of a line.
+ */
+export const markdownText = (text: string): string =>
+  text
+    .replace(/\r\n?/g, "\n")
+    .replace(/[!-/:-@[-`{-~]/g, "\\$&")
+    .replace(/^\s+|\s+$/gu, (edge) => [...edge].map((c) => `&#${c.codePointAt(0)};`).join(""))
+    .replace(/\n/g, "&#10;");
+/**
+ * A plain field in bold (S62): inline HTML, which keeps edge whitespace and cannot open a block with text after it. An
+ * empty question, which has no text to follow the tag, gets no line (marked would read the bare tags as an HTML block).
+ */
+const strong = (text: string): string => `<strong>${markdownText(text)}</strong>`;
+/**
+ * A question as the page shows it in the conversation (S8): the same parts as the terminal's, in Markdown. The context
+ * and the details are Markdown where they are written; every other field is plain text, encoded by markdownText.
+ */
 export const questionMarkdown = (q: PresentedQuestion): string => {
   const context = q.context.text.trim() === "" ? "" : `${q.context.text}${q.context.by === "program" ? ` _(${CONTEXT_BY_PROGRAM})_` : ""}\n\n`;
-  const terms = q.terms.length === 0 ? "" : `${TERMS_HEADING}\n\n${q.terms.map((t) => `- **${t.term}**: ${t.explanation}`).join("\n")}\n\n`;
-  const options = q.options.length === 0 ? "" : `\n\n${q.options.map((o) => `- ${"token" in o.answer ? `${o.answer.token}. ` : ""}**${o.label}**${o.description === "" ? "" : ` — ${o.description}`}`).join("\n")}`;
+  const terms = q.terms.length === 0 ? "" : `${TERMS_HEADING}\n\n${q.terms.map((t) => `- ${strong(t.term)}${t.explanation === "" ? "" : `: ${markdownText(t.explanation)}`}`).join("\n")}\n\n`;
+  const options = q.options.length === 0 ? "" : `\n\n${q.options.map((o) => `- ${"token" in o.answer ? `${markdownText(`${o.answer.token}.`)} ` : ""}${strong(o.label)}${o.description === "" ? "" : ` — ${markdownText(o.description)}`}`).join("\n")}`;
   const details = q.details.trim() === "" ? "" : `${q.details.trim()}\n\n`;
-  return `**${questionTitle(q.number)}** · _${originLine(q.origin, q.decision)}_\n\n${context}${details}${terms}**${q.question}**${options}`;
+  return `**${questionTitle(q.number)}** · _${originLine(q.origin, q.decision)}_\n\n${context}${details}${terms}${q.question === "" ? "" : strong(q.question)}${options}`;
 };
 
 // ---- a pause's facts as prose (S11, issue #19) -------------------------------------------------------------------------
