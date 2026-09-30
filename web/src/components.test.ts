@@ -506,7 +506,7 @@ describe("TopBar", () => {
   test("Stop sends stop for the run on one click, and is disabled without a run in progress", () => {
     const stopped: number[] = [];
     const run = { ...emptyRun(3), project: "/p", task: "the task" };
-    const root = show(TopBar, { run, connection: "open", onStop: (r: number) => void stopped.push(r) });
+    const root = show(TopBar, { run, connection: "open", onStop: (_i: string, r: number) => void stopped.push(r) });
     const stop = one(root, "button[name=stop]") as HTMLButtonElement;
     expect(stop.textContent?.trim()).toBe("Stop task");
     stop.click();
@@ -1336,7 +1336,7 @@ describe("the confirmation before a run ends, in the page", () => {
   test("Stop task opens the dialog; only confirming stops the run", () => {
     const stopped: number[] = [];
     const run = { ...emptyRun(3), project: "/p", task: "t" };
-    const root = show(TopBar, { run, connection: "open", onStop: (r: number) => void stopped.push(r) });
+    const root = show(TopBar, { run, connection: "open", onStop: (_i: string, r: number) => void stopped.push(r) });
     one(root, "button[name=stop]").click();
     flushSync();
     expect(stopped).toEqual([]);

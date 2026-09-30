@@ -97,7 +97,7 @@
 
 <svelte:window bind:innerWidth={width} />
 <div class="app">
-  <TopBar {run} connection={view.connection} onStop={(id) => send({ type: "stop", incarnation: view.incarnation ?? "", run: id })} />
+  <TopBar {run} incarnation={view.incarnation} connection={view.connection} onStop={(incarnation, id) => send({ type: "stop", incarnation, run: id })} />
   <!-- A failed page says so for as long as it lasts, apart from the notices, which a new task marks as seen, and keeps
        the answers it could not send until each is dismissed [visibility of system status; help users recognise,
        diagnose and recover from errors; user control and freedom: nothing typed is lost]. -->
@@ -173,6 +173,7 @@
         {/if}
         <QuestionPane
           widget={asking ? run.pending : null}
+          identity={pendingKey(view)}
           answersOnly={deciding}
           onShowConversation={() => (conversationForPrompt = promptKey)}
           {offline}

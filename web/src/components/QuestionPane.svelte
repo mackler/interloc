@@ -12,6 +12,7 @@
   import { Button, Card, TextFieldOutlined, TextFieldOutlinedMultiline } from "m3-svelte";
   import { answerHint, END_RUN_LABEL, HELP_ME_DECIDE, NUMERIC_OPTION_NOTE, originLine, PROGRAM_CONTEXT_NOTE, PROPOSED_ANSWERS_LABEL, questionTitle, SHOW_CONVERSATION, TERMS_HEADING } from "../../../src/prompts.ts";
   import type { Widget } from "../state.ts";
+  import type { DraftKey } from "../draft.ts";
   import { type Ending, endingOf } from "../../../src/input.ts";
   import ConfirmEndDialog from "./ConfirmEndDialog.svelte";
   import { render } from "../markdown.ts";
@@ -25,27 +26,36 @@
   // typed text is lost; help users recognise and recover: the page's banner and notice say why nothing is sent].
   // `answersOnly`: beside a decision's analysis, which shows the question with its context and terms (S22), the pane keeps
   // only the answers [aesthetic and minimalist design: the question is not shown twice].
-  type Props = { widget: Widget | null; text?: string; offline?: boolean; answersOnly?: boolean; onAnswer: (prompt: number, text: string) => void; onShowConversation?: () => void };
-  let { widget, text = $bindable(""), offline = false, answersOnly = false, onAnswer, onShowConversation }: Props = $props();
+  // `identity`: the pending prompt's full key (incarnation, run, prompt; ../draft.ts), to which a confirmation is bound.
+  type Props = { widget: Widget | null; identity?: DraftKey | null; text?: string; offline?: boolean; answersOnly?: boolean; onAnswer: (prompt: number, text: string) => void; onShowConversation?: () => void };
+  let { widget, identity = null, text = $bindable(""), offline = false, answersOnly = false, onAnswer, onShowConversation }: Props = $props();
   const deliver = (value: string) => {
     if (widget === null) return;
     if (!offline) text = "";
     onAnswer(widget.asked.prompt, value);
   };
   // S25: a submission that ends the run, clicked or typed, is confirmed first by the one predicate the terminal uses.
-  let confirming = $state<{ value: string; ending: Ending } | null>(null);
+  // S38 (W2-R1-1): the confirmation holds the identity of the prompt it was opened for, delivers only to that prompt,
+  // and closes without acting as soon as the pending prompt is another one or none [error prevention].
+  const identityOf = (): string | null => (widget === null ? null : JSON.stringify([identity?.incarnation ?? null, identity?.run ?? null, widget.asked.prompt]));
+  const currentIdentity = $derived(identityOf());
+  let confirming = $state<{ value: string; ending: Ending; identity: string } | null>(null);
+  $effect(() => {
+    if (confirming !== null && currentIdentity !== confirming.identity) confirming = null;
+  });
   let returnFocus: HTMLElement | null = null;
   const send = (value: string) => {
     if (widget === null) return;
     const ending = endingOf(widget.asked.kind, widget.asked.mode, value);
     if (ending === null) return deliver(value);
     returnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    confirming = { value, ending };
+    const opened = identityOf();
+    if (opened !== null) confirming = { value, ending, identity: opened };
   };
   const confirm = () => {
-    const value = confirming?.value;
+    const target = confirming;
     confirming = null;
-    if (value !== undefined) deliver(value);
+    if (target !== null && target.identity === identityOf()) deliver(target.value);
   };
   const cancel = () => {
     confirming = null;

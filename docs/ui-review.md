@@ -99,6 +99,11 @@ run-ending buttons (End the run in the question pane, Stop task in the top bar) 
 error color role, the role of a destructive action. End the run stands apart at the end of the row of choices. Ctrl+C in
 the server's terminal is unchanged and asks nothing.
 
+A confirmation is bound to what it was opened for (W2-R1-1, P3-R1-1, 30 Sep 2026): Stop task to the server's
+incarnation and the run, End the run to the prompt's full key (incarnation, run, prompt). If another tab answers the
+prompt, the run ends, or another run or server start takes its place while the dialog is open, the dialog closes
+without acting, so confirming can never stop another run or answer another prompt [error prevention].
+
 ## The question pane and the explanations of terms (issues #46, #59, #36, #20; 29 Sep 2026)
 
 **One presentation for every question.** Every question the user is asked, whatever produced it, is presented the

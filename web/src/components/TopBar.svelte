@@ -11,11 +11,23 @@
 
   // A failed page (defect B of docs/page-question-phase-defects.md) reads "disconnected", and Stop, which can no longer
   // reach the server, is disabled [visibility of system status; error prevention].
-  type Props = { run: RunView | null; connection: ViewState["connection"]; onStop: (run: number) => void };
-  let { run, connection, onStop }: Props = $props();
+  // S38 (W2-R1-1, P3-R1-1): the confirmation is bound to the server's incarnation and the run it was opened for (run ids
+  // restart at 1 in each incarnation), stops exactly that, and closes without acting when either changes [error
+  // prevention].
+  type Props = { run: RunView | null; incarnation?: string | null; connection: ViewState["connection"]; onStop: (incarnation: string, run: number) => void };
+  let { run, incarnation = null, connection, onStop }: Props = $props();
   const CONNECTION: Record<ViewState["connection"], string> = { connecting: "connecting…", open: "connected", reconnecting: "reconnecting…", failed: "disconnected" };
   const running = $derived(run !== null && run.ended === null);
-  let confirming = $state(false);
+  let confirming = $state<{ incarnation: string; run: number } | null>(null);
+  const current = $derived(run === null || run.ended !== null ? null : { incarnation: incarnation ?? "", run: run.id });
+  $effect(() => {
+    if (confirming !== null && (current === null || current.incarnation !== confirming.incarnation || current.run !== confirming.run)) confirming = null;
+  });
+  const confirm = () => {
+    const target = confirming;
+    confirming = null;
+    if (target !== null && current !== null && current.incarnation === target.incarnation && current.run === target.run) onStop(target.incarnation, target.run);
+  };
 </script>
 
 <header class="bar">
@@ -27,9 +39,9 @@
     {/if}
   </div>
   <span class="connection m3-font-label-medium {connection}" role="status">{CONNECTION[connection]}</span>
-  <span class="stop"><Button variant="outlined" type="button" name="stop" disabled={!running || connection === "failed"} onclick={() => (confirming = true)}>Stop task</Button></span>
+  <span class="stop"><Button variant="outlined" type="button" name="stop" disabled={!running || connection === "failed"} onclick={() => (confirming = current)}>Stop task</Button></span>
 </header>
-<ConfirmEndDialog ending={confirming ? "stopTask" : null} onConfirm={() => { confirming = false; if (run !== null) onStop(run.id); }} onCancel={() => (confirming = false)} />
+<ConfirmEndDialog ending={confirming !== null ? "stopTask" : null} onConfirm={confirm} onCancel={() => (confirming = null)} />
 
 <style>
   .bar { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 1rem; background: var(--m3c-surface-container); box-shadow: var(--m3-elevation-2); position: relative; z-index: 1; }
