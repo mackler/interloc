@@ -150,6 +150,13 @@ and every hidden character written as its escape (S55, W6-R1-1, P7-R1-1): "**mod
 where it is shown. The table of plain labels is looked up by its own entries only, so a name such as "constructor" is
 shown as an unknown setting.
 
+Two names still looked alike after that: a key with a line break and the literal key `a\nb`, and a name of spaces or
+tabs alone and a key spelled like its phrase ("(1 space)"). Since S57 (W6-R1-1 of work review 7, P8-R1-1), a name with a
+backslash is shown with escapes too, its backslashes doubled, and a name of whitespace alone has each character written
+as its escape (a space as `\u0020`); the note on escapes is shown beside every escaped name. An empty name reads "The
+tool's setting with an empty name", with no term. Distinct names therefore never display alike, and each keeps a term
+of its own [error prevention; visibility of system status].
+
 The page also keeps that whitespace when it renders the value (S51, W3-R1-2 of work review 5). A code element's text
 keeps every space, but the browser's default white-space collapses runs and drops the spaces at the edges, so "a b",
 "a  b" and "a<tab>b" would look alike and " a " like "a". One rule in `web/src/theme.css`, shared by the question pane,
