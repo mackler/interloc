@@ -606,3 +606,25 @@ test("S57: conversation.md carries the labels and notes of escaped names", async
   assert.ok(record.includes(prompts.unknownSettingLabel(`a${BS}nb`)));
   assert.ok(record.includes(prompts.unknownSettingLabel(SP)));
 });
+
+// S60 (W8-R1-2): an empty list, an empty object and an input with no fields are named by fixed phrases, so that they
+// never display alike.
+test("S60: empty lists, empty objects, the empty text and null display differently, nested too; no fields has its phrase", async () => {
+  const { renderQuestionRecord } = await import("../src/render.ts");
+  const inputs = [{ settings: [] }, { settings: {} }, { settings: "" }, { settings: null }];
+  const lines = inputs.map((i) => prompts.toolInputLines(i));
+  assert.equal(new Set(lines).size, inputs.length, JSON.stringify(lines));
+  const facts = inputs.map((i) => prompts.permissionFacts("T", i));
+  assert.equal(new Set(facts).size, inputs.length, JSON.stringify(facts));
+  assert.ok(lines[0].includes(prompts.EMPTY_LIST_PHRASE));
+  assert.ok(lines[1].includes(prompts.EMPTY_OBJECT_PHRASE));
+  assert.ok(facts[0].includes(prompts.EMPTY_LIST_PHRASE));
+  assert.ok(facts[1].includes(prompts.EMPTY_OBJECT_PHRASE));
+  const nested = [{ edits: [{}] }, { edits: [[]] }];
+  assert.notEqual(prompts.toolInputLines(nested[0]), prompts.toolInputLines(nested[1]));
+  assert.notEqual(prompts.permissionFacts("T", nested[0]), prompts.permissionFacts("T", nested[1]));
+  assert.equal(prompts.toolInputLines({}), prompts.NO_INPUT_PHRASE);
+  assert.ok(prompts.permissionFacts("T", {}).includes(prompts.NO_INPUT_PHRASE));
+  const record = renderQuestionRecord({ number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: lines[0], decision: null });
+  assert.ok(record.includes(prompts.EMPTY_LIST_PHRASE));
+});

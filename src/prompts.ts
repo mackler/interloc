@@ -1300,8 +1300,15 @@ const stringValue = (v: string): string => {
   if (shown.kind === "phrase" || !shown.text.includes("\n")) return `${codeSpan(v)}${note}`;
   return `\n\n${codeFence(shown.text)}\n${shown.text}\n${codeFence(shown.text)}\n${note === "" ? "" : `\n${ESCAPED_VALUE_NOTE}\n`}`;
 };
+/** The phrases of containers without content (S60, W8-R1-2): plain text, never code, so none looks like a string value. */
+export const EMPTY_LIST_PHRASE = "(empty list)";
+export const EMPTY_OBJECT_PHRASE = "(empty object)";
+export const NO_INPUT_PHRASE = "(no settings)";
+const isEmptyObject = (v: unknown): boolean => v !== null && typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0;
 const inputValue = (v: unknown, depth: number): string => {
   if (typeof v === "string") return stringValue(v);
+  if (Array.isArray(v) && v.length === 0) return EMPTY_LIST_PHRASE;
+  if (isEmptyObject(v)) return EMPTY_OBJECT_PHRASE;
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (typeof v === "number") return String(v);
   if (v === null || v === undefined) return "(none)";
@@ -1314,6 +1321,7 @@ const fieldLabel = (key: string): string => knownLabel(key) ?? unknownSettingLab
 /** A tool's input as the user reads it (S34): each field under its plain label, or its own name when it has none. */
 export function toolInputLines(input: unknown): string {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return inputValue(input, 0).trim();
+  if (isEmptyObject(input)) return NO_INPUT_PHRASE;
   return Object.entries(input as Record<string, unknown>).map(([k, v]) => `- ${fieldLabel(k)}: ${inputValue(v, 1)}`).join("\n");
 }
 /** The keys of a tool's input, nested ones included, that have no plain label, each once, in order. */
@@ -1332,11 +1340,13 @@ export function unknownSettingsRequest(keys: readonly string[]): string {
 }
 /** A tool's input in prose (S12): each field on its own line, values as text, never the input's JSON. */
 export function toolInputProse(input: unknown): string {
-  const value = (v: unknown): string =>
-    typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : Array.isArray(v) ? v.map(value).join(", ") : v === null || v === undefined ? "(none)" : Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k} ${value(x)}`).join("; ");
-  if (input === null || typeof input !== "object" || Array.isArray(input)) return value(input);
-  return Object.entries(input as Record<string, unknown>).map(([k, v]) => `${k}: ${value(v)}`).join("\n");
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return proseValue(input);
+  if (isEmptyObject(input)) return NO_INPUT_PHRASE;
+  return Object.entries(input as Record<string, unknown>).map(([k, v]) => `${k}: ${proseValue(v)}`).join("\n");
 }
+/** One value of a tool's input in prose (S12); an empty list or object by its phrase (S60). */
+const proseValue = (v: unknown): string =>
+  typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : Array.isArray(v) && v.length === 0 ? EMPTY_LIST_PHRASE : isEmptyObject(v) ? EMPTY_OBJECT_PHRASE : Array.isArray(v) ? v.map(proseValue).join(", ") : v === null || v === undefined ? "(none)" : Object.entries(v as Record<string, unknown>).map(([k, x]) => `${k} ${proseValue(x)}`).join("; ");
 /**
  * The question of a permission request (S12, S49): the tool and the kind of action, pointing at the input shown above it
  * under TOOL_INPUT_HEADING (the terminal prints the details before the question; the page shows them in the region above
@@ -1358,7 +1368,7 @@ export function permissionQuestion(tool: string, input: unknown): string {
 /** The facts of a permission request a context call is given (S12). */
 export function permissionFacts(tool: string, input: unknown): string {
   const fields = input !== null && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
-  const lines = fields.length === 0 ? toolInputProse(input) : fields.map(([k, v]) => `${k}${knownLabel(k) !== null ? ` (${knownLabel(k)})` : ""}: ${toolInputProse(v)}`).join("\n");
+  const lines = fields.length === 0 ? toolInputProse(input) : fields.map(([k, v]) => `${k}${knownLabel(k) !== null ? ` (${knownLabel(k)})` : ""}: ${proseValue(v)}`).join("\n");
   const unknown = toolInputTerms(input).map((t) => t.term);
   return `Claude Code, while it carries out the plan, asks to use its tool ${tool} with this input:\n${lines}\nIf the user allows it, the tool runs in the project; if not, Claude Code is told so and continues without it. The user is shown the input under the heading "${TOOL_INPUT_HEADING}".${unknown.length === 0 ? "" : `\n${unknownSettingsRequest(unknown)}`}`;
 }

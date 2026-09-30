@@ -227,3 +227,18 @@ describe("names that would otherwise display alike", () => {
     }
   });
 });
+
+// S60 (W8-R1-2): through the page's renderer, empty lists, empty objects, the empty text and null display differently,
+// and the phrases are plain text, never code.
+describe("empty containers in a tool's input", () => {
+  test("the rendered texts differ pairwise, and a phrase is not code", () => {
+    const inputs = [{ settings: [] }, { settings: {} }, { settings: "" }, { settings: null }, { edits: [{}] }, { edits: [[]] }, {}];
+    const texts = inputs.map((i) => rendered(i).textContent ?? "");
+    expect(new Set(texts).size).toBe(inputs.length);
+    for (const [input, phrase] of [[{ settings: [] }, prompts.EMPTY_LIST_PHRASE], [{ settings: {} }, prompts.EMPTY_OBJECT_PHRASE], [{}, prompts.NO_INPUT_PHRASE]] as const) {
+      const el = rendered(input);
+      expect(el.textContent).toContain(phrase);
+      expect(codes(el).some((c) => c.includes(phrase))).toBe(false);
+    }
+  });
+});
