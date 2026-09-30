@@ -140,6 +140,10 @@ would change or hide (a carriage return, a control or zero-width character, a sp
 visible escape of plain ASCII characters, with a note saying what the escapes stand for. The value shown is then the
 value allowed, character for character [visibility of system status; error prevention].
 
+A line break at the start or end of a multi-line value is written as the escape `\n` too (S54, W3-R1-2 of work review 6): a
+fenced block drops the last line break of its content, so "a\nb" and "a\nb\n" would otherwise look alike. The line breaks
+between the lines stay real.
+
 The page also keeps that whitespace when it renders the value (S51, W3-R1-2 of work review 5). A code element's text
 keeps every space, but the browser's default white-space collapses runs and drops the spaces at the edges, so "a b",
 "a  b" and "a<tab>b" would look alike and " a " like "a". One rule in `web/src/theme.css`, shared by the question pane,

@@ -1204,7 +1204,7 @@ export function spacesPhrase(n: number): string {
  * page, the terminal and conversation.md read them alike.
  */
 export const ESCAPED_VALUE_NOTE =
-  "(Characters that cannot be shown are written as escapes: `\\r` is a carriage return, `\\uXXXX` the character with that hexadecimal code, and `\\\\` a backslash of the value.)";
+  "(Characters that cannot be shown are written as escapes: `\\n` is a line break at the start or end of the value, `\\r` a carriage return, `\\uXXXX` the character with that hexadecimal code, and `\\\\` a backslash of the value.)";
 const WHITESPACE_NAMES: Readonly<Record<string, readonly [string, string]>> = {
   " ": ["space", "spaces"],
   "\t": ["tab", "tabs"],
@@ -1241,10 +1241,11 @@ export function shownValue(value: string): ShownValue {
   const marks = chars.map((ch) => {
     const i = at;
     at += ch.length;
-    return HIDDEN.test(ch) || (SPECIAL_SPACE.test(ch) && (i < lead || i >= trail));
+    // S54: a line break at the start or end of a value is lost or merged by the renderer, so it is escaped too.
+    return HIDDEN.test(ch) || ((SPECIAL_SPACE.test(ch) || ch === "\n") && (i < lead || i >= trail));
   });
   if (!marks.some((m) => m)) return { kind: "literal", text: value };
-  const text = chars.map((ch, i) => (marks[i] ? (ch === "\r" ? "\\r" : `\\u${hex4(ch)}`) : ch === "\\" ? "\\\\" : ch)).join("");
+  const text = chars.map((ch, i) => (marks[i] ? (ch === "\r" ? "\\r" : ch === "\n" ? "\\n" : `\\u${hex4(ch)}`) : ch === "\\" ? "\\\\" : ch)).join("");
   return { kind: "escaped", text };
 }
 const longestRun = (value: string, ch: string): number => Math.max(0, ...[...value.matchAll(new RegExp(`\\${ch}+`, "g"))].map((m) => m[0].length));
@@ -1271,7 +1272,7 @@ export const literalText = (v: string): string => stringValue(v);
 const stringValue = (v: string): string => {
   const shown = shownValue(v);
   const note = shown.kind === "escaped" ? ` ${ESCAPED_VALUE_NOTE}` : "";
-  if (shown.kind === "phrase" || !v.includes("\n")) return `${codeSpan(v)}${note}`;
+  if (shown.kind === "phrase" || !shown.text.includes("\n")) return `${codeSpan(v)}${note}`;
   return `\n\n${codeFence(shown.text)}\n${shown.text}\n${codeFence(shown.text)}\n${note === "" ? "" : `\n${ESCAPED_VALUE_NOTE}\n`}`;
 };
 const inputValue = (v: unknown, depth: number): string => {

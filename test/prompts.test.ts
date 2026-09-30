@@ -518,3 +518,15 @@ test("an execution stop's details hold Claude Code's description under their hea
   assert.ok(prompts.execStopDetails(description).includes(description));
   assert.ok(prompts.execStopDetails("  ").includes(prompts.EXEC_STOP_NO_DESCRIPTION));
 });
+
+// S54: the terminal's lines and conversation.md carry the edge line breaks as escapes, as the page does.
+test("a multi-line value's edge line breaks are escaped in the terminal's lines and the record", async () => {
+  const { renderQuestionRecord } = await import("../src/render.ts");
+  const lines = prompts.toolInputLines({ content: "a\nb\n" });
+  assert.ok(lines.includes("a\nb\\n"), lines);
+  assert.ok(lines.includes(prompts.ESCAPED_VALUE_NOTE));
+  assert.ok(prompts.ESCAPED_VALUE_NOTE.includes("`\\n`"));
+  assert.notEqual(prompts.toolInputLines({ content: "a\nb" }), lines);
+  const record = renderQuestionRecord({ number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: lines, decision: null });
+  assert.ok(record.includes("a\nb\\n"));
+});

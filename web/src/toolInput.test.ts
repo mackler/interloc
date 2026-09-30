@@ -120,3 +120,24 @@ describe("the transport pause's fault, rendered in the page", () => {
     expect(renderQuestionRecord(q as never)).toContain(details);
   });
 });
+
+// S54 (W3-R1-2 of work review 6): a multi-line value's leading and trailing line breaks are shown, so that values that
+// differ only in them never display alike (a fenced block drops a trailing line break of its content).
+describe("line breaks at the edges of a value", () => {
+  const values = ["a\nb", "a\nb\n", "a\nb\n\n", "\na\nb", "a\r\n"];
+  test("values that differ only in their edge line breaks display differently", () => {
+    const shown = values.map((v) => rendered({ content: v }).textContent ?? "");
+    expect(new Set(shown).size).toBe(values.length);
+  });
+  test("an escaped edge line break carries the note; a value without one still round-trips", () => {
+    const el = rendered({ content: "a\nb\n" });
+    expect(el.textContent).toContain("a\nb\\n");
+    expect(el.textContent).toContain(render(prompts.ESCAPED_VALUE_NOTE).replace(/<[^>]+>/g, "").trim());
+    expect([...rendered({ content: "a\nb" }).querySelectorAll("pre code")].map((c) => c.textContent)).toEqual(["a\nb\n"]);
+  });
+  test("a multi-line fault ending in a line break keeps it visible in the transport pause's details", () => {
+    const el = document.createElement("div");
+    el.innerHTML = render(prompts.transportDetails(1, "first\nsecond\n"));
+    expect(el.textContent).toContain("second\\n");
+  });
+});
