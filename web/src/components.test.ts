@@ -1256,6 +1256,30 @@ describe("QuestionPane's regions", () => {
     expect(root.querySelector("[role=tooltip]")).not.toBe(null);
   });
 
+  // S41 (W2-R1-4): the numeric option (More cycles) carries its terms like every other option.
+  test("a term in the numeric option's label and description is marked and opens its explanation", () => {
+    const limit: PresentedQuestion = {
+      ...question,
+      terms: [{ term: "cycles", explanation: "Rounds of review and response." }, { term: "reviewer", explanation: "Codex, which checks the plan." }],
+      question: "Should the review stop?",
+      context: { text: "The review has reached its limit.", by: "agent" },
+      details: "",
+      options: [{ label: "More cycles", description: "let the reviewer go on", answer: { numeric: true } }],
+    };
+    const root = show(QuestionPane, { widget: withQuestion(limit), onAnswer: () => undefined });
+    const numeric = one(root, ".numeric");
+    const marks = [...numeric.querySelectorAll<HTMLElement>(".term")];
+    expect(marks.map((m) => m.textContent)).toEqual(["cycles", "reviewer"]);
+    expect(numeric.textContent).toContain(prompts.NUMERIC_OPTION_NOTE);
+    marks[1].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    flushSync();
+    expect(one(root, "[role=tooltip]").textContent).toContain("Codex, which checks the plan.");
+    marks[0].focus();
+    marks[0].dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    flushSync();
+    expect(one(root, "[role=tooltip]").textContent).toContain("Rounds of review and response.");
+  });
+
   test("Show the conversation calls its handler", () => {
     let shown = 0;
     const root = show(QuestionPane, { widget: withQuestion(), onAnswer: () => undefined, onShowConversation: () => void shown++ });

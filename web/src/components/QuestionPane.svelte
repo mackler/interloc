@@ -113,7 +113,7 @@
               {@const token = option.answer.token}
               <Card variant="outlined" onclick={() => send(token)}><span class="card-text"><span class="token">{token}.</span> <TermText inline html={textHtml(option.description === "" ? option.label : `${option.label} — ${option.description}`)} terms={question.terms} /></span></Card>
             {:else}
-              <div class="numeric"><strong>{option.label}</strong>{#if option.description !== ""} — {option.description}{/if}<br /><span class="m3-font-body-small">{NUMERIC_OPTION_NOTE}</span></div>
+              <div class="numeric"><strong><TermText inline html={textHtml(option.label)} terms={question.terms} /></strong>{#if option.description !== ""} — <TermText inline html={textHtml(option.description)} terms={question.terms} />{/if}<br /><span class="m3-font-body-small">{NUMERIC_OPTION_NOTE}</span></div>
             {/if}
           {/each}
         </div>
