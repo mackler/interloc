@@ -1199,25 +1199,81 @@ export const emptyTextPhrase = "(empty text)";
 export function spacesPhrase(n: number): string {
   return `(${n} ${n === 1 ? "space" : "spaces"})`;
 }
-const longestRun = (value: string, ch: string): number => Math.max(0, ...[...value.matchAll(new RegExp(`\\${ch}+`, "g"))].map((m) => m[0].length));
 /**
- * A single-line value as a Markdown code span shown exactly (S45): the delimiter one backtick longer than the value's
- * longest run of backticks, and one space of padding on both sides where the value begins or ends with a backtick or a
- * space, since CommonMark then strips one space from each side. The empty text and spaces alone cannot be a code span.
+ * The note beside a value shown with escapes (S48): what each escape stands for. Its escapes are code spans, so that the
+ * page, the terminal and conversation.md read them alike.
+ */
+export const ESCAPED_VALUE_NOTE =
+  "(Characters that cannot be shown are written as escapes: `\\r` is a carriage return, `\\uXXXX` the character with that hexadecimal code, and `\\\\` a backslash of the value.)";
+const WHITESPACE_NAMES: Readonly<Record<string, readonly [string, string]>> = {
+  " ": ["space", "spaces"],
+  "\t": ["tab", "tabs"],
+  "\n": ["line break", "line breaks"],
+  "\r": ["carriage return", "carriage returns"],
+  "\u00a0": ["non-breaking space", "non-breaking spaces"],
+};
+const hex4 = (ch: string): string => (ch.codePointAt(0) ?? 0).toString(16).toUpperCase().padStart(4, "0");
+/** A value of whitespace alone, named as its runs in order (S48, P5-R1-1): "(1 tab, then 2 spaces)". */
+const whitespaceRuns = (value: string): string => {
+  const runs = [...value.matchAll(/(\s)\1*/gu)].map((m) => {
+    const [one, many] = WHITESPACE_NAMES[m[1]] ?? [`character U+${hex4(m[1])}`, `characters U+${hex4(m[1])}`];
+    const n = [...m[0]].length;
+    return `${n} ${n === 1 ? one : many}`;
+  });
+  return `(${runs.join(", then ")})`;
+};
+/** The characters a code span or a browser changes or hides (S48): controls but tab and line break, format and invisible characters. */
+const HIDDEN = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u00AD\u200B-\u200F\u2028-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/u;
+const SPECIAL_SPACE = /[^\S \t\n]/u;
+/**
+ * How a string value is shown (S48): as it is; as a phrase, when it is empty or whitespace alone; or with escapes, when
+ * it holds a character a code span or a browser would change or hide, or a special space at an edge. With escapes, the
+ * value's own backslashes are doubled, a carriage return is `\\r` and any other such character `\\uXXXX`.
+ */
+export type ShownValue = Readonly<{ kind: "literal" | "escaped" | "phrase"; text: string }>;
+export function shownValue(value: string): ShownValue {
+  if (value === "") return { kind: "phrase", text: emptyTextPhrase };
+  if (/^\s+$/u.test(value)) return { kind: "phrase", text: whitespaceRuns(value) };
+  const chars = [...value];
+  const lead = (/^\s*/u.exec(value)?.[0] ?? "").length;
+  const trail = value.length - (/\s*$/u.exec(value)?.[0] ?? "").length;
+  let at = 0;
+  const marks = chars.map((ch) => {
+    const i = at;
+    at += ch.length;
+    return HIDDEN.test(ch) || (SPECIAL_SPACE.test(ch) && (i < lead || i >= trail));
+  });
+  if (!marks.some((m) => m)) return { kind: "literal", text: value };
+  const text = chars.map((ch, i) => (marks[i] ? (ch === "\r" ? "\\r" : `\\u${hex4(ch)}`) : ch === "\\" ? "\\\\" : ch)).join("");
+  return { kind: "escaped", text };
+}
+const longestRun = (value: string, ch: string): number => Math.max(0, ...[...value.matchAll(new RegExp(`\\${ch}+`, "g"))].map((m) => m[0].length));
+/** A text as a Markdown code span shown exactly (S45): the delimiter one backtick longer than its longest run, padded where an edge is a backtick or a space. */
+const spanOf = (text: string): string => {
+  const tick = "`".repeat(longestRun(text, "`") + 1);
+  const pad = /^[` ]|[` ]$/.test(text) ? " " : "";
+  return `${tick}${pad}${text}${pad}${tick}`;
+};
+/**
+ * A single-line value as a Markdown code span (S45, S48): shown exactly, or with escapes (`shownValue`); the empty text
+ * and whitespace alone, which a code span cannot show, as phrases.
  */
 export function codeSpan(value: string): string {
-  if (value === "") return emptyTextPhrase;
-  if (value.trim() === "") return spacesPhrase(value.length);
-  const tick = "`".repeat(longestRun(value, "`") + 1);
-  const pad = /^[` ]|[` ]$/.test(value) ? " " : "";
-  return `${tick}${pad}${value}${pad}${tick}`;
+  const shown = shownValue(value);
+  return shown.kind === "phrase" ? shown.text : spanOf(shown.text);
 }
 /** The fence of a multi-line value's code block (S45): longer than any run of backticks in it, at least three. */
 export function codeFence(value: string): string {
   return "`".repeat(Math.max(3, longestRun(value, "`") + 1));
 }
+const stringValue = (v: string): string => {
+  const shown = shownValue(v);
+  const note = shown.kind === "escaped" ? ` ${ESCAPED_VALUE_NOTE}` : "";
+  if (shown.kind === "phrase" || !v.includes("\n")) return `${codeSpan(v)}${note}`;
+  return `\n\n${codeFence(shown.text)}\n${shown.text}\n${codeFence(shown.text)}\n${note === "" ? "" : `\n${ESCAPED_VALUE_NOTE}\n`}`;
+};
 const inputValue = (v: unknown, depth: number): string => {
-  if (typeof v === "string") return v.includes("\n") ? `\n\n${codeFence(v)}\n${v}\n${codeFence(v)}\n` : codeSpan(v);
+  if (typeof v === "string") return stringValue(v);
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (typeof v === "number") return String(v);
   if (v === null || v === undefined) return "(none)";

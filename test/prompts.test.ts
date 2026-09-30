@@ -430,3 +430,39 @@ test("codeSpan pads symmetrically where an edge is a backtick or a space, and ne
   assert.equal(prompts.codeSpan("  "), prompts.spacesPhrase(2));
   assert.equal(prompts.codeFence("a\n```\nb"), "````");
 });
+
+// S48 (W3-R1-2 of work review 4, P5-R1-1, P5-R1-2): whitespace alone is named as its runs in order; a character a code
+// span or the browser would change or hide is written as a visible escape, with the note once per field.
+test("codeSpan names whitespace-only values as ordered runs, so that values with equal counts never look alike", () => {
+  assert.equal(prompts.codeSpan("\t"), "(1 tab)");
+  assert.equal(prompts.codeSpan("\u00a0"), "(1 non-breaking space)");
+  assert.equal(prompts.codeSpan("\t  "), "(1 tab, then 2 spaces)");
+  assert.equal(prompts.codeSpan("  \t"), "(2 spaces, then 1 tab)");
+  assert.notEqual(prompts.codeSpan("\t  "), prompts.codeSpan("  \t"));
+  assert.equal(prompts.codeSpan("   "), prompts.spacesPhrase(3));
+});
+
+test("codeSpan escapes carriage returns, controls, invisible characters and special spaces at an edge, with ASCII escapes", () => {
+  const bs = "\\";
+  assert.equal(prompts.codeSpan("before\rafter"), `\`before${bs}rafter\``);
+  assert.equal(prompts.codeSpan("end\r"), `\`end${bs}r\``);
+  assert.equal(prompts.codeSpan("a\u200bb"), `\`a${bs}u200Bb\``);
+  assert.equal(prompts.codeSpan("bell\u0007"), `\`bell${bs}u0007\``);
+  assert.equal(prompts.codeSpan("\u00a0x"), `\`${bs}u00A0x\``);
+  // A backslash of the value is doubled only where the value is shown with escapes.
+  assert.equal(prompts.codeSpan("c:\\dir\r"), `\`c:${bs}${bs}dir${bs}r\``);
+  assert.equal(prompts.codeSpan("c:\\dir"), "`c:\\dir`");
+  // Ordinary spaces and tabs inside printable text stay literal, as does an inner non-breaking space.
+  assert.equal(prompts.codeSpan("a\tb c"), "`a\tb c`");
+  assert.equal(prompts.codeSpan("a\u00a0b"), "`a\u00a0b`");
+});
+
+test("an escaped field carries ESCAPED_VALUE_NOTE once, in the lines the terminal and conversation.md print; a literal one none", () => {
+  const escaped = prompts.toolInputLines({ old_string: "a\rb", new_string: "c\u200b" });
+  assert.equal(escaped.split(prompts.ESCAPED_VALUE_NOTE).length - 1, 2);
+  assert.ok(!escaped.includes("\r") && !escaped.includes("\u200b"));
+  assert.ok(!prompts.toolInputLines({ new_string: "plain" }).includes(prompts.ESCAPED_VALUE_NOTE));
+  const block = prompts.toolInputLines({ content: "line 1\r\nline 2" });
+  assert.ok(block.includes("line 1\\r\nline 2"), block);
+  assert.equal(block.split(prompts.ESCAPED_VALUE_NOTE).length - 1, 1);
+});

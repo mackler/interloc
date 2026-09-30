@@ -61,3 +61,35 @@ describe("a tool's input, rendered in the page", () => {
     expect(codes(el)).toContain("echo <secret> > /tmp/out");
   });
 });
+
+// S48 (P5-R1-1, P5-R1-2): through the page's renderer, a value is shown exactly or with each differing character named.
+describe("whitespace and invisible characters in a tool's input", () => {
+  const text = (input: Record<string, unknown>) => rendered(input).textContent ?? "";
+  test("whitespace alone is named as its runs in order", () => {
+    expect(text({ new_string: "\t" })).toContain("(1 tab)");
+    expect(text({ new_string: "\u00a0" })).toContain("(1 non-breaking space)");
+    const a = text({ old_string: "\t  " });
+    const b = text({ old_string: "  \t" });
+    expect(a).toContain("(1 tab, then 2 spaces)");
+    expect(b).toContain("(2 spaces, then 1 tab)");
+    expect(a).not.toBe(b);
+  });
+  for (const [value, escape, raw] of [
+    ["before\rafter", "before\\rafter", "\r"],
+    ["end\r", "end\\r", "\r"],
+    ["a\u200bb", "a\\u200Bb", "\u200b"],
+    ["bell\u0007", "bell\\u0007", "\u0007"],
+    ["\u00a0x", "\\u00A0x", "\u00a0"],
+  ] as const) {
+    test(`an invisible or control character is a visible escape: ${JSON.stringify(value)}`, () => {
+      const el = rendered({ new_string: value });
+      expect(codes(el)[0]).toBe(escape);
+      expect(el.textContent).not.toContain(raw);
+      expect(el.textContent).toContain(render(prompts.ESCAPED_VALUE_NOTE).replace(/<[^>]+>/g, "").trim());
+    });
+  }
+  test("a multi-line value with CRLF line ends shows the carriage return's escape at the end of its line", () => {
+    const el = rendered({ content: "one\r\ntwo" });
+    expect([...el.querySelectorAll("pre code")].map((c) => c.textContent)).toEqual(["one\\r\ntwo\n"]);
+  });
+});
