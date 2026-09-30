@@ -1194,8 +1194,30 @@ export function unknownSettingLabel(key: string): string {
 /** The fixed explanation of such a field's name, which holds when no context call explained it (P2-R1-2). */
 export const unknownSettingExplanation =
   "The name that Claude Code's tool gives one of its settings. Interloq has no description of this setting; its meaning is what its name says.";
+/** The phrases shown for a value a code span cannot hold (S45, P4-R1-1): the empty text, and spaces alone. */
+export const emptyTextPhrase = "(empty text)";
+export function spacesPhrase(n: number): string {
+  return `(${n} ${n === 1 ? "space" : "spaces"})`;
+}
+const longestRun = (value: string, ch: string): number => Math.max(0, ...[...value.matchAll(new RegExp(`\\${ch}+`, "g"))].map((m) => m[0].length));
+/**
+ * A single-line value as a Markdown code span shown exactly (S45): the delimiter one backtick longer than the value's
+ * longest run of backticks, and one space of padding on both sides where the value begins or ends with a backtick or a
+ * space, since CommonMark then strips one space from each side. The empty text and spaces alone cannot be a code span.
+ */
+export function codeSpan(value: string): string {
+  if (value === "") return emptyTextPhrase;
+  if (value.trim() === "") return spacesPhrase(value.length);
+  const tick = "`".repeat(longestRun(value, "`") + 1);
+  const pad = /^[` ]|[` ]$/.test(value) ? " " : "";
+  return `${tick}${pad}${value}${pad}${tick}`;
+}
+/** The fence of a multi-line value's code block (S45): longer than any run of backticks in it, at least three. */
+export function codeFence(value: string): string {
+  return "`".repeat(Math.max(3, longestRun(value, "`") + 1));
+}
 const inputValue = (v: unknown, depth: number): string => {
-  if (typeof v === "string") return v.includes("\n") ? `\n\n\`\`\`\n${v}\n\`\`\`\n` : v;
+  if (typeof v === "string") return v.includes("\n") ? `\n\n${codeFence(v)}\n${v}\n${codeFence(v)}\n` : codeSpan(v);
   if (typeof v === "boolean") return v ? "yes" : "no";
   if (typeof v === "number") return String(v);
   if (v === null || v === undefined) return "(none)";

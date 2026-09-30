@@ -416,3 +416,17 @@ test("toolInputLines labels the known fields in plain words and keeps each unkno
   // A multi-line value stays readable, and nested fields are labeled too.
   assert.ok(!prompts.toolInputLines({ edits: [{ old_string: "a", new_string: "b" }] }).includes("old_string"));
 });
+
+// S45 (P4-R1-1): the code span of a single-line value: its delimiter one backtick longer than the value's longest run,
+// padded on both sides only where CommonMark would otherwise strip or merge an edge.
+test("codeSpan pads symmetrically where an edge is a backtick or a space, and never a value of spaces alone", () => {
+  assert.equal(prompts.codeSpan("abc"), "`abc`");
+  assert.equal(prompts.codeSpan("a`b"), "``a`b``");
+  assert.equal(prompts.codeSpan("`x"), "`` `x ``");
+  assert.equal(prompts.codeSpan("x`"), "`` x` ``");
+  assert.equal(prompts.codeSpan(" v "), "`  v  `");
+  assert.equal(prompts.codeSpan(" x"), "`  x `");
+  assert.equal(prompts.codeSpan(""), prompts.emptyTextPhrase);
+  assert.equal(prompts.codeSpan("  "), prompts.spacesPhrase(2));
+  assert.equal(prompts.codeFence("a\n```\nb"), "````");
+});

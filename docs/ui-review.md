@@ -127,6 +127,11 @@ twice [aesthetic and minimalist design]. There only the context scrolls, in a re
 lines high (2.75rem), and the question text follows it outside any scrolled region, so a long context cannot push the question
 out of view while its answers are shown (W2-R1-2; L20 at 390 × 844 and 640 × 400).
 
+A permission request's tool input is shown literally (W3-R1-2, P4-R1-1, 30 Sep 2026): every text value is set as code,
+its delimiters chosen so that no character of it is read as Markdown or HTML and no space at its edges is lost. The
+empty text and a value of spaces alone, which code cannot show, read "(empty text)" and "(n spaces)". What the user is
+asked to allow is exactly what Claude Code would do [visibility of system status; error prevention].
+
 **Explanations of terms.** m3-svelte has no rich tooltip, so the one of a term is built by hand (`TermTooltip`), as
 the plan step's is. It asserts only the explanation the agents wrote and Codex reviewed: plain text, nothing more.
 Every case-sensitive, whole-word occurrence of a term is marked (decision Q5) in the context, the details, the
