@@ -153,6 +153,14 @@ never contains the input itself (S49, W4-R1-1). A long command therefore stays i
 cannot push the question's answers out of view (L21 at 390 × 844 and 640 × 400, in the pane and beside an analysis)
 [visibility of system status; recognition rather than recall].
 
+The same holds for every question the program composes (S52, W5-R1-1): no question embeds text of an agent or an SDK,
+only names the program chooses (a phase's heading, a file's name, an agent). The exhaustion pause names the agent and
+the call and asks whether to retry; the attempts and the last fault are in its details, the fault shown literally as
+code, since it is the SDK's text and not Markdown (P6-R1-1). At an execution stop without a question, Claude Code's
+description is in the details, as Markdown like all of Claude's prose. The question pane's bottom region is at least
+5rem high, so that an option card of two lines is seen whole in a short window (L23: a fault of 2,500 characters at
+390 × 844 and 640 × 400) [visibility of system status; recognition rather than recall].
+
 **Explanations of terms.** m3-svelte has no rich tooltip, so the one of a term is built by hand (`TermTooltip`), as
 the plan step's is. It asserts only the explanation the agents wrote and Codex reviewed: plain text, nothing more.
 Every case-sensitive, whole-word occurrence of a term is marked (decision Q5) in the context, the details, the
