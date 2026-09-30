@@ -185,3 +185,45 @@ describe("the names of fields without a plain label", () => {
     expect(term.explanation).toBe(prompts.unknownSettingEscapedExplanation);
   });
 });
+
+// S57 (W6-R1-1 of work review 7, P8-R1-1): through the page's renderer, distinct names display differently, escaped ones
+// carry the note, and every term is marked and passes the validation.
+describe("names that would otherwise display alike", () => {
+  const BS = String.fromCharCode(92);
+  const LF = String.fromCharCode(10);
+  const groups: readonly (readonly string[])[] = [
+    [`a${LF}b`, `a${BS}nb`],
+    [`a${BS}b`, `a${BS}${BS}b`],
+    ["", "(empty text)", "(empty name)"],
+    [" ", "(1 space)", `${BS}u0020`],
+    ["\t", "(1 tab)", `${BS}u0009`],
+  ];
+  const inputOf = (keys: readonly string[]) => {
+    const input: Record<string, unknown> = {};
+    for (const k of keys) Object.defineProperty(input, k, { value: 1, enumerable: true, configurable: true, writable: true });
+    return input;
+  };
+  test("labels differ, the note is beside each escaped name, and every term is marked without a problem", async () => {
+    const { permissionDraft } = await import("../../src/offer.ts");
+    const { questionProblems } = await import("../../src/question.ts");
+    const { markTerms } = await import("./terms.ts");
+    const note = render(prompts.ESCAPED_VALUE_NOTE).replace(/<[^>]+>/g, "").trim();
+    for (const group of groups) {
+      const labels = group.map((k) => {
+        const el = document.createElement("div");
+        el.innerHTML = render(prompts.unknownSettingLabel(k));
+        return el.textContent ?? "";
+      });
+      expect(new Set(labels).size, JSON.stringify(group)).toBe(group.length);
+      for (const k of group) if (k !== "" && prompts.shownName(k).kind === "escaped") expect(rendered(inputOf([k])).textContent).toContain(note);
+      const draft = permissionDraft("FutureTool", inputOf(group));
+      expect(draft.terms.length).toBe(group.filter((k) => k !== "").length);
+      const problems = questionProblems({ context: "c", question: draft.question, terms: draft.terms, options: [], details: draft.details }, "context");
+      expect(problems.filter((p) => p.kind === "termAbsent" || p.kind === "blankTerm" || p.kind === "duplicateTerm"), JSON.stringify(group)).toEqual([]);
+      const el = document.createElement("div");
+      el.innerHTML = markTerms(render(draft.details ?? ""), draft.terms);
+      const marked = new Set([...el.querySelectorAll<HTMLElement>(".term")].map((m) => Number(m.dataset.term)));
+      for (let i = 0; i < draft.terms.length; i++) expect(marked.has(i), draft.terms[i].term).toBe(true);
+    }
+  });
+});

@@ -1193,9 +1193,13 @@ export const TOOL_INPUT_HEADING = "What Claude Code would do:";
  * or HTML: every line break, and every character S48 escapes, is written as its escape (`shownName`).
  */
 export function unknownSettingLabel(key: string): string {
+  // S57: the empty name has nothing to show or to mark; an escaped name carries the note that says what its escapes mean.
+  if (key === "") return EMPTY_NAME_LABEL;
   const shown = shownName(key);
-  return `The tool's setting named ${shown.kind === "phrase" ? shown.text : spanOf(shown.text)}`;
+  return `The tool's setting named ${spanOf(shown.text)}${shown.kind === "escaped" ? ` ${ESCAPED_VALUE_NOTE}` : ""}`;
 }
+/** The label of a field whose name is empty (S57): plain text, not code, and no term. */
+export const EMPTY_NAME_LABEL = "The tool's setting with an empty name";
 /** The fixed explanation of such a field's name, which holds when no context call explained it (P2-R1-2). */
 export const unknownSettingExplanation =
   "The name that Claude Code's tool gives one of its settings. Interloq has no description of this setting; its meaning is what its name says.";
@@ -1211,7 +1215,7 @@ export function spacesPhrase(n: number): string {
  * page, the terminal and conversation.md read them alike.
  */
 export const ESCAPED_VALUE_NOTE =
-  "(Characters that cannot be shown are written as escapes: `\\n` is a line break at the start or end of the value, `\\r` a carriage return, `\\uXXXX` the character with that hexadecimal code, and `\\\\` a backslash of the value.)";
+  "(Characters that cannot be shown are written as escapes: `\\n` is a line break (in a value, one at its start or end), `\\r` a carriage return, `\\uXXXX` the character with that hexadecimal code (`\\u0020` a space), and `\\\\` a backslash of the value or name.)";
 const WHITESPACE_NAMES: Readonly<Record<string, readonly [string, string]>> = {
   " ": ["space", "spaces"],
   "\t": ["tab", "tabs"],
@@ -1241,10 +1245,17 @@ export type ShownValue = Readonly<{ kind: "literal" | "escaped" | "phrase"; text
 export function shownValue(value: string): ShownValue {
   return shownText(value, false);
 }
-/** A name shown on one line (S55): as a value is, and every line break written as the escape `\\n`. */
+/**
+ * A name shown on one line (S55, S57), one-to-one over non-empty names: a name with a backslash, a line break, a hidden
+ * character or whitespace alone is escaped (its backslashes doubled, each whitespace character of a whitespace-only name
+ * written as its escape); any other name is literal and contains no backslash. Never a phrase, so never blank.
+ */
 export function shownName(name: string): ShownValue {
-  return shownText(name, true);
+  if (/^\s+$/u.test(name)) return { kind: "escaped", text: [...name].map(escapeOf).join("") };
+  const shown = shownText(name, true);
+  return shown.kind === "literal" && name.includes("\\") ? { kind: "escaped", text: name.replaceAll("\\", "\\\\") } : shown;
 }
+const escapeOf = (ch: string): string => (ch === "\r" ? "\\r" : ch === "\n" ? "\\n" : `\\u${hex4(ch)}`);
 function shownText(value: string, inline: boolean): ShownValue {
   if (value === "") return { kind: "phrase", text: emptyTextPhrase };
   if (/^\s+$/u.test(value)) return { kind: "phrase", text: whitespaceRuns(value) };
@@ -1259,7 +1270,7 @@ function shownText(value: string, inline: boolean): ShownValue {
     return HIDDEN.test(ch) || (inline && ch === "\n") || ((SPECIAL_SPACE.test(ch) || ch === "\n") && (i < lead || i >= trail));
   });
   if (!marks.some((m) => m)) return { kind: "literal", text: value };
-  const text = chars.map((ch, i) => (marks[i] ? (ch === "\r" ? "\\r" : ch === "\n" ? "\\n" : `\\u${hex4(ch)}`) : ch === "\\" ? "\\\\" : ch)).join("");
+  const text = chars.map((ch, i) => (marks[i] ? escapeOf(ch) : ch === "\\" ? "\\\\" : ch)).join("");
   return { kind: "escaped", text };
 }
 const longestRun = (value: string, ch: string): number => Math.max(0, ...[...value.matchAll(new RegExp(`\\${ch}+`, "g"))].map((m) => m[0].length));
@@ -1311,7 +1322,7 @@ const unknownKeys = (v: unknown): readonly string[] =>
 /** One term per field without a plain label (P2-R1-2): its name, with the fixed explanation. */
 export function toolInputTerms(input: unknown): readonly Readonly<{ term: string; explanation: string }>[] {
   // S55: the term is the name as displayed, so that it is found where the page and the validation look for it.
-  return [...new Set(unknownKeys(input).map(shownName))].flatMap((shown, i, all) =>
+  return [...new Set(unknownKeys(input).filter((k) => k !== "").map(shownName))].flatMap((shown, i, all) =>
     all.findIndex((o) => o.text === shown.text) === i ? [{ term: shown.text, explanation: shown.kind === "literal" ? unknownSettingExplanation : unknownSettingEscapedExplanation }] : [],
   );
 }

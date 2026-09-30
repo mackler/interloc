@@ -546,3 +546,63 @@ test("an unknown field's name is shown literally and looked up by own properties
   const record = renderQuestionRecord({ number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: prompts.toolInputLines(own("<target>")), decision: null });
   assert.ok(record.includes("`<target>`"));
 });
+
+// S57 (W6-R1-1 of work review 7, P8-R1-1): distinct field names never display alike, each keeps its own term, and an
+// escaped name carries the escape note. Keys and expected texts are built from character codes, not escapes in source.
+const BS = String.fromCharCode(92);
+const LF = String.fromCharCode(10);
+const TAB = String.fromCharCode(9);
+const SP = String.fromCharCode(32);
+const withKeys = (keys: readonly string[]) => {
+  const input: Record<string, unknown> = {};
+  for (const k of keys) Object.defineProperty(input, k, { value: 1, enumerable: true, configurable: true, writable: true });
+  return input;
+};
+const NAME_GROUPS: readonly (readonly string[])[] = [
+  [`a${LF}b`, `a${BS}nb`],
+  [`a${BS}b`, `a${BS}${BS}b`],
+  ["", "(empty text)", "(empty name)"],
+  [SP, "(1 space)", `${BS}u0020`],
+  [TAB, "(1 tab)", `${BS}u0009`],
+];
+test("S57: the names of each group display differently, each non-empty one with its own non-blank term", () => {
+  for (const group of NAME_GROUPS) {
+    const input = withKeys(group);
+    const shown = group.filter((k) => k !== "").map((k) => prompts.shownName(k).text);
+    assert.equal(new Set(shown).size, shown.length, JSON.stringify(group));
+    const labels = group.map((k) => prompts.unknownSettingLabel(k));
+    assert.equal(new Set(labels).size, labels.length, JSON.stringify(group));
+    const lines = prompts.toolInputLines(input);
+    for (const label of labels) assert.ok(lines.includes(label), label);
+    const terms = prompts.toolInputTerms(input);
+    assert.equal(terms.length, group.filter((k) => k !== "").length, JSON.stringify(group));
+    assert.equal(new Set(terms.map((t) => t.term)).size, terms.length);
+    for (const t of terms) {
+      assert.ok(t.term.trim() !== "", JSON.stringify(t));
+      assert.ok(labels.some((l) => l.includes(t.term)), t.term);
+    }
+  }
+  assert.equal(prompts.shownName(SP).text, `${BS}u0020`);
+  assert.equal(prompts.shownName(`${BS}u0020`).text, `${BS}${BS}u0020`);
+  assert.equal(prompts.shownName(TAB).text, `${BS}u0009`);
+  assert.equal(prompts.unknownSettingLabel(""), prompts.EMPTY_NAME_LABEL);
+  assert.ok(prompts.unknownSettingLabel(`a${LF}b`).includes(prompts.ESCAPED_VALUE_NOTE));
+  assert.ok(prompts.unknownSettingLabel(`a${BS}nb`).includes(prompts.ESCAPED_VALUE_NOTE));
+  assert.ok(!prompts.unknownSettingLabel("mode").includes(prompts.ESCAPED_VALUE_NOTE));
+});
+
+test("S57: shownName is one-to-one over non-empty names, never blank, and the empty name's label is unlike any other", async () => {
+  const fc = (await import("fast-check")).default;
+  const chars = fc.constantFrom("a", "b", BS, LF, TAB, SP, "n", "u", "0", "2", String.fromCharCode(13), String.fromCharCode(0x200b));
+  const names = fc.array(chars, { minLength: 1, maxLength: 6 }).map((cs) => cs.join(""));
+  fc.assert(fc.property(names, names, (a, b) => a === b || prompts.shownName(a).text !== prompts.shownName(b).text), { numRuns: 20000, examples: [[`a${LF}b`, `a${BS}nb`], [SP, `${BS}u0020`]] });
+  fc.assert(fc.property(names, (a) => prompts.shownName(a).text.trim() !== "" && prompts.unknownSettingLabel(a) !== prompts.unknownSettingLabel("")));
+});
+
+test("S57: conversation.md carries the labels and notes of escaped names", async () => {
+  const { renderQuestionRecord } = await import("../src/render.ts");
+  const details = prompts.toolInputLines(withKeys([`a${BS}nb`, SP]));
+  const record = renderQuestionRecord({ number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details, decision: null });
+  assert.ok(record.includes(prompts.unknownSettingLabel(`a${BS}nb`)));
+  assert.ok(record.includes(prompts.unknownSettingLabel(SP)));
+});
