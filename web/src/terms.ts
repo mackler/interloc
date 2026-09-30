@@ -17,16 +17,21 @@ const hitsIn = (text: string, terms: readonly Term[]): readonly Hit[] => {
   return all.reduce<Hit[]>((kept, hit) => (kept.length > 0 && hit.at < kept[kept.length - 1].at + kept[kept.length - 1].length ? kept : [...kept, hit]), []);
 };
 
-/** The HTML with every occurrence of a term wrapped in a focusable `.term` naming the term's index (`data-term`). */
+/**
+ * The HTML with every occurrence of a term wrapped in a `.term` naming the term's index (`data-term`). A mark is
+ * focusable, except inside a link (S40, W2-R1-3): the link is already a focus stop, and focusing it explains every term
+ * it contains (TermText), so that no interactive element is nested in another.
+ */
 export const markTerms = (html: string, terms: readonly Term[]): string => {
   if (terms.length === 0) return html;
   const root = document.createElement("template");
   root.innerHTML = html;
   const walker = document.createTreeWalker(root.content, NodeFilter.SHOW_TEXT);
   const nodes: Text[] = [];
-  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) if ((n.parentElement?.closest("a, .term") ?? null) === null) nodes.push(n as Text);
+  for (let n = walker.nextNode(); n !== null; n = walker.nextNode()) if ((n.parentElement?.closest(".term") ?? null) === null) nodes.push(n as Text);
   for (const node of nodes) {
     const text = node.data;
+    const inLink = (node.parentElement?.closest("a") ?? null) !== null;
     const hits = hitsIn(text, terms);
     if (hits.length === 0) continue;
     const parts = document.createDocumentFragment();
@@ -35,7 +40,7 @@ export const markTerms = (html: string, terms: readonly Term[]): string => {
       if (hit.at > from) parts.append(text.slice(from, hit.at));
       const mark = document.createElement("span");
       mark.className = "term";
-      mark.tabIndex = 0;
+      if (!inLink) mark.tabIndex = 0;
       mark.dataset.term = String(hit.index);
       mark.textContent = text.slice(hit.at, hit.at + hit.length);
       parts.append(mark);

@@ -2,8 +2,10 @@
   // The explanation of a term (S28, issue #36): a hand-built M3 rich tooltip, as StepTooltip is, since m3-svelte has
   // none. It asserts only the explanation the agents wrote and Codex reviewed. The text is plain text, never HTML. It is
   // placed inside the viewport, below or above its anchor, with a size limit and its own scrolling.
-  type Props = { id: string; term: string; explanation: string; anchor: HTMLElement; onEnter: () => void; onLeave: () => void };
-  let { id, term, explanation, anchor, onEnter, onLeave }: Props = $props();
+  // `entries`: one term, or every distinct term of a focused link, in order of occurrence (S40).
+  type Entry = Readonly<{ term: string; explanation: string }>;
+  type Props = { id: string; entries: readonly Entry[]; anchor: HTMLElement; onEnter: () => void; onLeave: () => void };
+  let { id, entries, anchor, onEnter, onLeave }: Props = $props();
   let tip: HTMLDivElement | undefined = $state();
   let place = $state("");
   const MARGIN = 8;
@@ -24,8 +26,10 @@
 
 <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
 <div role="tooltip" {id} class="tooltip m3-font-body-medium" style={place} tabindex="0" bind:this={tip} onmouseenter={onEnter} onmouseleave={onLeave}>
-  <strong class="m3-font-title-small">{term}</strong>
-  <p>{explanation}</p>
+  {#each entries as entry, i (i)}
+    <strong class="m3-font-title-small">{entry.term}</strong>
+    <p>{entry.explanation}</p>
+  {/each}
 </div>
 
 <style>
@@ -45,4 +49,5 @@
   }
   .tooltip:focus-visible { outline: 2px solid var(--m3c-secondary); }
   p { margin: 0.25rem 0 0; }
+  p + strong { display: block; margin-top: 0.5rem; }
 </style>

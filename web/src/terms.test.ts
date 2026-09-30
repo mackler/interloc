@@ -22,14 +22,28 @@ describe("markTerms", () => {
     expect(termOccurrences(text, "zod").length).toBe(2);
   });
 
-  test("the marking comes after sanitizing: a term's text is inserted as text, and nothing inside a link is marked", () => {
+  test("the marking comes after sanitizing: a term's text is inserted as text", () => {
     const el = marked(render("[zod](https://zod.dev) and zod <img src=x onerror=alert(1)>"));
-    expect(el.querySelectorAll(".term").length).toBe(1);
+    expect(el.querySelectorAll(".term").length).toBe(2);
     expect(el.innerHTML).not.toMatch(/onerror/);
     const hostile = document.createElement("div");
     hostile.innerHTML = markTerms("<p>a &lt;b&gt; b</p>", [{ term: "<b>", explanation: "x" }]);
     expect(hostile.querySelector("b")).toBe(null);
     expect(hostile.querySelector(".term")?.textContent).toBe("<b>");
+  });
+
+  // S40 (W2-R1-3): a term inside a link is marked too, without a focus stop of its own; the link stays a working link.
+  test("a term inside a link is marked without tabindex, and the link keeps its href and its focus", () => {
+    const el = marked(render("Use [zod](https://zod.dev)."));
+    const link = el.querySelector<HTMLAnchorElement>("a")!;
+    expect(link.getAttribute("href")).toBe("https://zod.dev");
+    const mark = link.querySelector<HTMLElement>(".term")!;
+    expect(mark.textContent).toBe("zod");
+    expect(mark.hasAttribute("tabindex")).toBe(false);
+    expect(mark.dataset.term).toBe("0");
+    const two = document.createElement("div");
+    two.innerHTML = markTerms(render("[SQLite database](https://example.org)"), [{ term: "SQLite", explanation: "An engine." }, { term: "database", explanation: "Stored data." }]);
+    expect([...two.querySelectorAll<HTMLElement>("a .term")].map((m) => [m.textContent, m.hasAttribute("tabindex")])).toEqual([["SQLite", false], ["database", false]]);
   });
 
   test("without terms the HTML is unchanged", () => {

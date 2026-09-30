@@ -9,7 +9,8 @@
   type Term = Readonly<{ term: string; explanation: string }>;
   type Props = { html: string; terms: readonly Term[]; class?: string; inline?: boolean };
   let { html, terms, class: className = "", inline = false }: Props = $props();
-  let open = $state<{ anchor: HTMLElement; index: number } | null>(null);
+  // The open tooltip: its anchor (a mark, or a link that contains marks, S40) and the terms it explains, in order.
+  let open = $state<{ anchor: HTMLElement; indices: readonly number[] } | null>(null);
   const id = `term-tip-${Math.random().toString(36).slice(2)}`;
   let leaving: ReturnType<typeof setTimeout> | null = null;
   const stay = () => {
@@ -19,13 +20,19 @@
   // The timer is the component's edge: cleared when the component is destroyed.
   $effect(() => stay);
   const markOf = (target: EventTarget | null): HTMLElement | null => (target instanceof HTMLElement ? target.closest<HTMLElement>(".term") : null);
-  const show = (mark: HTMLElement | null) => {
-    if (mark === null) return;
+  // A focused link explains every distinct term it contains, in order of occurrence (S40, P3-R1-2).
+  const linkOf = (target: EventTarget | null): HTMLElement | null => (target instanceof HTMLAnchorElement && target.querySelector(".term") !== null ? target : null);
+  const termsOf = (anchor: HTMLElement): readonly number[] =>
+    anchor.classList.contains("term") ? [Number(anchor.dataset.term)] : [...new Set([...anchor.querySelectorAll<HTMLElement>(".term")].map((m) => Number(m.dataset.term)))];
+  const anchorOf = (target: EventTarget | null): HTMLElement | null => linkOf(target) ?? markOf(target);
+  const show = (anchor: HTMLElement | null) => {
+    if (anchor === null) return;
     stay();
     open?.anchor.removeAttribute("aria-describedby");
-    mark.setAttribute("aria-describedby", id);
-    open = { anchor: mark, index: Number(mark.dataset.term) };
+    anchor.setAttribute("aria-describedby", id);
+    open = { anchor, indices: termsOf(anchor) };
   };
+  const entries = $derived(open === null ? [] : open.indices.flatMap((i) => (terms[i] === undefined ? [] : [terms[i]])));
   const close = () => {
     stay();
     open?.anchor.removeAttribute("aria-describedby");
@@ -43,11 +50,11 @@
   role="presentation"
   onmouseover={(e: MouseEvent) => show(markOf(e.target))}
   onmouseout={(e: MouseEvent) => markOf(e.target) !== null && leave()}
-  onfocusin={(e: FocusEvent) => show(markOf(e.target))}
-  onfocusout={(e: FocusEvent) => markOf(e.target) !== null && close()}
+  onfocusin={(e: FocusEvent) => show(anchorOf(e.target))}
+  onfocusout={(e: FocusEvent) => anchorOf(e.target) !== null && close()}
   onkeydown={(e: KeyboardEvent) => e.key === "Escape" && close()}>{@html markTerms(html, terms)}</svelte:element>
-{#if open !== null && terms[open.index] !== undefined}
-  <TermTooltip {id} term={terms[open.index].term} explanation={terms[open.index].explanation} anchor={open.anchor} onEnter={stay} onLeave={leave} />
+{#if open !== null && entries.length > 0}
+  <TermTooltip {id} {entries} anchor={open.anchor} onEnter={stay} onLeave={leave} />
 {/if}
 
 <style>
