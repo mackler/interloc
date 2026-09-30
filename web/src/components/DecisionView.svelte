@@ -19,6 +19,7 @@
   import { type EntryView, viewOf } from "../../../src/analysisView.ts";
   import type { UiEvent } from "../../../src/uiEvents.ts";
   import { textHtml } from "../terms.ts";
+  import { render } from "../markdown.ts";
   import TermText from "./TermText.svelte";
 
   type Props = { event: Extract<UiEvent, { _tag: "DecisionAnalyzed" }>; narrow: boolean; onShowConversation: () => void };
@@ -66,7 +67,12 @@
        [recognition rather than recall: what is being decided stays beside the arguments]. -->
   <div class="question">
     <!-- S28: the question's terms carry their explanations here too; the analysis text does not. -->
-    <p class="question-context m3-font-body-medium"><TermText inline html={textHtml(event.presented.context.text)} terms={event.presented.terms} />{#if event.presented.context.by === "program"} <span class="by">({CONTEXT_BY_PROGRAM})</span>{/if}</p>
+    <!-- S46 (W3-R1-3): the details the question is about (a permission's input, a pause's facts, an agreed question's
+         reason) follow the context in the same scrolling region, as the terminal prints them. -->
+    <div class="question-context m3-font-body-medium">
+      <p class="context-text"><TermText inline html={textHtml(event.presented.context.text)} terms={event.presented.terms} />{#if event.presented.context.by === "program"} <span class="by">({CONTEXT_BY_PROGRAM})</span>{/if}</p>
+      {#if event.presented.details.trim() !== ""}<TermText class="details markdown" html={render(event.presented.details)} terms={event.presented.terms} />{/if}
+    </div>
     <p class="question-text m3-font-title-small"><TermText inline html={textHtml(event.presented.question)} terms={event.presented.terms} /></p>
   </div>
   {#if narrow}
@@ -110,6 +116,9 @@
   .question { flex-shrink: 0; display: flex; flex-direction: column; gap: 0.5rem; }
   .question-context { margin: 0; box-sizing: border-box; max-height: 2.75rem; overflow-y: auto; padding: 0.5rem 0.75rem; border-radius: var(--m3-shape-small); background: var(--m3c-surface-container); color: var(--m3c-on-surface-variant); white-space: pre-wrap; }
   .question-context .by { font-style: italic; }
+  .context-text { margin: 0; }
+  .question-context :global(.details) { margin-top: 0.5rem; white-space: normal; }
+  .question-context :global(.details pre) { overflow-x: auto; }
   .question-text { margin: 0; }
   .hint, .narrow { margin: 0; color: var(--m3c-on-surface-variant); }
   /* The columns and the recommendation scroll in both directions within the area, so that the question and the prompt stay in view. */

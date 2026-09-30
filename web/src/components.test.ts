@@ -783,6 +783,25 @@ describe("DecisionView", () => {
     }
   });
 
+  // S46 (W3-R1-3): the question's details are shown with its context beside the analysis, as in the terminal.
+  test("the question's details are shown in the context region, as Markdown with its terms marked, the question outside", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const { analysisLines } = await import("../../src/render.ts");
+    const details = `${prompts.TOOL_INPUT_HEADING}\n\n${prompts.toolInputLines({ command: "rm -rf build" })}\n\nThe **build** directory holds the bundle.`;
+    const withDetails = { ...presented, details, terms: [{ term: "bundle", explanation: "The built page." }] };
+    const root = show(DecisionView, { event: { ...(event as object), presented: withDetails } as never, narrow: false, onShowConversation: () => undefined });
+    const context = one(root, ".question-context");
+    expect(context.textContent).toContain(prompts.TOOL_INPUT_HEADING);
+    expect(context.querySelector("code")?.textContent).toBe("rm -rf build");
+    expect(context.querySelector("strong")?.textContent).toBe("build");
+    expect([...context.querySelectorAll(".term")].map((m) => m.textContent)).toEqual(["bundle"]);
+    expect(one(root, ".question-text").closest(".question-context")).toBe(null);
+    // The terminal prints the same details beside its analysis.
+    const lines = analysisLines(2, withDetails as never, { columns: [], recommendation: null } as never).join("\n");
+    expect(lines).toContain(prompts.TOOL_INPUT_HEADING);
+    expect(lines).toContain("rm -rf build");
+  });
+
   test("one column per option in order, the heading Disadvantages: in each, arguments offset by level, symbols, the recommendation", async () => {
     const { default: DecisionView } = await import("./components/DecisionView.svelte");
     const shown: string[] = [];
