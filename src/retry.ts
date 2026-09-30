@@ -61,7 +61,7 @@ export const withTransportRetry = <A, E, R>(
         // S10 (G-R1-1): the context of a pause for Claude Code is the program's own at once, since a context call would
         // need the agent that cannot be reached; a pause for Codex gets its context from Claude Code (S12).
         const facts = prompts.transportFacts(agent, what, n, error.message);
-        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.transportExhaustedQuestion(agent, what, n, error.message), options: transportOptions(), ...(agent === "codex" ? { explain: facts } : {}), decision: null };
+        const draft: QuestionDraft = { origin, context: programContext(origin), terms: [], question: prompts.transportExhaustedQuestion(agent, what), options: transportOptions(), details: prompts.transportDetails(n, error.message), ...(agent === "codex" ? { explain: facts } : {}), decision: null };
         const answer = yield* askOffering((p) => ui.ask(p), prompts.transportPrompt, draft, (a) => parseTransportAnswer(a) !== null);
         const choice = parseTransportAnswer(answer) ?? "stop";
         yield* store.converse(prompts.transportDecisionLine(choice, agent, what));

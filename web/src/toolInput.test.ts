@@ -93,3 +93,30 @@ describe("whitespace and invisible characters in a tool's input", () => {
     expect([...el.querySelectorAll("pre code")].map((c) => c.textContent)).toEqual(["one\\r\ntwo\n"]);
   });
 });
+
+// S52 (W5-R1-1, P6-R1-1): the fault of the transport pause moved into its details, which the page renders as Markdown.
+// The fault is text of the SDK or the CLI, not Markdown, so it is shown literally, as a tool's input is.
+describe("the transport pause's fault, rendered in the page", () => {
+  const faults = ["Connection failed: <endpoint> unavailable", "a ` tick and a ``` run", "*stars* and _underscores_"];
+  const renderedDetails = (fault: string): HTMLElement => {
+    const el = document.createElement("div");
+    el.innerHTML = render(prompts.transportDetails(3, fault));
+    return el;
+  };
+  for (const fault of faults) {
+    test(`a single-line fault is shown exactly: ${JSON.stringify(fault)}`, () => {
+      const el = renderedDetails(fault);
+      expect(el.textContent).toContain(prompts.TRANSPORT_FAULT_HEADING);
+      expect(codes(el)).toEqual([fault]);
+    });
+  }
+  test("a fault of several lines is shown exactly in its block", () => {
+    const fault = "request failed\n    at <anonymous>\n```";
+    expect([...renderedDetails(fault).querySelectorAll("pre code")].map((c) => c.textContent)).toEqual([`${fault}\n`]);
+  });
+  test("the record in conversation.md carries the same details", () => {
+    const details = prompts.transportDetails(3, faults[0]);
+    const q = { number: 1, origin: { kind: "transport", agent: "codex", what: "the review", attempts: 3, fault: faults[0] }, context: { text: "c", by: "program" }, terms: [], question: prompts.transportExhaustedQuestion("codex", "the review"), options: [], details, decision: null } as const;
+    expect(renderQuestionRecord(q as never)).toContain(details);
+  });
+});

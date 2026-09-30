@@ -1266,6 +1266,8 @@ export function codeSpan(value: string): string {
 export function codeFence(value: string): string {
   return "`".repeat(Math.max(3, longestRun(value, "`") + 1));
 }
+/** A text shown exactly, as code (S45, S48): a span for one line, a fenced block for several, with the escapes' note where needed. */
+export const literalText = (v: string): string => stringValue(v);
 const stringValue = (v: string): string => {
   const shown = shownValue(v);
   const note = shown.kind === "escaped" ? ` ${ESCAPED_VALUE_NOTE}` : "";
@@ -1418,9 +1420,21 @@ export function transportRetryLine(agent: "claude" | "codex", attempt: number, o
 export function transportRecoveredLine(agent: "claude" | "codex"): string {
   return `${agentName(agent)}: connection restored`;
 }
-/** The question of the pause when the retries are exhausted. */
-export function transportExhaustedQuestion(agent: "claude" | "codex", what: string, attempts: number, fault: string): string {
-  return `${agentName(agent)} could not be reached for ${what} after ${attempts} attempts (${fault}). Retry again, or stop the run?`;
+/**
+ * The question of the pause when the retries are exhausted (S52, W5-R1-1): the agent and the kind of call, both chosen
+ * by the program. The attempts and the fault, whose length the program does not choose, are in its details.
+ */
+export function transportExhaustedQuestion(agent: "claude" | "codex", what: string): string {
+  return `${agentName(agent)} could not be reached for ${what}; the attempts and the last error are shown above. Retry again, or stop the run?`;
+}
+/** The heading of the exhaustion pause's details (S52). */
+export const TRANSPORT_FAULT_HEADING = "Why the agent could not be reached:";
+/**
+ * The exhaustion pause's details (S52, P6-R1-1): the attempts in the program's words, and the last fault. The fault is
+ * text of the SDK or the CLI, not Markdown, so it is shown literally, as a tool's input is (S45, S48).
+ */
+export function transportDetails(attempts: number, fault: string): string {
+  return `${TRANSPORT_FAULT_HEADING}\n\nInterloq tried ${attempts} ${attempts === 1 ? "time" : "times"}, waiting longer before each new attempt. The last error, as reported:${literalText(fault).startsWith("\n") ? "" : " "}${literalText(fault)}`;
 }
 export function transportDecisionLine(answer: "retry" | "stop", agent: "claude" | "codex", what: string): string {
   return `**User decision:** ${answer === "retry" ? "retry again" : "stop the run"} after ${agentName(agent)} could not be reached for ${what}.\n\n`;
@@ -1585,10 +1599,19 @@ export function agreedDetails(reason: string): string {
 export const REPLY_QUESTION = "What do you want to reply to Claude Code?";
 /** The question of the summary's confirmation. */
 export const CONFIRM_SUMMARY_QUESTION = "Claude Code has written this summary of the requirements from the clarification. Does it state the requirements correctly?";
-/** The question at a stop of an execution phase whose report carried no question the user was asked. */
-export function execStopQuestion(description: string): string {
-  const said = description.trim() === "" ? "Claude Code gave no description of why it stopped." : `Claude Code says: ${description.trim()}`;
-  return `${said} What should Claude Code know or do when the plan is revised?`;
+/**
+ * The question at a stop of an execution phase whose report carried no question the user was asked (S52, W5-R1-1):
+ * fixed; Claude Code's description is in its details (`execStopDetails`).
+ */
+export function execStopQuestion(): string {
+  return "Claude Code stopped before the plan was finished, for the reason shown above. What should Claude Code know or do when the plan is revised?";
+}
+/** The heading of an execution stop's details, and what they say when Claude Code gave no description (S52). */
+export const EXEC_STOP_HEADING = "Why Claude Code stopped, in its own words:";
+export const EXEC_STOP_NO_DESCRIPTION = "Claude Code gave no description of why it stopped.";
+/** An execution stop's details (S52): Claude Code's description, its own prose, rendered as Markdown like all of it (issue #7). */
+export function execStopDetails(description: string): string {
+  return `${EXEC_STOP_HEADING}\n\n${description.trim() === "" ? EXEC_STOP_NO_DESCRIPTION : description.trim()}`;
 }
 
 /**
@@ -1624,7 +1647,7 @@ export function fallbackContext(origin: QuestionOrigin): string {
     case "unchanged":
       return `${interloq} During ${origin.heading}, Claude Code accepted points ${origin.accepted.join(", ")} of Codex's review but did not change ${origin.fileLabel}, the file under review, even after being told so. Interloq asks you how to continue, because an accepted point that changes nothing would otherwise be reviewed again and again.`;
     case "transport":
-      return `${interloq} Every call to an agent goes over the network. ${agentWords(origin.agent)} could not be reached for ${origin.what} after ${origin.attempts} attempts; the last error was: ${origin.fault}. Interloq waited and tried again automatically. It now asks you whether to try again or stop the run; the run's records are kept either way.`;
+      return `${interloq} Every call to an agent goes over the network. ${agentWords(origin.agent)} could not be reached for ${origin.what} after ${origin.attempts} attempts; the last error is shown below. Interloq waited and tried again automatically. It now asks you whether to try again or stop the run; the run's records are kept either way.`;
   }
 }
 

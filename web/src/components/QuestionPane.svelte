@@ -175,7 +175,9 @@
   .terms dd { margin: 0; }
   .top :global(.markdown pre) { overflow-x: auto; }
   .question-text { margin: 0; flex-shrink: 0; overflow-wrap: anywhere; }
-  .bottom { flex: 1 1 0; min-height: 4rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+  /* At least a card of two lines (a label and a description that wraps once) fits, so that the first option can be
+     seen whole in a short window (S52, L23 at 640 × 400). */
+  .bottom { flex: 1 1 0; min-height: 5rem; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
   /* One card per row at every width; a card grows with its text, and a long unbroken token (a path) wraps. */
   .options { display: flex; flex-direction: column; gap: 0.5rem; }
   .options > :global(button) { width: 100%; min-width: 0; overflow-wrap: anywhere; text-align: start; }

@@ -602,3 +602,33 @@ test("(L22) code in rendered Markdown keeps its whitespace: in the pane, beside 
   await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
   await distinctWidths("in the transcript", panel(page, LEFT).locator("article", { hasText: "Probe" }).last());
 });
+
+// (L23) S52 (W5-R1-1): the exhaustion pause after a fault of 2,500 characters. The question names the agent and the call
+// only; the attempts and the whole fault, <endpoint> included (shown literally, P6-R1-1), are in the details above it.
+const TRANSPORT_LONG_URL = "http://127.0.0.1:8121/";
+for (const [width, height] of [[390, 844], [640, 400]] as const) {
+  test(`(L23) the exhaustion pause after a long fault at ${width} × ${height}: the question and the first option in view`, async ({ page }) => {
+    await page.setViewportSize({ width, height });
+    await startTask(page, `Reach Codex at ${width}`, TRANSPORT_LONG_URL);
+    const question = pane(page).locator(".question-text");
+    await expect(question).toContainText("Retry again, or stop the run?");
+    await expect(question).not.toContainText("endpoint");
+    const firstOption = () => page.getByRole("group", { name: "Proposed answers" }).getByRole("button").first();
+    const together = async (what: string) => {
+      await firstOption().scrollIntoViewIfNeeded();
+      for (const [name, part] of [["the question", question], ["the first option", firstOption()]] as const) {
+        const b = await box(part);
+        expect(b.y, `${what}: ${name}'s top`).toBeGreaterThanOrEqual(-1);
+        expect(b.y + b.height, `${what}: ${name} is below the window`).toBeLessThanOrEqual(height + 1);
+      }
+    };
+    await together("at the pause");
+    const top = pane(page).locator(".top");
+    await expect(top.locator("code")).toContainText("<endpoint> refused the connection");
+    await top.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+    await expect(top.getByText(/END OF FAULT/)).toBeInViewport();
+    await together("after scrolling the details");
+    await firstOption().click();
+    await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
+  });
+}

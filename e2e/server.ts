@@ -286,6 +286,16 @@ SCENARIOS.whitespace = {
   execScripts: [{ permission: { tool: "Probe", input: WHITESPACE_VALUES } }],
 };
 
+// S52 (W5-R1-1): a Codex turn whose retries run out with a fault of 2,500 characters: the exhaustion pause, whose
+// question stays short while the fault, <endpoint> included, is in its details.
+const LONG_FAULT = `stream disconnected before completion: <endpoint> refused the connection; ${"the server said nothing more. ".repeat(80)}END OF FAULT`;
+SCENARIOS.transportLong = {
+  steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }],
+  reviews: [{ issues: [], fault: LONG_FAULT }, { issues: [], fault: LONG_FAULT }, { issues: [] }, { issues: [] }, { issues: [] }],
+  execs: [finished],
+  config: { maxTransportRetries: 1, transportRetryDelaySeconds: 0.01 },
+};
+
 const scenario = SCENARIOS[process.env.SCENARIO ?? "converge"] ?? SCENARIOS.converge;
 const port = Number(process.env.PORT ?? "8101");
 const repo = tempRepo();

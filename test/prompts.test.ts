@@ -481,3 +481,40 @@ test("permissionQuestion names neither the command, nor the file, nor the addres
   assert.equal(prompts.permissionQuestion("Edit", { file_path: "/a" }).length, prompts.permissionQuestion("Edit", { file_path: `/${"b".repeat(3000)}` }).length);
   assert.ok(prompts.permissionQuestion("Bash", { command: "ls" }).includes(prompts.TOOL_INPUT_HEADING));
 });
+
+// S52 (W5-R1-1): every question the program composes has a length independent of its inputs. An argument is either free
+// text of an agent or an SDK (the fault, the stop description), which no question embeds, or a short name the program
+// chooses at the call site: a heading (subjectHeading: "Planning phase 1", "Decision 2"…), a file label (the subjects'
+// fileLabel: "plan.json"…), an agent, a kind of call (transportWhat, transportReviewWhat over a heading), a count.
+test("the questions the program composes embed no agent-written or SDK-written text", () => {
+  const short = "x";
+  const long = "y".repeat(3000);
+  // The fault and the stop description are no longer arguments of the question at all.
+  assert.equal(prompts.transportExhaustedQuestion.length, 2);
+  assert.equal(prompts.execStopQuestion.length, 0);
+  for (const q of [prompts.transportExhaustedQuestion("claude", prompts.transportWhat("planning")), prompts.execStopQuestion()]) assert.ok(!q.includes(long) && !q.includes(short + short));
+  // The program-chosen names, bounded by the program's own vocabulary.
+  const headings = ["Question review", "Terms review", "Requirements review", "Planning phase 12", "Work review 3", "Decision 7"];
+  const files = ["questions.json", "terms.json", "requirements.md", "plan.json", "analysis.json", "changes.diff"];
+  for (const heading of headings) {
+    assert.ok(prompts.limitQuestion(heading, 5).length < 200, heading);
+    for (const file of files) assert.ok(prompts.unchangedQuestion(heading, file).length < 200, `${heading} ${file}`);
+  }
+  for (const file of files) for (const pause of ["unexplained", "identical"] as const) assert.ok(prompts.pauseQuestion({ pause, fileLabel: file, heading: "Planning phase 1", round: 1 } as never).length < 200, file);
+});
+test("the transport pause's details hold the attempts and the whole fault under their heading; the fallback context points to them", () => {
+  const fault = `read ECONNRESET ${"z".repeat(2500)}`;
+  const details = prompts.transportDetails(4, fault);
+  assert.ok(details.startsWith(prompts.TRANSPORT_FAULT_HEADING));
+  assert.ok(details.includes("4"));
+  assert.ok(details.includes(fault));
+  const context = prompts.fallbackContext({ kind: "transport", agent: "codex", what: "the review", attempts: 4, fault });
+  assert.ok(!context.includes(fault), "the fallback paragraph embeds the fault");
+  assert.ok(context.length < 1000);
+});
+test("an execution stop's details hold Claude Code's description under their heading", () => {
+  const description = "The build needs a decision about **the cache**.";
+  assert.ok(prompts.execStopDetails(description).startsWith(prompts.EXEC_STOP_HEADING));
+  assert.ok(prompts.execStopDetails(description).includes(description));
+  assert.ok(prompts.execStopDetails("  ").includes(prompts.EXEC_STOP_NO_DESCRIPTION));
+});

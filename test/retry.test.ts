@@ -175,3 +175,14 @@ test("the exhaustion pause for Codex is explained by a context call; the pause f
     }
   }
 });
+
+// S52 (W5-R1-1): the exhaustion pause's question names the agent and the call; the attempts and the whole fault are in
+// its details, so that a long fault cannot push the answers out of view.
+test("at the exhaustion pause, the details hold the attempts and the whole fault; the question does not", async () => {
+  const long = `stream disconnected: <endpoint> ${"e".repeat(2500)}`;
+  const { layer, ui } = await setup([prompts.TRANSPORT_ANSWERS.stop]);
+  await exitOf(withTransportRetry("claude", "the review", () => Effect.fail(new TransportFault({ agent: "claude", message: long, status: null })), Effect.void), layer);
+  const [q] = ui.notified.flatMap((e) => (e._tag === "QuestionPresented" ? [e.question] : []));
+  assert.ok(!q.question.includes(long.slice(0, 40)), q.question);
+  assert.equal(q.details, prompts.transportDetails(3, long));
+});

@@ -612,3 +612,18 @@ test("an execution that ends in AgentUnreachable halts the run, and a started st
   const plan = JSON.parse(fs.readFileSync(path.join(probe.dir, "plan.json"), "utf8")).plan;
   assert.equal(plan.stages[0].steps[0].status, "unfinished");
 });
+
+// S52 (W5-R1-1): at an execution stop without a question, Claude Code's description is in the details, not the question.
+test("a stop without a question presents Claude Code's description in the details", async () => {
+  const description = `The migration failed: ${"m".repeat(2500)}`;
+  const { layer, probe } = testLayer(tempRepo(), {
+    answers: ["retry with smaller steps"],
+    steps: [{ output: noQuestions, plan: "v1" }, { output: noQuestions }],
+    reviews: [{ issues: [] }, { issues: [] }, { issues: [] }, { issues: [] }],
+    execs: [{ status: "aborted", summary: "", question: description, remainingWork: "", userInput: null }, finished],
+  });
+  assert.equal(await runTask(layer), 2);
+  const [q] = presentedQuestions(probe.ui).filter((p) => p.origin.kind === "execStop");
+  assert.equal(q.question, prompts.execStopQuestion());
+  assert.equal(q.details, prompts.execStopDetails(description));
+});
