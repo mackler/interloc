@@ -26,6 +26,8 @@ import { LONG_ANSWERS } from "./longAnswers.ts";
 import { finished, issue, respond, type TestOptions, tempRepo, testWiring } from "../test/helpers.ts";
 
 const noQuestions = { questions_for_user: [] };
+// S39 (W2-R1-2): a context long enough to overflow its region beside the analysis.
+const LONG_DECISION_CONTEXT = Array.from({ length: 8 }, (_, i) => `Paragraph ${i + 1} of the context: the service keeps its data in a database, and the choice decides what runs beside it.`).join("\n\n");
 /** A scripted interview turn; `asked` and `answered` are the ids Claude reports (issue #21). */
 const turn = (message: string, complete: boolean, summary: string, asked: string[] = [], answered: string[] = []) => ({ message_to_user: message, current_question: { id: "", context: "", text: "", terms: [], options: [] }, asked_ids: asked, answered_ids: answered, complete, summary });
 /** A turn that asks the agreed question Q1 by its id: the page shows it from questions.json (S18). */
@@ -168,7 +170,7 @@ export const SCENARIOS: Record<string, TestOptions> = {
   // W1-R1-3: a long recommendation must not squeeze the columns.
   decideLong: {
     steps: [
-      { output: { questions_for_user: [{ context: "c", question: "Which database should the service use?", terms: [], options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
+      { output: { questions_for_user: [{ context: LONG_DECISION_CONTEXT, question: "Which database should the service use?", terms: [], options: [{ label: "SQLite", description: "one file, no server" }, { label: "PostgreSQL", description: "a database server" }] }] }, plan: "1. [ ] the step\n" },
       { output: { ...DECIDE_ANALYSIS, recommendation: { option: "SQLite", reason: LONG_RECOMMENDATION } } },
       { output: noQuestions },
     ],

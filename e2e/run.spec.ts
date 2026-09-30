@@ -55,7 +55,8 @@ const startTask = async (page: Page, scenario: Scenario, task: string) => {
     if (await form.isVisible()) return;
     if (await stop.isEnabled({ timeout: 1_000 }).catch(() => false)) {
       await stop.click({ timeout: 2_000 });
-      await confirmEnd(page);
+      // S38: the confirmation closes without acting if the run ends before it is confirmed, which the retry covers.
+      await page.locator("dialog[open] button[name=confirm-end]").click({ timeout: 2_000 }).catch(() => undefined);
     }
     await again.click({ timeout: 5_000 });
     await expect(form).toBeVisible({ timeout: 2_000 });

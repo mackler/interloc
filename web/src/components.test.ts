@@ -764,6 +764,25 @@ describe("DecisionView", () => {
     expect(root.querySelector(".question-text")?.textContent?.trim()).toBe("Which database?");
   });
 
+  // S39 (W2-R1-2): only the context scrolls; the question text is in no scrolled region of the view.
+  test("the question text is outside the scrolled context region, and only the context scrolls", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const root = show(DecisionView, { event, narrow: false, onShowConversation: () => undefined });
+    const context = one(root, ".question-context");
+    const asked = one(root, ".question-text");
+    expect(asked.closest(".question-context")).toBe(null);
+    expect(context.contains(asked)).toBe(false);
+    // jsdom applies no component styles, so the rules are read from the component's source: the context region scrolls,
+    // and no element between the question text and the view does.
+    const source = (await import("./components/DecisionView.svelte?raw")).default;
+    const rule = (selector: string) => source.match(new RegExp(`\\n\\s*${selector.replace(".", "\\.")} \\{([^}]*)\\}`))?.[1] ?? "";
+    expect(rule(".question-context")).toMatch(/overflow-y: auto/);
+    const section = one(root, "section.decision");
+    for (let el = asked.parentElement; el !== null && el !== section; el = el.parentElement) {
+      for (const cls of el.classList) if (!cls.startsWith("svelte-")) expect(rule(`.${cls}`), `.${cls} scrolls`).not.toMatch(/overflow/);
+    }
+  });
+
   test("one column per option in order, the heading Disadvantages: in each, arguments offset by level, symbols, the recommendation", async () => {
     const { default: DecisionView } = await import("./components/DecisionView.svelte");
     const shown: string[] = [];

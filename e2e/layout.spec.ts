@@ -34,7 +34,8 @@ const startTask = async (page: Page, task: string, url = URL) => {
     if (await form.isVisible()) return;
     if (await stop.isEnabled({ timeout: 1_000 }).catch(() => false)) {
       await stop.click({ timeout: 2_000 });
-      await confirmEnd(page);
+      // S38: the confirmation closes without acting if the run ends before it is confirmed, which the retry covers.
+      await page.locator("dialog[open] button[name=confirm-end]").click({ timeout: 2_000 }).catch(() => undefined);
     }
     await again.click({ timeout: 5_000 });
     await expect(form).toBeVisible({ timeout: 2_000 });
@@ -420,6 +421,35 @@ test("(L16) a long analysis at 390 × 600 with the progress opened: the analysis
   await reachable(parts);
   await answerDismisses(page, parts);
 });
+
+// S39 (W2-R1-2): beside an analysis only the context scrolls; the question text stays in view with the first answer card,
+// before and after the context is scrolled to its end, and the answer controls remain reachable.
+for (const [width, height] of [[390, 844], [640, 400]] as const) {
+  test(`(L20) a long context beside the analysis at ${width} × ${height}: the question stays in view with the first answer`, async ({ page }) => {
+    const parts = await openLongAnalysis(page, width, height);
+    const context = parts.analysis.locator(".question-context");
+    const question = parts.analysis.locator(".question-text");
+    const firstCard = page.getByRole("group", { name: "Proposed answers" }).getByRole("button").first();
+    const overflow = await context.evaluate((el) => el.scrollHeight - el.clientHeight);
+    expect(overflow, "the context overflows its region").toBeGreaterThan(0);
+    expect(await question.evaluate((el) => el.closest(".question-context") === null), "the question is outside the scrolled context").toBe(true);
+    const inView = async (what: string) => {
+      await firstCard.scrollIntoViewIfNeeded();
+      for (const [name, part] of [["the question", question], ["the first answer", firstCard]] as const) {
+        const b = await box(part);
+        expect(b.y, `${what}: ${name}'s top`).toBeGreaterThanOrEqual(-1);
+        expect(b.y + b.height, `${what}: ${name} is below the window`).toBeLessThanOrEqual(height + 1);
+      }
+    };
+    await inView("before scrolling the context");
+    await context.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
+    await expect.poll(() => context.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await inView("after scrolling the context to its end");
+    await separateAndWhole(parts);
+    await reachable(parts);
+    await answerDismisses(page, parts);
+  });
+}
 
 // Issue #6: a step's long text scrolls inside its tooltip, which stays in the viewport, in a desktop window and, with the
 // progress opened, in a phone-sized one.

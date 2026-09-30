@@ -123,7 +123,9 @@ system status]. The context takes at most three tenths of the pane. The transcri
 conversation") and back ("Back to the question"), and an answer gives the column back to the transcript [user control
 and freedom]. The question joins the transcript with its answer once it is answered. Beside a decision's analysis,
 which shows the question with its context and terms, the pane keeps only the answers, so the question is not shown
-twice [aesthetic and minimalist design].
+twice [aesthetic and minimalist design]. There only the context scrolls, in a region of its own about one and a half
+lines high (2.75rem), and the question text follows it outside any scrolled region, so a long context cannot push the question
+out of view while its answers are shown (W2-R1-2; L20 at 390 × 844 and 640 × 400).
 
 **Explanations of terms.** m3-svelte has no rich tooltip, so the one of a term is built by hand (`TermTooltip`), as
 the plan step's is. It asserts only the explanation the agents wrote and Codex reviewed: plain text, nothing more.
