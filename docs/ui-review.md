@@ -144,6 +144,12 @@ A line break at the start or end of a multi-line value is written as the escape 
 fenced block drops the last line break of its content, so "a\nb" and "a\nb\n" would otherwise look alike. The line breaks
 between the lines stay real.
 
+A field that Interloq has no plain label for shows its own name the same way, as code on one line, with every line break
+and every hidden character written as its escape (S55, W6-R1-1, P7-R1-1): "**mode**" and "mode", or "a<line break>b" and
+"a b", never look alike, and "<target>" is not removed. Its term is the name as displayed, so its explanation is found
+where it is shown. The table of plain labels is looked up by its own entries only, so a name such as "constructor" is
+shown as an unknown setting.
+
 The page also keeps that whitespace when it renders the value (S51, W3-R1-2 of work review 5). A code element's text
 keeps every space, but the browser's default white-space collapses runs and drops the spaces at the edges, so "a b",
 "a  b" and "a<tab>b" would look alike and " a " like "a". One rule in `web/src/theme.css`, shared by the question pane,

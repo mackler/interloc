@@ -410,7 +410,7 @@ test("toolInputLines labels the known fields in plain words and keeps each unkno
   for (const key of ["file_path", "old_string", "new_string", "replace_all"]) assert.ok(!lines.includes(key), key);
   assert.deepEqual(prompts.toolInputTerms(known), []);
   assert.notEqual(prompts.toolInputLines({ overwrite: true }), prompts.toolInputLines({ dry_run: true }));
-  assert.match(prompts.toolInputLines({ overwrite: true }), /"overwrite"/);
+  assert.match(prompts.toolInputLines({ overwrite: true }), /`overwrite`/);
   assert.deepEqual(prompts.toolInputTerms({ overwrite: true, edits: [{ old_string: "a", mode: "m" }] }).map((t) => t.term), ["overwrite", "mode"]);
   assert.ok(prompts.unknownSettingExplanation.trim() !== "");
   // A multi-line value stays readable, and nested fields are labeled too.
@@ -529,4 +529,20 @@ test("a multi-line value's edge line breaks are escaped in the terminal's lines 
   assert.notEqual(prompts.toolInputLines({ content: "a\nb" }), lines);
   const record = renderQuestionRecord({ number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: lines, decision: null });
   assert.ok(record.includes("a\nb\\n"));
+});
+
+// S55 (W6-R1-1, P7-R1-1): the label table is looked up by own properties; an unknown name is shown as code, its line
+// breaks escaped, in the terminal's lines and conversation.md alike.
+test("an unknown field's name is shown literally and looked up by own properties only", async () => {
+  const { renderQuestionRecord } = await import("../src/render.ts");
+  const own = (key: string) => Object.defineProperty({}, key, { value: 1, enumerable: true });
+  for (const key of ["constructor", "toString", "__proto__"]) {
+    const lines = prompts.toolInputLines(own(key));
+    assert.ok(lines.includes(prompts.unknownSettingLabel(key)), lines);
+    assert.doesNotMatch(lines, /function|native code/);
+  }
+  assert.equal(prompts.unknownSettingLabel("**mode**"), "The tool's setting named `**mode**`");
+  assert.ok(prompts.toolInputLines(own("a\nb")).includes("`a\\nb`"));
+  const record = renderQuestionRecord({ number: 1, origin: { kind: "relayed" }, context: { text: "c", by: "agent" }, terms: [], question: "Q?", options: [], details: prompts.toolInputLines(own("<target>")), decision: null });
+  assert.ok(record.includes("`<target>`"));
 });

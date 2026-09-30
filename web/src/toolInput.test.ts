@@ -141,3 +141,47 @@ describe("line breaks at the edges of a value", () => {
     expect(el.textContent).toContain("second\\n");
   });
 });
+
+// S55 (W6-R1-1, P7-R1-1): a field without a plain label shows its own name literally, every line break escaped, and
+// the label table is looked up by own properties only; the term of a key is the text displayed for it.
+describe("the names of fields without a plain label", () => {
+  const keys = ["**mode**", "mode", "<target>", "a`b", " mode", "a\nb", "a b", "constructor", "toString", "__proto__"];
+  const inputWith = (key: string): Record<string, unknown> => {
+    const input: Record<string, unknown> = {};
+    Object.defineProperty(input, key, { value: 1, enumerable: true, configurable: true, writable: true });
+    return input;
+  };
+  const shownOf = (key: string) => rendered(inputWith(key)).textContent ?? "";
+  test("every name is shown; names that differ display differently; none is removed or labeled as a known field", () => {
+    const shown = keys.map(shownOf);
+    expect(new Set(shown).size).toBe(keys.length);
+    expect(shownOf("<target>")).toContain("<target>");
+    expect(shownOf("**mode**")).toContain("**mode**");
+    for (const key of ["constructor", "toString", "__proto__"]) {
+      expect(shownOf(key)).toContain(prompts.unknownSettingLabel(key).replace(/`/g, ""));
+      expect(shownOf(key)).not.toMatch(/function|native code/);
+      expect(prompts.toolInputTerms(inputWith(key)).length).toBe(1);
+      expect(prompts.permissionFacts("T", inputWith(key))).not.toMatch(/function|native code/);
+    }
+  });
+  test("the seam: each key's term occurs in the details as validated and is marked in the page", async () => {
+    const { permissionDraft } = await import("../../src/offer.ts");
+    const { questionProblems } = await import("../../src/question.ts");
+    const { markTerms } = await import("./terms.ts");
+    for (const key of keys) {
+      const draft = permissionDraft("FutureTool", inputWith(key));
+      expect(draft.terms.length, key).toBe(1);
+      const problems = questionProblems({ context: "c", question: draft.question, terms: draft.terms, options: [], details: draft.details }, "context");
+      expect(problems.filter((p) => p.kind === "termAbsent"), key).toEqual([]);
+      const el = document.createElement("div");
+      el.innerHTML = markTerms(render(draft.details ?? ""), draft.terms);
+      expect([...el.querySelectorAll(".term")].map((m) => m.textContent), key).toContain(draft.terms[0].term);
+    }
+  });
+  test("a name with a line break is written with the escape, and its explanation says so", () => {
+    expect(shownOf("a\nb")).toContain("a\\nb");
+    const [term] = prompts.toolInputTerms(inputWith("a\nb"));
+    expect(term.term).toBe("a\\nb");
+    expect(term.explanation).toBe(prompts.unknownSettingEscapedExplanation);
+  });
+});

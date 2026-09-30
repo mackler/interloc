@@ -1188,12 +1188,19 @@ export const TOOL_INPUT_LABELS: Readonly<Record<string, string>> = {
 /** The heading of a permission request's input in the question's details (S34). */
 export const TOOL_INPUT_HEADING = "What Claude Code would do:";
 /** The line of a field Interloq has no words for: its own name, so that two such fields never look alike (P2-R1-2). */
+/**
+ * S55 (W6-R1-1, P7-R1-1): the name is shown as code, on one line, so that no character of it is interpreted as Markdown
+ * or HTML: every line break, and every character S48 escapes, is written as its escape (`shownName`).
+ */
 export function unknownSettingLabel(key: string): string {
-  return `The tool's setting named "${key}"`;
+  const shown = shownName(key);
+  return `The tool's setting named ${shown.kind === "phrase" ? shown.text : spanOf(shown.text)}`;
 }
 /** The fixed explanation of such a field's name, which holds when no context call explained it (P2-R1-2). */
 export const unknownSettingExplanation =
   "The name that Claude Code's tool gives one of its settings. Interloq has no description of this setting; its meaning is what its name says.";
+/** The same for a name shown with escapes (S55): the term is the name as displayed. */
+export const unknownSettingEscapedExplanation = `${unknownSettingExplanation} The name is written with escapes, as the note beside it says.`;
 /** The phrases shown for a value a code span cannot hold (S45, P4-R1-1): the empty text, and spaces alone. */
 export const emptyTextPhrase = "(empty text)";
 export function spacesPhrase(n: number): string {
@@ -1232,6 +1239,13 @@ const SPECIAL_SPACE = /[^\S \t\n]/u;
  */
 export type ShownValue = Readonly<{ kind: "literal" | "escaped" | "phrase"; text: string }>;
 export function shownValue(value: string): ShownValue {
+  return shownText(value, false);
+}
+/** A name shown on one line (S55): as a value is, and every line break written as the escape `\\n`. */
+export function shownName(name: string): ShownValue {
+  return shownText(name, true);
+}
+function shownText(value: string, inline: boolean): ShownValue {
   if (value === "") return { kind: "phrase", text: emptyTextPhrase };
   if (/^\s+$/u.test(value)) return { kind: "phrase", text: whitespaceRuns(value) };
   const chars = [...value];
@@ -1242,7 +1256,7 @@ export function shownValue(value: string): ShownValue {
     const i = at;
     at += ch.length;
     // S54: a line break at the start or end of a value is lost or merged by the renderer, so it is escaped too.
-    return HIDDEN.test(ch) || ((SPECIAL_SPACE.test(ch) || ch === "\n") && (i < lead || i >= trail));
+    return HIDDEN.test(ch) || (inline && ch === "\n") || ((SPECIAL_SPACE.test(ch) || ch === "\n") && (i < lead || i >= trail));
   });
   if (!marks.some((m) => m)) return { kind: "literal", text: value };
   const text = chars.map((ch, i) => (marks[i] ? (ch === "\r" ? "\\r" : ch === "\n" ? "\\n" : `\\u${hex4(ch)}`) : ch === "\\" ? "\\\\" : ch)).join("");
@@ -1283,7 +1297,9 @@ const inputValue = (v: unknown, depth: number): string => {
   if (Array.isArray(v)) return v.map((x, i) => `\n${"  ".repeat(depth)}- ${i + 1}.${inputValue(x, depth + 1).startsWith("\n") ? "" : " "}${inputValue(x, depth + 1)}`).join("");
   return Object.entries(v as Record<string, unknown>).map(([k, x]) => `\n${"  ".repeat(depth)}- ${fieldLabel(k)}: ${inputValue(x, depth + 1)}`).join("");
 };
-const fieldLabel = (key: string): string => TOOL_INPUT_LABELS[key] ?? unknownSettingLabel(key);
+/** The plain label of a field, looked up by own properties only (S55: "constructor" is no label). */
+const knownLabel = (key: string): string | null => (Object.hasOwn(TOOL_INPUT_LABELS, key) ? TOOL_INPUT_LABELS[key] : null);
+const fieldLabel = (key: string): string => knownLabel(key) ?? unknownSettingLabel(key);
 /** A tool's input as the user reads it (S34): each field under its plain label, or its own name when it has none. */
 export function toolInputLines(input: unknown): string {
   if (input === null || typeof input !== "object" || Array.isArray(input)) return inputValue(input, 0).trim();
@@ -1291,10 +1307,13 @@ export function toolInputLines(input: unknown): string {
 }
 /** The keys of a tool's input, nested ones included, that have no plain label, each once, in order. */
 const unknownKeys = (v: unknown): readonly string[] =>
-  v === null || typeof v !== "object" ? [] : Array.isArray(v) ? v.flatMap(unknownKeys) : Object.entries(v as Record<string, unknown>).flatMap(([k, x]) => [...(k in TOOL_INPUT_LABELS ? [] : [k]), ...unknownKeys(x)]);
+  v === null || typeof v !== "object" ? [] : Array.isArray(v) ? v.flatMap(unknownKeys) : Object.entries(v as Record<string, unknown>).flatMap(([k, x]) => [...(knownLabel(k) !== null ? [] : [k]), ...unknownKeys(x)]);
 /** One term per field without a plain label (P2-R1-2): its name, with the fixed explanation. */
 export function toolInputTerms(input: unknown): readonly Readonly<{ term: string; explanation: string }>[] {
-  return [...new Set(unknownKeys(input))].map((term) => ({ term, explanation: unknownSettingExplanation }));
+  // S55: the term is the name as displayed, so that it is found where the page and the validation look for it.
+  return [...new Set(unknownKeys(input).map(shownName))].flatMap((shown, i, all) =>
+    all.findIndex((o) => o.text === shown.text) === i ? [{ term: shown.text, explanation: shown.kind === "literal" ? unknownSettingExplanation : unknownSettingEscapedExplanation }] : [],
+  );
 }
 /** What the context call is asked about the fields without a plain label (P2-R1-2). */
 export function unknownSettingsRequest(keys: readonly string[]): string {
@@ -1328,7 +1347,7 @@ export function permissionQuestion(tool: string, input: unknown): string {
 /** The facts of a permission request a context call is given (S12). */
 export function permissionFacts(tool: string, input: unknown): string {
   const fields = input !== null && typeof input === "object" && !Array.isArray(input) ? Object.entries(input as Record<string, unknown>) : [];
-  const lines = fields.length === 0 ? toolInputProse(input) : fields.map(([k, v]) => `${k}${k in TOOL_INPUT_LABELS ? ` (${TOOL_INPUT_LABELS[k]})` : ""}: ${toolInputProse(v)}`).join("\n");
+  const lines = fields.length === 0 ? toolInputProse(input) : fields.map(([k, v]) => `${k}${knownLabel(k) !== null ? ` (${knownLabel(k)})` : ""}: ${toolInputProse(v)}`).join("\n");
   const unknown = toolInputTerms(input).map((t) => t.term);
   return `Claude Code, while it carries out the plan, asks to use its tool ${tool} with this input:\n${lines}\nIf the user allows it, the tool runs in the project; if not, Claude Code is told so and continues without it. The user is shown the input under the heading "${TOOL_INPUT_HEADING}".${unknown.length === 0 ? "" : `\n${unknownSettingsRequest(unknown)}`}`;
 }
