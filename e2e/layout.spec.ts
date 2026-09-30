@@ -556,8 +556,11 @@ for (const [width, height] of [[390, 844], [640, 400]] as const) {
     // The whole command is in the details, reached by scrolling the region above the question.
     const top = pane(page).locator(".top");
     await expect(top).toContainText("line 40 of a long command");
-    await top.evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
-    await expect(top.getByText(/line 40 of a long command/)).toBeInViewport();
+    // The command is one element among others in the details, and it is not the last of them: scrolling the region to
+    // its end shows what follows the command, not the command's last line. Bring the command's own end into view.
+    const command = top.locator("pre").filter({ hasText: "line 40 of a long command" });
+    await command.evaluate((el) => el.scrollIntoView({ block: "end" }));
+    await expect(command).toBeInViewport();
     await together("after scrolling the details", question);
     await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
     const analysis = page.getByRole("region", { name: /^Decision 1: / });
