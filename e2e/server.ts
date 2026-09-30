@@ -277,6 +277,15 @@ SCENARIOS.permissionLong = {
   execScripts: [{ permission: { tool: "Bash", input: { command: LONG_COMMAND, description: "Prepare the build directory" } } }],
 };
 
+// S51 (W3-R1-2 of work review 5): values that differ only in their whitespace, whose rendered widths the layout test compares.
+const WHITESPACE_VALUES = { alpha: "a b", beta: "a  b", gamma: "a\tb", delta: " a ", epsilon: "a" } as const;
+SCENARIOS.whitespace = {
+  steps: [{ output: noQuestions, plan: "1. [ ] the step\n" }, { output: PERMISSION_ANALYSIS }],
+  reviews: [{ issues: [] }, { issues: [] }, { issues: [] }],
+  execs: [finished],
+  execScripts: [{ permission: { tool: "Probe", input: WHITESPACE_VALUES } }],
+};
+
 const scenario = SCENARIOS[process.env.SCENARIO ?? "converge"] ?? SCENARIOS.converge;
 const port = Number(process.env.PORT ?? "8101");
 const repo = tempRepo();

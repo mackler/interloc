@@ -140,6 +140,14 @@ would change or hide (a carriage return, a control or zero-width character, a sp
 visible escape of plain ASCII characters, with a note saying what the escapes stand for. The value shown is then the
 value allowed, character for character [visibility of system status; error prevention].
 
+The page also keeps that whitespace when it renders the value (S51, W3-R1-2 of work review 5). A code element's text
+keeps every space, but the browser's default white-space collapses runs and drops the spaces at the edges, so "a b",
+"a  b" and "a<tab>b" would look alike and " a " like "a". One rule in `web/src/theme.css`, shared by the question pane,
+the question beside an analysis and the transcript, sets code in rendered Markdown to `white-space: break-spaces` with
+a tab size of 4, inline code as an inline block so that its tab stops are measured from its own start (a tab is never
+the width of one space), and code blocks to `white-space: pre`, scrolling sideways (L22 measures the widths in all
+three places).
+
 The question of a permission request names the tool and the kind of action and points at the input shown above it; it
 never contains the input itself (S49, W4-R1-1). A long command therefore stays in the details, where it scrolls, and
 cannot push the question's answers out of view (L21 at 390 × 844 and 640 × 400, in the pane and beside an analysis)

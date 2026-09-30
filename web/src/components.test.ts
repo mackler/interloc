@@ -1442,3 +1442,45 @@ test("a transcript message with terms marks them; the question beside an analysi
   const view = show(DecisionView, { event: analyzed, narrow: false, onShowConversation: () => undefined });
   expect([...view.querySelectorAll(".question .term")].length).toBe(2);
 });
+
+// S51 (W3-R1-2 of work review 5): code in rendered Markdown keeps its whitespace in the pane, beside an analysis and in
+// the transcript, by one shared rule. jsdom has no layout (the widths are measured by e2e L22), so this reads the rule
+// from its stylesheet and asserts that each of the three components renders its code inside the class the rule targets.
+describe("the shared rule for code in rendered Markdown", () => {
+  const ruleOf = (css: string, selector: string) => {
+    const at = css.replace(/\/\*[\s\S]*?\*\//g, "").split("}").find((block) => block.split("{")[0].split(",").map((s) => s.trim()).includes(selector));
+    return at === undefined ? "" : at.split("{")[1];
+  };
+  test("theme.css keeps the whitespace of inline code and of code blocks, a tab wider than a space", async () => {
+    // Read from disk: Vitest's CSS handling gives a `?raw` stylesheet as empty text.
+    const { readFileSync } = await import("node:fs");
+    const css = readFileSync("web/src/theme.css", "utf8");
+    const inline = ruleOf(css, ".markdown code");
+    expect(inline).toMatch(/white-space:\s*break-spaces/);
+    expect(inline).toMatch(/tab-size:\s*4/);
+    const block = ruleOf(css, ".markdown pre code");
+    expect(block).toMatch(/white-space:\s*pre\b/);
+    expect(ruleOf(css, ".markdown pre")).toMatch(/overflow-x:\s*auto/);
+    // Inline code measures its tab stops from its own start, so a tab never looks like one space.
+    expect(ruleOf(css, ".markdown :not(pre) > code")).toMatch(/display:\s*inline-block/);
+  });
+  test("no component copies the rule", async () => {
+    for (const source of [await import("./components/QuestionPane.svelte?raw"), await import("./components/DecisionView.svelte?raw"), await import("./components/Message.svelte?raw")]) {
+      expect(source.default).not.toMatch(/break-spaces/);
+    }
+  });
+  test("QuestionPane, DecisionView and Message render their code inside .markdown", async () => {
+    const details = prompts.toolInputLines({ command: " a " });
+    const presented: PresentedQuestion = { number: 1, origin: { kind: "relayed" }, context: { text: "Run `x`.", by: "agent" }, terms: [], question: "Q?", options: [], details, decision: null };
+    const pane = show(QuestionPane, { widget: { ...widget(prompts.optionOrTextPrompt), question: presented, presentedAt: null }, onAnswer: () => undefined });
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const event = { _tag: "DecisionAnalyzed", decision: 1, question: "Q?", presented, options: [], analysis: { decision: "Q?", columns: [], recommendation: { option: "", reason: "" } } } as never;
+    const beside = one(show(DecisionView, { event, narrow: false, onShowConversation: () => undefined }), ".question-context");
+    const message = show(MessageView, { message: { key: "1-1", author: "program", heading: "", body: details, format: "markdown", time: "2026-09-30T10:00:00.000Z", showTime: false, band: null } });
+    for (const [what, root] of [["the pane", pane], ["beside an analysis", beside], ["the transcript", message]] as const) {
+      const codes = [...root.querySelectorAll("code")].filter((c) => c.textContent === " a ");
+      expect(codes.length, what).toBe(1);
+      expect(codes[0].closest(".markdown"), what).not.toBe(null);
+    }
+  });
+});

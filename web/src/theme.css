@@ -60,3 +60,26 @@ body { font-family: "Roboto Flex", Roboto, system-ui, sans-serif; }
   .circular-indeterminate > svg { display: none; }
   .circular-indeterminate > .glyph { position: static; width: auto; height: auto; overflow: visible; clip-path: none; }
 }
+
+/* S51 (W3-R1-2 of work review 5): code in rendered Markdown keeps its whitespace visually, wherever the page renders
+   it (the question pane, beside an analysis, the transcript). A code element's text keeps every space, but the default
+   white-space collapses runs and drops the spaces at the edges, so "a b", "a  b" and "a<tab>b" would look alike and
+   " a " like "a" [visibility of system status; error prevention: a permission's input is read before it is allowed].
+   One rule for all three components; none copies it. Inline code is an inline block, so that its tab stops are
+   measured from its own start: a tab then always advances to the next of every 4 spaces, never the width of one space
+   by the accident of where the code falls in the line. */
+.markdown code {
+  white-space: break-spaces;
+  tab-size: 4;
+}
+.markdown :not(pre) > code {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: bottom;
+}
+.markdown pre code {
+  white-space: pre;
+}
+.markdown pre {
+  overflow-x: auto;
+}

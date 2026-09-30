@@ -567,3 +567,38 @@ for (const [width, height] of [[390, 844], [640, 400]] as const) {
     await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
   });
 }
+
+// (L22) S51 (W3-R1-2 of work review 5): code in rendered Markdown keeps its whitespace visually. A code element's text
+// keeps every space, but the browser's default white-space collapses runs and drops the spaces at the edges, so
+// "a b", "a  b" and "a<tab>b" would look alike and " a " like "a". Measured in the question pane, beside an analysis and
+// in the transcript's answered exchange.
+const WHITESPACE_URL = "http://127.0.0.1:8120/";
+const WHITESPACE_VALUES = ["a b", "a  b", "a\tb", " a ", "a"] as const;
+const widths = async (scope: Locator) =>
+  scope.evaluate((root, values) => {
+    const codes = [...root.querySelectorAll("code")];
+    return values.map((v) => {
+      const code = codes.find((c) => c.textContent === v);
+      return code === undefined ? -1 : code.getBoundingClientRect().width;
+    });
+  }, [...WHITESPACE_VALUES]);
+const distinctWidths = async (what: string, scope: Locator) => {
+  const [single, double, tab, edged, bare] = await widths(scope);
+  for (const [name, w] of [["a b", single], ["a  b", double], ["a\\tb", tab], [" a ", edged], ["a", bare]] as const) expect(w, `${what}: the code element of "${name}"`).toBeGreaterThan(0);
+  expect(double, `${what}: "a  b" wider than "a b"`).toBeGreaterThan(single);
+  expect(tab, `${what}: "a\\tb" wider than "a  b"`).toBeGreaterThan(double);
+  expect(edged, `${what}: " a " wider than "a"`).toBeGreaterThan(bare);
+};
+test("(L22) code in rendered Markdown keeps its whitespace: in the pane, beside an analysis and in the transcript", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await startTask(page, "Probe the whitespace", WHITESPACE_URL);
+  await expect(pane(page).locator(".question-text")).toContainText("Should it be allowed?");
+  await distinctWidths("in the question pane", pane(page).locator(".top"));
+  await page.getByRole("button", { name: HELP_ME_DECIDE }).click();
+  const analysis = page.getByRole("region", { name: /^Decision 1: / });
+  await expect(analysis).toBeVisible();
+  await distinctWidths("beside the analysis", analysis.locator(".question-context"));
+  await page.getByRole("group", { name: "Proposed answers" }).getByRole("button").first().click();
+  await expect(panel(page, LEFT).getByText(/finished after 1 implementation phase/)).toBeVisible();
+  await distinctWidths("in the transcript", panel(page, LEFT).locator("article", { hasText: "Probe" }).last());
+});
