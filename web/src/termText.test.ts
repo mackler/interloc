@@ -168,3 +168,32 @@ describe("TermText and the keyboard", () => {
     expect(tooltip()).toBe(null);
   });
 });
+
+// S59: an occurrence split by inline markup is one occurrence: either fragment opens its one tooltip, and it is one stop.
+describe("TermText and a term split by inline markup", () => {
+  const terms = [{ term: "cache key", explanation: "The name of a saved result." }];
+  test("hovering either fragment opens the one tooltip, anchored to the focusable fragment", () => {
+    const root = show("The cache **key** identifies it.", terms);
+    const [first, second] = root.querySelectorAll<HTMLElement>(".term");
+    hover(second);
+    expect(tooltip()!.textContent).toContain(terms[0].explanation);
+    expect(first.getAttribute("aria-describedby")).toBe(tooltip()!.id);
+    expect(second.hasAttribute("aria-describedby")).toBe(false);
+    hover(first);
+    expect(document.querySelectorAll("[role=tooltip]").length).toBe(1);
+  });
+  test("focusing the occurrence opens it, and Tab from its tooltip reaches what follows the whole occurrence", () => {
+    const root = show("The cache **key** identifies it.", terms);
+    const after = document.createElement("button");
+    document.body.appendChild(after);
+    const [first] = root.querySelectorAll<HTMLElement>(".term");
+    focus(first);
+    expect(tooltip()!.textContent).toContain(terms[0].explanation);
+    first.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    flushSync();
+    expect(document.activeElement).toBe(tooltip());
+    tooltip()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true }));
+    flushSync();
+    expect(document.activeElement).toBe(after);
+  });
+});

@@ -20,7 +20,15 @@
   };
   // The timer is the component's edge: cleared when the component is destroyed.
   $effect(() => stay);
-  const markOf = (target: EventTarget | null): HTMLElement | null => (target instanceof HTMLElement ? target.closest<HTMLElement>(".term") : null);
+  /**
+   * The mark an event concerns: for a fragment of an occurrence split by inline markup (S59), the occurrence's first
+   * fragment, its focus stop, which anchors the tooltip for placement and `aria-describedby`.
+   */
+  const markOf = (target: EventTarget | null): HTMLElement | null => {
+    const mark = target instanceof HTMLElement ? target.closest<HTMLElement>(".term") : null;
+    const key = mark?.dataset.occurrence;
+    return key === undefined ? mark : (mark!.closest(".term-text")?.querySelector<HTMLElement>(`.term[data-occurrence="${key}"]`) ?? mark);
+  };
   // A focused link explains every distinct term it contains, in order of occurrence (S40, P3-R1-2).
   const linkOf = (target: EventTarget | null): HTMLElement | null => (target instanceof HTMLAnchorElement && target.querySelector(".term") !== null ? target : null);
   const termsOf = (anchor: HTMLElement): readonly number[] =>

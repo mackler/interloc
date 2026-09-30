@@ -1484,3 +1484,28 @@ describe("the shared rule for code in rendered Markdown", () => {
     }
   });
 });
+
+// S59 (P9-R2-1): the context is Markdown in the question pane and beside an analysis, and a term split by inline markup
+// is marked in it and explained.
+describe("a term split by inline markup in the context", () => {
+  const presented = { number: 3, origin: { kind: "relayed" }, context: { text: "The cache **key** identifies the saved result.", by: "agent" }, terms: [{ term: "cache key", explanation: "The name of a saved result." }], question: "Should we keep it?", options: [], details: "", decision: null } as const;
+  const check = (region: Element) => {
+    expect(region.querySelector("strong")?.textContent).toBe("key");
+    expect(region.textContent).not.toContain("*");
+    const [first] = region.querySelectorAll<HTMLElement>(".term");
+    expect([...region.querySelectorAll(".term")].map((m) => m.textContent)).toEqual(["cache ", "key"]);
+    first.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    flushSync();
+    expect(one(document.body, "[role=tooltip]").textContent).toContain("The name of a saved result.");
+  };
+  test("in the question pane", () => {
+    const root = show(QuestionPane, { widget: { ...widget(prompts.optionOrTextPrompt), question: presented as never, presentedAt: null }, onAnswer: () => undefined });
+    check(one(root, ".context"));
+  });
+  test("beside an analysis", async () => {
+    const { default: DecisionView } = await import("./components/DecisionView.svelte");
+    const event = { _tag: "DecisionAnalyzed", decision: 1, question: "Q?", presented, options: [], analysis: { decision: "Q?", columns: [], recommendation: { option: "", reason: "" } } } as never;
+    const root = show(DecisionView, { event, narrow: false, onShowConversation: () => undefined });
+    check(one(root, ".question-context"));
+  });
+});

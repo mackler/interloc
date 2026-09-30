@@ -105,3 +105,32 @@ test("a relayed text that does not follow the shape or breaks a rule is not read
   assert.equal(parseRelayedQuestion(prompts.relayedQuestionText({ context: good.context, terms: [{ term: "Zod", explanation: "a library" }], question: good.question }), good.options), null, "a term that does not occur");
   assert.equal(parseRelayedQuestion(`${good.context}\n\n${prompts.TERMS_HEADING}\nzod\n\n${good.question}`, good.options), null, "a term without its explanation");
 });
+
+// S59 (W8-R1-1, P9-R1-1, P9-R1-2): the validation reads a Markdown field as the reader sees it, inline run by inline run.
+test("markdownRuns: the inline runs of a Markdown field as the reader sees them", async () => {
+  const { markdownRuns } = await import("../src/question.ts");
+  assert.deepEqual(markdownRuns("The cache **key** identifies it."), ["The cache key identifies it."]);
+  assert.deepEqual(markdownRuns("a `a  b` and ` x `"), ["a a  b and x"]);
+  assert.deepEqual(markdownRuns("Use [zod](https://zod.dev) now."), ["Use zod now."]);
+  assert.deepEqual(markdownRuns("\\*x\\* and a_b_c"), ["*x* and a_b_c"]);
+  assert.deepEqual(markdownRuns("one\ntwo\n\nthree"), ["one\ntwo", "three"]);
+  assert.deepEqual(markdownRuns("- first\n- second"), ["first", "second"]);
+  assert.deepEqual(markdownRuns("# Head\n\ntext"), ["Head", "text"]);
+  assert.deepEqual(markdownRuns("```\na  b\n**c**\n```"), ["a  b\n**c**\n"]);
+  assert.deepEqual(markdownRuns("> cache\n>\n> > unrelated paragraph\n>\n> key"), ["cache", "unrelated paragraph", "key"]);
+  assert.deepEqual(markdownRuns("<blockquote>cache <p>unrelated paragraph</p>key</blockquote>"), ["cache ", "unrelated paragraph", "key"]);
+  assert.deepEqual(markdownRuns("*a **b** c*"), ["a b c"]);
+  assert.deepEqual(markdownRuns("2 * 3 * 4"), ["2 * 3 * 4"]);
+});
+
+test("S59: a term split by inline markup passes the validation; a term across blocks does not", () => {
+  const split: Question = { context: "The cache **key** identifies the saved result.", question: "Should we keep it?", terms: [{ term: "cache key", explanation: "The name of a saved result." }], options: [] };
+  assert.deepEqual(questionProblems(split), []);
+  const soft = { ...split, context: "The cache\nkey identifies it.", terms: [{ term: "cache\nkey", explanation: "x" }] };
+  assert.deepEqual(questionProblems(soft), []);
+  for (const context of ["The cache\n\nkey identifies it.", "> cache\n>\n> > unrelated paragraph\n>\n> key", "- cache\n- key"]) {
+    assert.deepEqual(kinds({ ...soft, context }), ["termAbsent"], context);
+  }
+  // The plain fields are read as they are: a term inside asterisks of the question is not split.
+  assert.deepEqual(kinds({ ...split, context: "c", question: "Keep the cache **key**?" }), ["termAbsent"]);
+});

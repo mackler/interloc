@@ -70,7 +70,10 @@
     <!-- S46 (W3-R1-3): the details the question is about (a permission's input, a pause's facts, an agreed question's
          reason) follow the context in the same scrolling region, as the terminal prints them. -->
     <div class="question-context m3-font-body-medium">
-      <p class="context-text"><TermText inline html={textHtml(event.presented.context.text)} terms={event.presented.terms} />{#if event.presented.context.by === "program"} <span class="by">({CONTEXT_BY_PROGRAM})</span>{/if}</p>
+      <!-- S59 (P9-R2-1): the context is Markdown, as in QuestionPane and the transcript, so a term split by inline
+           markup is marked here too. -->
+      <TermText class="context-text markdown" html={render(event.presented.context.text)} terms={event.presented.terms} />
+      {#if event.presented.context.by === "program"}<p class="by">({CONTEXT_BY_PROGRAM})</p>{/if}
       {#if event.presented.details.trim() !== ""}<TermText class="details markdown" html={render(event.presented.details)} terms={event.presented.terms} />{/if}
     </div>
     <p class="question-text m3-font-title-small"><TermText inline html={textHtml(event.presented.question)} terms={event.presented.terms} /></p>
@@ -114,9 +117,8 @@
   /* The question beside its analysis (S39, W2-R1-2): only the context is bounded and scrolls on its own; the question
      text follows it outside any scrolled region, as in QuestionPane, so a long context cannot push it out of view. */
   .question { flex-shrink: 0; display: flex; flex-direction: column; gap: 0.5rem; }
-  .question-context { margin: 0; box-sizing: border-box; max-height: 2.75rem; overflow-y: auto; padding: 0.5rem 0.75rem; border-radius: var(--m3-shape-small); background: var(--m3c-surface-container); color: var(--m3c-on-surface-variant); white-space: pre-wrap; }
-  .question-context .by { font-style: italic; }
-  .context-text { margin: 0; }
+  .question-context { margin: 0; box-sizing: border-box; max-height: 2.75rem; overflow-y: auto; padding: 0.5rem 0.75rem; border-radius: var(--m3-shape-small); background: var(--m3c-surface-container); color: var(--m3c-on-surface-variant); }
+  .question-context .by { margin: 0.25rem 0 0; font-style: italic; }
   .question-context :global(.details) { margin-top: 0.5rem; white-space: normal; }
   .question-context :global(.details pre) { overflow-x: auto; }
   .question-text { margin: 0; }
