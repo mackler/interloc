@@ -152,3 +152,7 @@ Since 30 Sep 2026 (W2-R1-3, W2-R1-5, P3-R1-2, P3-R1-3):
   as for a disclosure. Tab on a term (or link) whose tooltip is open moves into the tooltip, where the arrow and Page
   keys scroll a long explanation. The next Tab moves to what follows the term, never back into the tooltip. Shift+Tab
   and Escape there close it and return to the term [user control and freedom; flexibility and efficiency of use].
+- The tooltip is attached to the document's body, not placed inside the text it explains (W3-R1-1, 30 Sep 2026), so it
+  is never inside an option's card or a link, and a click in it answers nothing [error prevention]. The text of an
+  option's card sits above the card's state layer, so that a term in it is reached by the pointer, not only by the
+  keyboard.

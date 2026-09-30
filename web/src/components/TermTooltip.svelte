@@ -24,6 +24,13 @@
       onReturn?.();
     } else if (e.key === "Tab") onPast?.(e);
   };
+  // S44 (W3-R1-1): the tooltip lives in the document's body, never inside the text it explains, so that it is never a
+  // descendant of an option's card, a link or any other control, and a click in it reaches none of them.
+  const portal = (node: HTMLElement) => {
+    document.body.appendChild(node);
+    return { destroy: () => node.remove() };
+  };
+  const contain = (e: Event) => e.stopPropagation();
   let tip: HTMLDivElement | undefined = $state();
   let place = $state("");
   const MARGIN = 8;
@@ -45,7 +52,7 @@
 <!-- The tooltip takes focus so that a long explanation can be scrolled by keyboard, and its keys route focus back to
      its term or past it (S42). -->
 <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
-<div role="tooltip" {id} class="tooltip m3-font-body-medium" style={place} tabindex="0" bind:this={tip} onmouseenter={onEnter} onmouseleave={onLeave} onkeydown={onKey} onfocusout={onFocusOut}>
+<div role="tooltip" {id} class="tooltip m3-font-body-medium" style={place} tabindex="0" bind:this={tip} use:portal onclick={contain} onpointerdown={contain} onmouseenter={onEnter} onmouseleave={onLeave} onkeydown={onKey} onfocusout={onFocusOut}>
   {#each entries as entry, i (i)}
     <strong class="m3-font-title-small">{entry.term}</strong>
     <p>{entry.explanation}</p>

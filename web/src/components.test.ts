@@ -1284,14 +1284,14 @@ describe("QuestionPane's regions", () => {
     marks[1].focus();
     marks[1].dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     flushSync();
-    expect(one(root, "[role=tooltip]").textContent).toContain("The program this task builds.");
-    expect(marks[1].getAttribute("aria-describedby")).toBe(one(root, "[role=tooltip]").id);
+    expect(one(document.body, "[role=tooltip]").textContent).toContain("The program this task builds.");
+    expect(marks[1].getAttribute("aria-describedby")).toBe(one(document.body, "[role=tooltip]").id);
     marks[1].dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     flushSync();
-    expect(root.querySelector("[role=tooltip]")).toBe(null);
+    expect(document.querySelector("[role=tooltip]")).toBe(null);
     marks[0].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     flushSync();
-    expect(root.querySelector("[role=tooltip]")).not.toBe(null);
+    expect(document.querySelector("[role=tooltip]")).not.toBe(null);
   });
 
   // S41 (W2-R1-4): the numeric option (More cycles) carries its terms like every other option.
@@ -1311,11 +1311,27 @@ describe("QuestionPane's regions", () => {
     expect(numeric.textContent).toContain(prompts.NUMERIC_OPTION_NOTE);
     marks[1].dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     flushSync();
-    expect(one(root, "[role=tooltip]").textContent).toContain("Codex, which checks the plan.");
+    expect(one(document.body, "[role=tooltip]").textContent).toContain("Codex, which checks the plan.");
     marks[0].focus();
     marks[0].dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
     flushSync();
-    expect(one(root, "[role=tooltip]").textContent).toContain("Rounds of review and response.");
+    expect(document.getElementById(marks[0].getAttribute("aria-describedby") ?? "")!.textContent).toContain("Rounds of review and response.");
+  });
+
+  // S44 (W3-R1-1): a term's tooltip is never inside the card it explains, so a click in it answers nothing.
+  test("a click in the tooltip of a term in an option card sends nothing; the tooltip is in no button", () => {
+    const sent: string[] = [];
+    const q: PresentedQuestion = { ...question, terms: [{ term: "file", explanation: "A file on the disk." }], options: [{ label: "SQLite", description: "one file", answer: { token: "1" } }] };
+    const root = show(QuestionPane, { widget: withQuestion(q), onAnswer: (_p: number, t: string) => void sent.push(t) });
+    const mark = one(root, ".options .term");
+    mark.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    flushSync();
+    const tip = one(document.body, "[role=tooltip]");
+    expect(tip.closest("button")).toBe(null);
+    tip.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    tip.querySelector("p")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    flushSync();
+    expect(sent).toEqual([]);
   });
 
   test("Show the conversation calls its handler", () => {

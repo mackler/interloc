@@ -68,6 +68,14 @@ describe("TermText and the terms inside a link", () => {
     expect(tooltip()!.querySelectorAll("strong").length).toBe(1);
   });
 
+  // S44 (W3-R1-1): the tooltip of a term inside a link is not inside the link.
+  test("the tooltip of a link's term is not a descendant of the link", () => {
+    const root = show("Use [zod](https://zod.dev).", [{ term: "zod", explanation: "A library." }]);
+    focus(root.querySelector<HTMLAnchorElement>("a")!);
+    expect(tooltip()!.closest("a")).toBe(null);
+    expect(root.contains(tooltip())).toBe(false);
+  });
+
   test("a link without a term opens nothing", () => {
     const root = show("See [the docs](https://example.org) about zod.", [{ term: "zod", explanation: "A library." }]);
     focus(root.querySelector<HTMLAnchorElement>("a")!);

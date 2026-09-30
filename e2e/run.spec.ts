@@ -452,6 +452,21 @@ test("(21) a long explanation is entered, scrolled and left by keyboard", async 
   await expect(tooltip).toHaveCount(0);
 });
 
+// S44 (W3-R1-1): a click in the explanation of a term in an option card answers nothing.
+test("(22) a click in a term's explanation inside an option card leaves the question pending", async ({ page }) => {
+  await startTask(page, "longQuestion", "Add a database");
+  await expect(asking(page, DATABASE)).toBeVisible();
+  const term = option(page, /^1\. SQLite/).locator(".term").first();
+  await term.hover();
+  const tooltip = page.getByRole("tooltip");
+  await expect(tooltip).toBeVisible();
+  await tooltip.click();
+  await expect(asking(page, DATABASE)).toBeVisible();
+  await expect(page.locator("[data-author=user]")).toHaveCount(0);
+  await continueWithoutDeciding(page).click();
+  await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
+});
+
 // S24, S25: q typed at a question asks for confirmation; confirmed, the run ends as interrupted, with exit code 130.
 test("(20) q typed and confirmed ends the run as an interruption", async ({ page }) => {
   await startTask(page, "decision", "Add a database and leave");

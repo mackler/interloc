@@ -180,6 +180,8 @@
   .options { display: flex; flex-direction: column; gap: 0.5rem; }
   .options > :global(button) { width: 100%; min-width: 0; overflow-wrap: anywhere; text-align: start; }
   .token { font-weight: 600; }
+  /* The text above the card's state layer, so that a term in it is reached by the pointer (S44). */
+  .card-text { position: relative; z-index: 1; }
   .numeric { padding: 0.75rem 1rem; border: 1px dashed var(--m3c-outline-variant); border-radius: var(--m3-shape-medium); }
   .asks { margin: 0; color: var(--m3c-on-surface-variant); }
   .choices { display: flex; flex-wrap: wrap; gap: 0.5rem; }
