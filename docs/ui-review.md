@@ -134,3 +134,12 @@ when the pointer or focus leaves, stays inside the viewport, and scrolls when lo
 flexibility and efficiency of use]. The marking is applied to the sanitized DOM and inserts a term's text as text, so
 no markup of an agent passes into the page unsanitized. The terminal prints the terms as a "Terms:" block above the
 question (decision Q6).
+
+Since 30 Sep 2026 (W2-R1-3, W2-R1-5, P3-R1-2, P3-R1-3):
+- A term inside a link is marked too, but without a focus stop of its own, so that no interactive element is nested in
+  another. Hovering the mark explains that term; focusing the link opens one tooltip that explains every term the link
+  contains, in order.
+- The tooltip is rendered after the whole text, so the natural tab order would pass it by. Focus is therefore routed
+  as for a disclosure. Tab on a term (or link) whose tooltip is open moves into the tooltip, where the arrow and Page
+  keys scroll a long explanation. The next Tab moves to what follows the term, never back into the tooltip. Shift+Tab
+  and Escape there close it and return to the term [user control and freedom; flexibility and efficiency of use].

@@ -4,8 +4,26 @@
   // placed inside the viewport, below or above its anchor, with a size limit and its own scrolling.
   // `entries`: one term, or every distinct term of a focused link, in order of occurrence (S40).
   type Entry = Readonly<{ term: string; explanation: string }>;
-  type Props = { id: string; entries: readonly Entry[]; anchor: HTMLElement; onEnter: () => void; onLeave: () => void };
-  let { id, entries, anchor, onEnter, onLeave }: Props = $props();
+  // S42: the keyboard inside the tooltip. Tab leaves past its anchor (`onPast`), Shift+Tab and Escape return to the anchor
+  // (`onReturn`), and focus leaving for anything but the anchor closes it (`onFocusOut`).
+  type Props = {
+    id: string;
+    entries: readonly Entry[];
+    anchor: HTMLElement;
+    onEnter: () => void;
+    onLeave: () => void;
+    onReturn?: () => void;
+    onPast?: (e: KeyboardEvent) => void;
+    onFocusOut?: (e: FocusEvent) => void;
+  };
+  let { id, entries, anchor, onEnter, onLeave, onReturn, onPast, onFocusOut }: Props = $props();
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape" || (e.key === "Tab" && e.shiftKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      onReturn?.();
+    } else if (e.key === "Tab") onPast?.(e);
+  };
   let tip: HTMLDivElement | undefined = $state();
   let place = $state("");
   const MARGIN = 8;
@@ -24,8 +42,10 @@
   });
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
-<div role="tooltip" {id} class="tooltip m3-font-body-medium" style={place} tabindex="0" bind:this={tip} onmouseenter={onEnter} onmouseleave={onLeave}>
+<!-- The tooltip takes focus so that a long explanation can be scrolled by keyboard, and its keys route focus back to
+     its term or past it (S42). -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+<div role="tooltip" {id} class="tooltip m3-font-body-medium" style={place} tabindex="0" bind:this={tip} onmouseenter={onEnter} onmouseleave={onLeave} onkeydown={onKey} onfocusout={onFocusOut}>
   {#each entries as entry, i (i)}
     <strong class="m3-font-title-small">{entry.term}</strong>
     <p>{entry.explanation}</p>

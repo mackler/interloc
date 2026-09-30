@@ -419,6 +419,34 @@ test("(19) a term's explanation is reached by keyboard in the question pane", as
   await expect(left(page).getByText(/finished after 1 implementation phase/)).toBeVisible();
 });
 
+// S42 (W2-R1-5, P3-R1-3): Tab enters a term's tooltip, the keyboard scrolls it, the next Tab reaches the next term, and
+// Escape in the tooltip returns to its term.
+test("(21) a long explanation is entered, scrolled and left by keyboard", async ({ page }) => {
+  await startTask(page, "longQuestion", "Add a database");
+  await expect(asking(page, DATABASE)).toBeVisible();
+  const database = pane(page).locator(".question-text .term", { hasText: "database" });
+  const service = pane(page).locator(".question-text .term", { hasText: "service" });
+  const tooltip = page.getByRole("tooltip");
+  await database.focus();
+  await expect(tooltip).toContainText("The database of this task");
+  await page.keyboard.press("Tab");
+  await expect(tooltip).toBeFocused();
+  expect(await tooltip.evaluate((el) => el.scrollHeight > el.clientHeight)).toBe(true);
+  await page.keyboard.press("PageDown");
+  await expect.poll(() => tooltip.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+  await page.keyboard.press("Tab");
+  await expect(service).toBeFocused();
+  await expect(tooltip).toContainText("The service of this task");
+  await expect(tooltip).not.toContainText("The database of this task");
+  await page.keyboard.press("Shift+Tab");
+  await expect(database).toBeFocused();
+  await page.keyboard.press("Tab");
+  await expect(tooltip).toBeFocused();
+  await page.keyboard.press("Escape");
+  await expect(database).toBeFocused();
+  await expect(tooltip).toHaveCount(0);
+});
+
 // S24, S25: q typed at a question asks for confirmation; confirmed, the run ends as interrupted, with exit code 130.
 test("(20) q typed and confirmed ends the run as an interruption", async ({ page }) => {
   await startTask(page, "decision", "Add a database and leave");

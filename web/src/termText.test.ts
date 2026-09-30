@@ -74,3 +74,89 @@ describe("TermText and the terms inside a link", () => {
     expect(tooltip()).toBe(null);
   });
 });
+
+// S42 (W2-R1-5, P3-R1-3): keyboard focus is routed into a term's tooltip and out after its anchor, never back into the
+// tooltip; Shift+Tab and Escape there return to the term.
+describe("TermText and the keyboard", () => {
+  const long = "A long explanation. ".repeat(80);
+  const terms = [{ term: "SQLite", explanation: long }, { term: "database", explanation: "Data kept for later use." }];
+  const withButton = (markdown: string, ts: readonly Term[]) => {
+    const root = show(markdown, ts);
+    const after = document.createElement("button");
+    after.textContent = "After";
+    document.body.appendChild(after);
+    return { root, after };
+  };
+  const key = (el: Element, k: string, shift = false) => {
+    const e = new KeyboardEvent("keydown", { key: k, shiftKey: shift, bubbles: true, cancelable: true });
+    el.dispatchEvent(e);
+    flushSync();
+    return e;
+  };
+
+  test("Tab from a term with its tooltip open enters the tooltip, which stays open", () => {
+    const { root } = withButton("SQLite keeps the database.", terms);
+    const [first] = root.querySelectorAll<HTMLElement>(".term");
+    focus(first);
+    const e = key(first, "Tab");
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(tooltip());
+    expect(tooltip()!.textContent).toContain("A long explanation.");
+  });
+
+  test("the next Tab moves to the second term, and the first tooltip closes", () => {
+    const { root } = withButton("SQLite keeps the database.", terms);
+    const [first, second] = root.querySelectorAll<HTMLElement>(".term");
+    focus(first);
+    key(first, "Tab");
+    const e = key(tooltip()!, "Tab");
+    expect(e.defaultPrevented).toBe(true);
+    expect(document.activeElement).toBe(second);
+    expect(tooltip()?.textContent ?? "").not.toContain("A long explanation.");
+  });
+
+  for (const [name, k, shift] of [["Shift+Tab", "Tab", true], ["Escape", "Escape", false]] as const) {
+    test(`${name} in the tooltip closes it and returns focus to the term`, () => {
+      const { root } = withButton("SQLite keeps the database.", terms);
+      const [first] = root.querySelectorAll<HTMLElement>(".term");
+      focus(first);
+      key(first, "Tab");
+      key(tooltip()!, k, shift);
+      expect(document.activeElement).toBe(first);
+      expect(tooltip()).toBe(null);
+    });
+  }
+
+  test("focus moving from the tooltip to anything outside both closes it", () => {
+    const { root, after } = withButton("SQLite keeps the database.", terms);
+    const [first] = root.querySelectorAll<HTMLElement>(".term");
+    focus(first);
+    key(first, "Tab");
+    after.focus();
+    flushSync();
+    expect(tooltip()).toBe(null);
+  });
+
+  test("Tab from the last term's tooltip reaches the following button, not the tooltip itself", () => {
+    const { root, after } = withButton("The database is SQLite", terms);
+    const marks = root.querySelectorAll<HTMLElement>(".term");
+    const last = marks[marks.length - 1];
+    focus(last);
+    key(last, "Tab");
+    expect(document.activeElement).toBe(tooltip());
+    key(tooltip()!, "Tab");
+    expect(document.activeElement).toBe(after);
+    expect(tooltip()).toBe(null);
+  });
+
+  test("a link that ends the text with one term: Tab enters its tooltip, and the next Tab reaches the following button", () => {
+    const { root, after } = withButton("Use [zod](https://zod.dev)", [{ term: "zod", explanation: long }]);
+    const link = root.querySelector<HTMLAnchorElement>("a")!;
+    focus(link);
+    key(link, "Tab");
+    expect(document.activeElement).toBe(tooltip());
+    key(tooltip()!, "Tab");
+    expect(document.activeElement).toBe(after);
+    expect(tooltip()).toBe(null);
+  });
+});

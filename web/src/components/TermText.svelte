@@ -5,6 +5,7 @@
   import { markTerms } from "../terms.ts";
   import { TOOLTIP_GRACE_MS } from "../time.ts";
   import TermTooltip from "./TermTooltip.svelte";
+  import { focusablesOf, nextFocusable } from "../focus.ts";
 
   type Term = Readonly<{ term: string; explanation: string }>;
   type Props = { html: string; terms: readonly Term[]; class?: string; inline?: boolean };
@@ -38,6 +39,60 @@
     open?.anchor.removeAttribute("aria-describedby");
     open = null;
   };
+  // S42 (W2-R1-5, P3-R1-3): the tooltip is rendered after the whole text, so the natural tab order would pass it by.
+  // Focus is routed as for a disclosure: Tab on an anchor whose tooltip is open enters the tooltip; Tab there leaves to
+  // what follows the anchor (never back into the tooltip); Shift+Tab and Escape there return to the anchor, which then
+  // does not reopen it.
+  const tipElement = (): HTMLElement | null => document.getElementById(id);
+  let returning: HTMLElement | null = null;
+  const onFocusIn = (target: EventTarget | null) => {
+    const anchor = anchorOf(target);
+    if (anchor !== null && anchor === returning) {
+      returning = null;
+      return;
+    }
+    returning = null;
+    show(anchor);
+  };
+  const onFocusOut = (e: FocusEvent) => {
+    if (anchorOf(e.target) === null) return;
+    const to = e.relatedTarget;
+    const tip = tipElement();
+    if (to instanceof Node && (to === open?.anchor || (tip !== null && tip.contains(to)))) return;
+    close();
+  };
+  const onKey = (e: KeyboardEvent) => {
+    if (e.key === "Escape") return close();
+    if (e.key !== "Tab" || e.shiftKey || open === null || e.target !== open.anchor) return;
+    const tip = tipElement();
+    if (tip === null) return;
+    e.preventDefault();
+    stay();
+    tip.focus();
+  };
+  const toAnchor = () => {
+    const anchor = open?.anchor ?? null;
+    close();
+    if (anchor === null) return;
+    returning = anchor;
+    anchor.focus();
+  };
+  const past = (e: KeyboardEvent) => {
+    const anchor = open?.anchor ?? null;
+    const tip = tipElement();
+    if (anchor === null || tip === null) return close();
+    const target = nextFocusable(focusablesOf(document), anchor, (el) => tip.contains(el));
+    if (target === null) return close();
+    e.preventDefault();
+    close();
+    target.focus();
+  };
+  const leaveTip = (e: FocusEvent) => {
+    const to = e.relatedTarget;
+    const tip = tipElement();
+    if (to instanceof Node && (to === open?.anchor || (tip !== null && tip.contains(to)))) return;
+    close();
+  };
   const leave = () => {
     stay();
     leaving = setTimeout(close, TOOLTIP_GRACE_MS);
@@ -50,11 +105,11 @@
   role="presentation"
   onmouseover={(e: MouseEvent) => show(markOf(e.target))}
   onmouseout={(e: MouseEvent) => markOf(e.target) !== null && leave()}
-  onfocusin={(e: FocusEvent) => show(anchorOf(e.target))}
-  onfocusout={(e: FocusEvent) => anchorOf(e.target) !== null && close()}
-  onkeydown={(e: KeyboardEvent) => e.key === "Escape" && close()}>{@html markTerms(html, terms)}</svelte:element>
+  onfocusin={(e: FocusEvent) => onFocusIn(e.target)}
+  onfocusout={onFocusOut}
+  onkeydown={onKey}>{@html markTerms(html, terms)}</svelte:element>
 {#if open !== null && entries.length > 0}
-  <TermTooltip {id} {entries} anchor={open.anchor} onEnter={stay} onLeave={leave} />
+  <TermTooltip {id} {entries} anchor={open.anchor} onEnter={stay} onLeave={leave} onReturn={toAnchor} onPast={past} onFocusOut={leaveTip} />
 {/if}
 
 <style>

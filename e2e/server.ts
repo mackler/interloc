@@ -247,7 +247,11 @@ SCENARIOS.unchangedPause = {
 export const LONG_QUESTION = {
   context: Array.from({ length: 12 }, (_, i) => `Paragraph ${i + 1} of the context: the service, a web server, keeps its data in a database; the cache, a store in memory, answers repeated reads; the migration, a script, changes the schema when the service starts.`).join("\n\n"),
   question: "Which database should the service use?",
-  terms: ["service", "cache", "migration", "schema", "database", "web server", "store in memory", "script"].map((term) => ({ term, explanation: `The ${term} of this task, explained in ordinary words for a reader who has never seen the codebase.` })),
+  // S42: "database" comes before "service" in the question, and its explanation is long enough to scroll in its tooltip.
+  terms: ["service", "cache", "migration", "schema", "database", "web server", "store in memory", "script"].map((term) => ({
+    term,
+    explanation: `The ${term} of this task, explained in ordinary words for a reader who has never seen the codebase.${term === "database" ? " It keeps what the service must remember between requests.".repeat(30) : ""}`,
+  })),
   options: [
     { label: "SQLite", description: "One file beside the service, no server to run; the migration runs when the service starts. ".repeat(4) },
     { label: "PostgreSQL", description: "A database server of its own, which the service reaches over the network; the cache stays in memory. ".repeat(4) },
